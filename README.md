@@ -64,8 +64,17 @@ All data is stored in your browser's `localStorage`. Nothing is sent to any serv
 
 ```
 debt-snowball-ha/
-├── hacs.json
+├── .gitignore
+├── LICENSE
 ├── README.md
+├── hacs.json
+├── package.json
 └── dist/
     └── debt-snowball-panel.js
+    └── debt-snowball-panel.css
+└── tests/
+    └── app.extended.test.js
+    └── app.test.js
+    └── helpers.js
+
 ```
