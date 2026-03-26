@@ -466,34 +466,34 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* Animate section headers when tab becomes active */
-.tab-panel.active .section-header {
+debt-snowball-panel .tab-panel.active .section-header {
     animation: slideInLeft 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-.tab-panel.active .section-header:nth-of-type(2) {
+debt-snowball-panel .tab-panel.active .section-header:nth-of-type(2) {
     animation-delay: 0.05s;
 }
 
-.tab-panel.active .section-header:nth-of-type(3) {
+debt-snowball-panel .tab-panel.active .section-header:nth-of-type(3) {
     animation-delay: 0.1s;
 }
 
 /* Animate summary bars at the bottom of each section */
-.tab-panel.active .income-summary,
-.tab-panel.active .debt-payments-summary,
-.tab-panel.active .recurring-cost-summary {
+debt-snowball-panel .tab-panel.active .income-summary,
+debt-snowball-panel .tab-panel.active .debt-payments-summary,
+debt-snowball-panel .tab-panel.active .recurring-cost-summary {
     animation: fadeIn 0.4s ease backwards 0.3s;
 }
 
 /* Animate stat boxes on payment plan tab */
-.tab-panel.active .stat-box {
+debt-snowball-panel .tab-panel.active .stat-box {
     animation: cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-.tab-panel.active .stat-box:nth-child(1) { animation-delay: 0.05s; }
-.tab-panel.active .stat-box:nth-child(2) { animation-delay: 0.12s; }
-.tab-panel.active .stat-box:nth-child(3) { animation-delay: 0.19s; }
-.tab-panel.active .stat-box:nth-child(4) { animation-delay: 0.26s; }
+debt-snowball-panel .tab-panel.active .stat-box:nth-child(1) { animation-delay: 0.05s; }
+debt-snowball-panel .tab-panel.active .stat-box:nth-child(2) { animation-delay: 0.12s; }
+debt-snowball-panel .tab-panel.active .stat-box:nth-child(3) { animation-delay: 0.19s; }
+debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0.26s; }
 
 /* ===== Warning Button ===== */
 .btn-warning {
@@ -1872,12 +1872,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* ===== Tab Panels ===== */
-.tab-panel {
-    display: none;
+debt-snowball-panel .tab-panel {
+    display: none !important;
 }
 
-.tab-panel.active {
-    display: flex;
+debt-snowball-panel .tab-panel.active {
+    display: flex !important;
     flex-direction: column;
     gap: 2.5rem;
     animation: fadeIn 0.3s ease;
@@ -2368,9 +2368,14 @@ class DebtSnowballPanel extends HTMLElement {
     }
 
     // Inject styles scoped into this element
-    const styleEl = document.createElement('style');
-    styleEl.textContent = PANEL_CSS;
-    this.appendChild(styleEl);
+    // Inject styles into document.head so HA's own stylesheet doesn't override them
+    const styleId = 'debt-snowball-panel-styles';
+    if (!document.getElementById(styleId)) {
+      const styleEl = document.createElement('style');
+      styleEl.id = styleId;
+      styleEl.textContent = PANEL_CSS;
+      document.head.appendChild(styleEl);
+    }
 
     // Inject HTML
     const wrapper = document.createElement('div');
