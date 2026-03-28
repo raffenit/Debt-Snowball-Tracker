@@ -2830,93 +2830,81 @@ const windfallModal         = _root.getElementById('windfall-modal');
 const checkinModal          = _root.getElementById('checkin-modal');
 
 // ─── HA Backend Data Storage ─────────────────────────────────────────────────
-// Storage: input_text helpers, auto-created on first run via the same WebSocket
-// API the HA Settings → Helpers UI uses. No YAML configuration required.
-// Helpers persist in .storage/input_text.json and survive restarts.
-// All data is shared across every user on the server.
+// Storage mechanism: a dedicated hidden Lovelace dashboard used purely as a
+// JSON store. HA writes its config to .storage/lovelace.snowball-store.json
+// on disk immediately on every save, and restores it automatically on restart.
 //
-// Chunk count is dynamic: the code writes as many snowball_data_N helpers as
-// the JSON requires, creating new ones automatically if data grows.
-// Only the active-tab preference is kept in localStorage (genuine per-browser UI state).
+// Why this works:
+//   ✓ Zero setup — no YAML, no helpers, no config changes required
+//   ✓ Truly persistent — written to disk, survives restarts
+//   ✓ Shared — all users on the server read the same data
+//   ✓ No size limits — the full payload is one JSON object
+//   ✓ Standard HA API — same mechanism Lovelace itself uses for dashboards
+//
+// The dashboard is created automatically on first save (hidden from sidebar).
+// Only the active-tab UI preference is kept in localStorage.
 
-const CHUNK_PREFIX = 'input_text.snowball_data_';
-const CHUNK_SIZE   = 5000; // chars per helper
+const STORE_URL_PATH = 'snowball-store';
 
-function chunkString(str, size) {
-    const chunks = [];
-    for (let i = 0; i < str.length; i += size) chunks.push(str.slice(i, i + size));
-    return chunks;
-}
+// Ensure the hidden storage dashboard exists (idempotent — safe to call every time).
+async function ensureStoreDashboard() {
+    const conn = _root._hass.connection;
 
-// Return all currently registered snowball_data_N helpers in index order.
-function availableChunkEntities() {
-    const states = _root._hass?.states || {};
-    const ordered = [];
-    let i = 0;
-    while (`${CHUNK_PREFIX}${i}` in states) { ordered.push(`${CHUNK_PREFIX}${i}`); i++; }
-    return ordered;
-}
+    // Check if it already exists by attempting to list dashboards
+    try {
+        const dashboards = await conn.sendMessagePromise({ type: 'lovelace/dashboards/list' });
+        if (dashboards.some(d => d.url_path === STORE_URL_PATH)) return; // already exists
+    } catch (err) {
+        // If listing fails, attempt creation anyway
+    }
 
-// Ensure at least `count` snowball_data_N helpers exist, creating any that are missing.
-async function ensureChunkHelpers(count) {
-    const states = _root._hass?.states || {};
-    for (let i = 0; i < count; i++) {
-        const entityId = `${CHUNK_PREFIX}${i}`;
-        if (entityId in states) continue; // already exists
-
-        try {
-            await _root._hass.connection.sendMessagePromise({
-                type: 'input_text/create',
-                name: `Snowball Data ${i}`,
-                max: 255,       // HA UI default; actual stored value is unlimited via service
-                mode: 'text',
-            });
-            console.log(`Debt Snowball: created helper ${entityId}`);
-        } catch (err) {
-            console.error(`Debt Snowball: could not create helper ${entityId} —`, err);
-            throw err; // Abort save if we can't create a required helper
+    // Create the hidden dashboard — this only runs once ever
+    try {
+        await conn.sendMessagePromise({
+            type:             'lovelace/dashboards/create',
+            url_path:         STORE_URL_PATH,
+            title:            'Snowball Store',
+            icon:             'mdi:database',
+            show_in_sidebar:  false,
+            require_admin:    false,
+        });
+    } catch (err) {
+        // "already exists" errors are fine — another user may have created it first
+        if (!String(err).includes('already')) {
+            throw err;
         }
-
-        // Give HA a moment to register the new entity in its state machine
-        await new Promise(r => setTimeout(r, 300));
     }
 }
 
 // ─── 1. Load ─────────────────────────────────────────────────────────────────
 async function loadBackendData() {
     try {
-        const entities = availableChunkEntities();
+        const result = await _root._hass.connection.sendMessagePromise({
+            type:      'lovelace/config',
+            url_path:  STORE_URL_PATH,
+            force:     true,
+        });
 
-        if (entities.length > 0) {
-            const states   = _root._hass.states;
-            const fullJson = entities
-                .map(id => {
-                    const val = states[id]?.state ?? '';
-                    return (val === 'unavailable' || val === 'unknown') ? '' : val;
-                })
-                .join('');
+        if (result) {
+            debts           = result.debts          || [];
+            recurringCosts  = result.recurringCosts  || [];
+            incomeEntries   = result.incomeEntries   || [];
+            checkpoints     = result.checkpoints     || [];
+            strategy        = result.strategy        || 'snowball';
+            startingBalance = result.startingBalance || 0;
 
-            if (fullJson.trim()) {
-                const data      = JSON.parse(fullJson);
-                debts           = data.debts          || [];
-                recurringCosts  = data.recurringCosts  || [];
-                incomeEntries   = data.incomeEntries   || [];
-                checkpoints     = data.checkpoints     || [];
-                strategy        = data.strategy        || 'snowball';
-                startingBalance = data.startingBalance || 0;
-
-                // Restore shared paid status; auto-reset when the month rolls over
-                if (data.paidMonth === currentMonthKey() && data.paidStatus) {
-                    paidStatus = data.paidStatus;
-                } else {
-                    paidStatus = {};
-                }
+            // Shared paid status — auto-reset when the month rolls over
+            if (result.paidMonth === currentMonthKey() && result.paidStatus) {
+                paidStatus = result.paidStatus;
+            } else {
+                paidStatus = {};
             }
         }
-        // If no helpers exist yet this is simply a first run — start empty, helpers
-        // will be created automatically on the first saveData() call.
     } catch (err) {
-        console.error('Debt Snowball: error loading server data —', err);
+        // Config not found = first run. That's fine — start empty.
+        if (!String(err).includes('not found') && !String(err).includes('config_not_found')) {
+            console.error('Debt Snowball: error loading data —', err);
+        }
     }
 
     // Active tab is the one genuine per-browser preference
@@ -2938,28 +2926,21 @@ async function saveData() {
     const activeTabEl = _root.querySelector('.tab-btn.active');
     if (activeTabEl) localStorage.setItem('snowball_active_tab', activeTabEl.dataset.tab);
 
-    const json   = JSON.stringify({
-        debts, recurringCosts, incomeEntries, checkpoints,
-        strategy, startingBalance,
-        paidStatus, paidMonth: currentMonthKey()
-    });
-    const chunks = chunkString(json, CHUNK_SIZE);
-
-    // Auto-create any helpers we don't have yet (first run, or data grew)
     try {
-        await ensureChunkHelpers(chunks.length);
-    } catch {
-        return; // ensureChunkHelpers already logged the error
-    }
+        await ensureStoreDashboard();
 
-    // Write all chunks; clear any extras left over from a previous smaller save
-    const entities = availableChunkEntities();
-    entities.forEach((entityId, i) => {
-        _root._hass.callService('input_text', 'set_value', {
-            entity_id: entityId,
-            value: chunks[i] ?? ''
-        }).catch(err => console.error(`Debt Snowball: failed writing ${entityId} —`, err));
-    });
+        await _root._hass.connection.sendMessagePromise({
+            type:      'lovelace/config/save',
+            url_path:  STORE_URL_PATH,
+            config:    {
+                debts, recurringCosts, incomeEntries, checkpoints,
+                strategy, startingBalance,
+                paidStatus, paidMonth: currentMonthKey(),
+            },
+        });
+    } catch (err) {
+        console.error('Debt Snowball: failed to save data —', err);
+    }
 }
 
 function currentMonthKey() {
@@ -3162,7 +3143,7 @@ function closeCheckpointModal() {
     setTimeout(() => { checkpointModal.style.display = 'none'; }, 300);
 }
 
-function saveCheckpoint() {
+async function saveCheckpoint() {
     try {
         const id     = _root.getElementById('checkpoint-id').value;
         const day    = parseInt(_root.getElementById('checkpoint-day').value);
@@ -3178,9 +3159,8 @@ function saveCheckpoint() {
             checkpoints.push({ id: Date.now().toString(), day, amount });
         }
 
-        saveData();
-        closeCheckpointModal();
-        showSavedToast(id ? 'Checkpoint updated ✓' : 'Checkpoint added ✓');
+        await saveData();
+        location.reload();
     } catch (err) {
         showErrorToast(err.message || 'Failed to save checkpoint.');
     }
@@ -3558,7 +3538,7 @@ function importData(e) {
                         date: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`,
                         amount: data.monthlyBudget }];
                 }
-                saveData();
+                saveData().then(() => location.reload());
                 showUndoToast('Data imported successfully', () => {});
             } catch { showNotificationToast('Error: Invalid backup file.', 'error'); }
         };
