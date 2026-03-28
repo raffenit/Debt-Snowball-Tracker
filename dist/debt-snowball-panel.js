@@ -584,83 +584,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         display: none;
     }
 
-    .schedule-row {
-        flex-wrap: nowrap;
-        align-items: center;
-        gap: 0.625rem;
-        padding: 0.75rem;
-    }
-
-    /* Left: icon stacked on day, both enlarged */
-    .schedule-date-col {
-        width: auto;
-        min-width: 44px;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 0.2rem;
-        flex-shrink: 0;
-    }
-
-    .schedule-icon {
-        font-size: 1.35rem;
-    }
-
-    .schedule-day {
-        font-size: 1rem;
-        font-weight: 700;
-        color: var(--text-primary);
-    }
-
-    /* Middle: name + badges, takes remaining space */
-    .schedule-info-col {
-        flex: 1;
-        min-width: 0;
-    }
-
-    .schedule-name {
-        font-size: 0.925rem;
-    }
-
-    .schedule-detail {
-        font-size: 0.775rem;
-    }
-
-    /* Right: amount on top, balance below */
-    .schedule-right-col {
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 0.25rem;
-    }
-
-    .schedule-amount-col {
-        min-width: 0;
-        font-size: 0.95rem !important;
-    }
-
-    .schedule-balance-col {
-        font-size: 0.78rem !important;
-        font-weight: 400;
-        min-width: 0;
-        padding: 0.2rem 0.4rem;
-        background: transparent;
-    }
-
-    /* Balance label is implied by position; hide to save space */
-    .schedule-balance-col .col-label {
-        display: none;
-    }
-
-    .schedule-action-col {
-        min-width: 0;
-    }
-
-    .btn-mark-paid {
-        font-size: 0.72rem;
-        padding: 0.3rem 0.5rem;
-        min-height: 30px;
-    }
-
     .windfall-bar {
         flex-direction: column;
         align-items: flex-start;
@@ -2390,17 +2313,110 @@ debt-snowball-panel .tab-panel.active {
 
 .btn-text-action:hover {
     color: var(--accent-hover);
+}
+
+/* ===== Schedule Row — Mobile Overrides =====
+   Must live AFTER the base schedule CSS above so these win the cascade. */
+@media (max-width: 640px) {
+    .schedule-row {
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem;
+    }
+
+    /* Left: icon + day stacked, fixed narrow width */
+    .schedule-date-col {
+        width: auto;
+        min-width: 0;
+        max-width: 40px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.15rem;
+        flex-shrink: 0;
+    }
+
+    .schedule-icon {
+        font-size: 1.35rem;
+        line-height: 1;
+    }
+
+    .schedule-day {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    /* Middle: stretches to fill all remaining space */
+    .schedule-info-col {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .schedule-name {
+        font-size: 0.9rem;
+    }
+
+    .schedule-detail {
+        font-size: 0.75rem;
+    }
+
+    /* Right: amount stacked above balance, flush right */
+    .schedule-right-col {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.2rem;
+        flex-shrink: 0;
+    }
+
+    .schedule-amount-col {
+        min-width: 0;
+        font-size: 0.875rem;
+        align-items: flex-end;
+    }
+
+    .schedule-balance-col {
+        font-size: 0.72rem;
+        font-weight: 400;
+        min-width: 0;
+        padding: 0.15rem 0.3rem;
+        background: transparent;
+        align-items: flex-end;
+    }
+
+    .schedule-balance-col .col-label {
+        display: none;
+    }
+
+    /* Action buttons: compact, never wrap */
+    .schedule-action-col {
+        min-width: 0;
+        flex-shrink: 0;
+    }
+
+    .btn-mark-paid {
+        font-size: 0.7rem;
+        padding: 0.25rem 0.45rem;
+        min-height: 28px;
+        white-space: nowrap;
+    }
+
+    .btn-edit-inline {
+        font-size: 0.7rem;
+        padding: 0.18rem 0.4rem;
+    }
 }`;
 
 const PANEL_HTML = `<div class="app-container">
         <header class="header">
             <h1>Debt Snowball Tracker</h1>
             <div class="header-actions">
-                <button id="export-btn" class="btn btn-secondary">Export Data</button>
-                <label for="import-file" class="btn btn-secondary">
+                <label for="import-file" class="btn btn-secondary" style="background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: #60a5fa;">
                     Import Data
                     <input type="file" id="import-file" accept=".json" style="display: none;">
                 </label>
+                <button id="export-btn" class="btn btn-secondary" style="background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.4); color: #4ade80;">Export Data</button>
             </div>
         </header>
 
@@ -2416,15 +2432,16 @@ const PANEL_HTML = `<div class="app-container">
             <div class="tab-panel active" id="tab-payment-plan">
                 
                 <section class="card" style="margin-bottom: 1.5rem;">
-                    <div class="section-header" style="margin-bottom: 0.75rem;">
-                        <div>
-                            <h2 style="margin-bottom: 0;">Bank Balances</h2>
-                            <p class="subtitle" style="margin-bottom:0; font-size: 0.85rem;">Set your day 1 balance, and add mid-month checkpoints to sync the app with reality.</p>
-                        </div>
-                        <button id="add-checkpoint-btn" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">+ Add Checkpoint</button>
+                    <div style="margin-bottom: 0.75rem;">
+                        <h2 style="margin-bottom: 0;">Bank Balances</h2>
+                        <p class="subtitle" style="margin-bottom:0; font-size: 0.85rem;">Set your day 1 balance, and add mid-month checkpoints to sync the app with reality.</p>
                     </div>
-                    <div class="input-group" style="margin-bottom: 0;">
+                    <div class="input-group" style="margin-bottom: 0.75rem;">
                         <input type="number" id="starting-bank-balance" min="0" step="0.01" placeholder="e.g. 1200" style="font-size: 1.25rem; font-weight: 600; color: var(--success-color);">
+                    </div>
+                    <div style="display: flex; gap: 0.625rem;">
+                        <button id="add-checkpoint-btn" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">+ Add Checkpoint</button>
+                        <button id="update-plan-btn" class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">↻ Update Plan</button>
                     </div>
                 </section>
 
@@ -3031,6 +3048,7 @@ function setupEventListeners() {
     addCostBtn.addEventListener('click',   () => openCostModal());
     addIncomeBtn.addEventListener('click', () => openIncomeModal());
     _root.getElementById('add-checkpoint-btn').addEventListener('click', () => openCheckpointModal());
+    _root.getElementById('update-plan-btn').addEventListener('click',    () => renderUI());
 
     _root.querySelectorAll('.close-debt-modal').forEach(b       => b.addEventListener('click', closeDebtModal));
     _root.querySelectorAll('.close-cost-modal').forEach(b       => b.addEventListener('click', closeCostModal));
