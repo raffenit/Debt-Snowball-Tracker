@@ -585,42 +585,70 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }
 
     .schedule-row {
-        flex-wrap: wrap;
-        gap: 0.5rem;
-        padding: 0.875rem 0.875rem;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.625rem;
+        padding: 0.75rem;
     }
 
+    /* Left: icon stacked on day, both enlarged */
     .schedule-date-col {
-        width: 100%;
-        min-width: 0;
+        width: auto;
+        min-width: 44px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.2rem;
+        flex-shrink: 0;
+    }
+
+    .schedule-icon {
+        font-size: 1.35rem;
     }
 
     .schedule-day {
-        font-size: 0.9rem;
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--text-primary);
     }
 
+    /* Middle: name + badges, takes remaining space */
     .schedule-info-col {
         flex: 1;
         min-width: 0;
     }
 
     .schedule-name {
-        font-size: 0.95rem;
+        font-size: 0.925rem;
     }
 
     .schedule-detail {
-        font-size: 0.8rem;
+        font-size: 0.775rem;
+    }
+
+    /* Right: amount on top, balance below */
+    .schedule-right-col {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.25rem;
     }
 
     .schedule-amount-col {
         min-width: 0;
-        font-size: 1rem !important;
+        font-size: 0.95rem !important;
     }
 
     .schedule-balance-col {
-        font-size: 0.9rem !important;
+        font-size: 0.78rem !important;
+        font-weight: 400;
         min-width: 0;
-        padding: 0.25rem 0.5rem;
+        padding: 0.2rem 0.4rem;
+        background: transparent;
+    }
+
+    /* Balance label is implied by position; hide to save space */
+    .schedule-balance-col .col-label {
+        display: none;
     }
 
     .schedule-action-col {
@@ -628,9 +656,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }
 
     .btn-mark-paid {
-        font-size: 0.8rem;
-        padding: 0.45rem 0.875rem;
-        min-height: 36px;
+        font-size: 0.72rem;
+        padding: 0.3rem 0.5rem;
+        min-height: 30px;
     }
 
     .windfall-bar {
@@ -1220,6 +1248,10 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     text-align: right;
     min-width: 100px;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.1rem;
 }
 
 .schedule-amount-income {
@@ -1239,6 +1271,28 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     padding: 0.25rem 0.75rem;
     border-radius: 6px;
     background: rgba(7, 6, 26, 0.5);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.1rem;
+}
+
+.col-label {
+    display: block;
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+/* Groups amount + balance so they can stack on mobile */
+.schedule-right-col {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
 }
 
 .balance-healthy {
@@ -4598,6 +4652,11 @@ function renderPaymentPlan() {
         const sign     = item.type === 'income' ? '+' : (item.type === 'checkpoint' || item.type === 'starting-balance') ? '' : '−';
         const balClass = item.balance <= 0 ? 'balance-zero' : item.balance < 500 ? 'balance-low' : 'balance-healthy';
         
+        const amountLabel = item.type === 'income'           ? 'Deposit'
+            : item.type === 'checkpoint'                       ? 'Synced to'
+            : item.type === 'starting-balance'                 ? 'Starting'
+            : 'Payment';
+
         const editBtnHtml = (item.type !== 'starting-balance')
             ? `<button class="btn-edit-inline" data-id="${item.id}" data-type="${item.type}" title="Edit entry">Edit</button>`
             : '';
@@ -4629,14 +4688,16 @@ function renderPaymentPlan() {
                 <div class="schedule-detail">${
                     item.type === 'debt' && item.isSnowballTarget ? 'Minimum + Snowball Extra'
                     : item.type === 'debt' ? 'Minimum Payment'
-                    : item.type === 'recurring' && (item.isCard || item.paymentMethod === 'card') ? 'Bypasses immediate cash pool'
-                    : item.type === 'recurring' ? 'Reduces available cash pool'
+                    : item.type === 'recurring' && (item.isCard || item.paymentMethod === 'card') ? 'Charged to credit card'
+                    : item.type === 'recurring' ? 'Paid from bank account'
                     : item.type === 'checkpoint' ? 'Resets the running balance for calculations below'
                     : ''
                 }</div>
             </div>
-            <div class="schedule-amount-col ${amountClass}">${sign}$${item.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-            <div class="schedule-balance-col ${balClass}">$${item.balance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            <div class="schedule-right-col">
+                <div class="schedule-amount-col ${amountClass}"><span class="col-label">${amountLabel}</span>${sign}$${item.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                <div class="schedule-balance-col ${balClass}"><span class="col-label">Balance</span>$${item.balance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            </div>
             
             <div class="schedule-action-col" style="display:flex; flex-direction:column; gap:0.35rem; align-items:flex-end; justify-content:center;">
                 ${paidBtnHtml}
