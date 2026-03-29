@@ -171,7 +171,7 @@ h2 {
     color: var(--text-secondary);
 }
 
-input[type="number"], input[type="text"], input[type="date"], select {
+input[type="number"], input[type="text"], input[type="date"], input[type="month"], select {
     width: 100%;
     padding: 0.75rem 1rem;
     background-color: #07061a;
@@ -1073,11 +1073,11 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.45rem 0.8rem;
+    padding: 0.5rem 0.9rem;
     border-radius: 0.375rem;
-    font-weight: 600;
-    font-size: 0.78rem;
-    letter-spacing: 0.05em;
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
     margin-bottom: 0.75rem;
 }
@@ -1143,6 +1143,183 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     border: 1px dashed rgba(100,116,139,0.3);
     margin-left: 0.3rem;
 }
+
+/* ===== Spending Budgets ===== */
+.budget-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    margin-bottom: 0.75rem;
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+.budget-card.budget-over {
+    border-color: rgba(239,68,68,0.4);
+}
+.budget-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    gap: 0.75rem;
+}
+.budget-card-header:hover {
+    background: rgba(255,255,255,0.03);
+}
+.budget-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+}
+.budget-toggle-icon {
+    font-size: 0.6rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+.budget-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.budget-exception-badge {
+    background: rgba(91,127,255,0.15);
+    color: var(--accent-color);
+    border: 1px solid rgba(91,127,255,0.3);
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.budget-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+}
+.budget-spent-of {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.budget-remaining {
+    font-size: 0.85rem;
+    color: var(--success-color);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.budget-over-label {
+    font-size: 0.85rem;
+    color: var(--danger-color);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.budget-progress-track {
+    height: 4px;
+    background: rgba(255,255,255,0.07);
+}
+.budget-progress-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+    min-width: 0;
+}
+.budget-expenses-panel {
+    border-top: 1px solid var(--border-color);
+    padding: 0.75rem 1rem 1rem;
+}
+.budget-empty-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin: 0.25rem 0 0.75rem;
+}
+.budget-expense-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 0.88rem;
+}
+.budget-expense-row:last-of-type {
+    border-bottom: none;
+}
+.expense-description {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.expense-date {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.expense-amount {
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 4.5rem;
+    text-align: right;
+}
+.expense-actions {
+    display: flex;
+    gap: 0.15rem;
+    flex-shrink: 0;
+}
+.btn-icon {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0.2rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: color 0.15s, background 0.15s;
+    line-height: 1;
+}
+.btn-icon:hover {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.08);
+}
+.btn-icon.btn-delete-expense:hover {
+    color: var(--danger-color);
+}
+.budget-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.btn-sm {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+}
+.budget-total-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.4rem 0 0.5rem;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    margin-top: 0.25rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.budget-total-over { color: var(--danger-color); }
+.budget-total-ok   { color: var(--text-secondary); }
 
 /* ===== Archive Modal ===== */
 .archive-modal-content {
@@ -2818,7 +2995,10 @@ const PANEL_HTML = `<div class="app-container">
                             <h2>Monthly Income</h2>
                             <p class="subtitle" style="margin-bottom:0;">Add each paycheck, deposit, or other income for the current month with its expected date.</p>
                         </div>
-                        <button id="add-income-btn" class="btn btn-success">+ Add Income</button>
+                        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                            <button id="advance-month-btn" class="btn btn-secondary" title="Archive this month and start fresh for next month early">⏭ Next Month</button>
+                            <button id="add-income-btn" class="btn btn-success">+ Add Income</button>
+                        </div>
                     </div>
                     <div id="income-list" class="debts-list">
                         </div>
@@ -2828,7 +3008,7 @@ const PANEL_HTML = `<div class="app-container">
                 <section class="recurring-section">
                     <div class="section-header">
                         <div>
-                            <h2>Monthly Costs</h2>
+                            <h2>Recurring Costs</h2>
                             <p class="subtitle" style="margin-bottom:0;">Bills grouped by category. <strong>One-Time</strong> costs are cleared at month end. <strong>Direct</strong> reduces your cash budget; <strong>Card</strong> does not.</p>
                         </div>
                         <button id="add-cost-btn" class="btn btn-warning">+ Add Cost</button>
@@ -2837,6 +3017,17 @@ const PANEL_HTML = `<div class="app-container">
                     <div id="costs-list" class="debts-list">
                         </div>
                     <div id="recurring-cost-summary" class="recurring-cost-summary" style="display:none"></div>
+                </section>
+
+                <section class="spending-budgets-section">
+                    <div class="section-header">
+                        <div>
+                            <h2>Spending Budgets</h2>
+                            <p class="subtitle" style="margin-bottom:0;">Track discretionary spending against monthly limits. Expenses clear each month.</p>
+                        </div>
+                        <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
+                    </div>
+                    <div id="budgets-list"></div>
                 </section>
             </div>
 
@@ -3049,6 +3240,11 @@ const PANEL_HTML = `<div class="app-container">
                     <label for="cost-interval-custom">Every X Months</label>
                     <input type="number" id="cost-interval-custom" min="2" max="60" step="1" placeholder="e.g. 4">
                 </div>
+                <div class="input-group" id="cost-start-month-group" style="display:none;">
+                    <label for="cost-start-month">Next Due Month</label>
+                    <input type="month" id="cost-start-month">
+                    <p class="subtitle" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem;">The month this cost should first (or next) appear. Leave blank to start this month.</p>
+                </div>
                 <div class="input-group">
                     <label for="cost-amount">Amount ($)</label>
                     <input type="number" id="cost-amount" min="0" step="0.01" required placeholder="e.g. 120">
@@ -3111,6 +3307,73 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-income-modal">Cancel</button>
                     <button type="submit" class="btn btn-success">Save Income</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="budget-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="budget-modal-title">Add Budget</h3>
+                <button class="close-modal close-budget-modal">&times;</button>
+            </div>
+            <form id="budget-form">
+                <input type="hidden" id="budget-id">
+                <div class="input-group">
+                    <label for="budget-name">Category Name</label>
+                    <input type="text" id="budget-name" required placeholder="e.g. Groceries">
+                </div>
+                <div class="input-group">
+                    <label for="budget-amount">Monthly Budget ($)</label>
+                    <input type="number" id="budget-amount" min="0" step="0.01" required placeholder="e.g. 500">
+                </div>
+                <div class="input-group promo-toggle-group">
+                    <label class="toggle-label" for="budget-exception-toggle">
+                        <span>Set a one-time override for this month?</span>
+                        <span class="toggle-switch">
+                            <input type="checkbox" id="budget-exception-toggle">
+                            <span class="toggle-slider toggle-slider-green"></span>
+                        </span>
+                    </label>
+                </div>
+                <div class="input-group" id="budget-exception-amount-group" style="display:none;">
+                    <label for="budget-exception-amount">This Month's Override Amount ($)</label>
+                    <input type="number" id="budget-exception-amount" min="0" step="0.01" placeholder="e.g. 750">
+                    <p class="subtitle" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem;">Reverts to the regular monthly budget next month.</p>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary close-budget-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Budget</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="expense-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="expense-modal-title">Add Expense</h3>
+                <button class="close-modal close-expense-modal">&times;</button>
+            </div>
+            <form id="expense-form">
+                <input type="hidden" id="expense-id">
+                <input type="hidden" id="expense-budget-id">
+                <div class="input-group">
+                    <label for="expense-description">Description</label>
+                    <input type="text" id="expense-description" required placeholder="e.g. Walmart run">
+                </div>
+                <div class="input-group">
+                    <label for="expense-amount">Amount ($)</label>
+                    <input type="number" id="expense-amount" min="0" step="0.01" required placeholder="e.g. 85.00">
+                </div>
+                <div class="input-group">
+                    <label for="expense-date">Date</label>
+                    <input type="date" id="expense-date">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary close-expense-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Expense</button>
                 </div>
             </form>
         </div>
@@ -3265,6 +3528,8 @@ let strategy = 'snowball'; // 'snowball' | 'avalanche'
 let showMortgage = true;   // toggle mortgage visibility
 let paidStatus = {};       // { [id: 'paid' | 'autopay' } — resets each calendar month
 let monthlyArchives = [];  // [{ month, label, incomeEntries, recurringCosts, checkpoints, startingBalance, totalIncome, totalCosts }]
+let spendingBudgets = [];  // [{ id, name, amount, exception: {month,amount}|null, expenses: [{id,description,amount,date}] }]
+let expandedBudgets = new Set(); // UI state: which budget IDs are expanded
 let paydownChart = null;
 let lastSimPayoffDate = null; // used for countdown ticker
 let countdownInterval = null;
@@ -3288,6 +3553,10 @@ const exportBtn             = _root.getElementById('export-btn');
 const importFileInput       = _root.getElementById('import-file');
 const windfallModal         = _root.getElementById('windfall-modal');
 const checkinModal          = _root.getElementById('checkin-modal');
+const budgetModal           = _root.getElementById('budget-modal');
+const budgetForm            = _root.getElementById('budget-form');
+const expenseModal          = _root.getElementById('expense-modal');
+const expenseForm           = _root.getElementById('expense-form');
 
 // ─── HA Backend Data Storage ─────────────────────────────────────────────────
 // Storage mechanism: a dedicated hidden Lovelace dashboard used purely as a
@@ -3355,6 +3624,7 @@ async function loadBackendData() {
             showMortgage    = result.showMortgage !== false;
             startingBalance = result.startingBalance || 0;
             monthlyArchives = result.monthlyArchives || [];
+            spendingBudgets = result.spendingBudgets  || [];
 
             const prevMonth = result.paidMonth;
             const thisMonth = currentMonthKey();
@@ -3389,7 +3659,12 @@ async function loadBackendData() {
                         }
                         return { ...c, nextDueMonth: next };
                     });
-                paidStatus     = {};
+                paidStatus      = {};
+                spendingBudgets = spendingBudgets.map(b => ({
+                    ...b,
+                    expenses:  [],
+                    exception: (b.exception?.month === prevMonth) ? null : b.exception,
+                }));
 
                 saveData().catch(err => console.error('Debt Snowball: rollover save failed —', err));
             } else if (prevMonth === thisMonth && result.paidStatus) {
@@ -3435,7 +3710,7 @@ async function saveData() {
             debts, recurringCosts, incomeEntries, checkpoints,
             strategy, startingBalance, showMortgage,
             paidStatus, paidMonth: currentMonthKey(),
-            monthlyArchives,
+            monthlyArchives, spendingBudgets,
         },
     });
 }
@@ -3443,6 +3718,70 @@ async function saveData() {
 function currentMonthKey() {
     const d = new Date();
     return `${d.getFullYear()}-${d.getMonth()}`;
+}
+
+// ─── Manual Month Advance ─────────────────────────────────────────────────────
+async function advanceToNextMonth() {
+    const currentKey = currentMonthKey();
+    const nextKey    = addMonthsToKey(currentKey, 1);
+    const nextLabel  = formatMonthLabel(nextKey);
+
+    if (!confirm(`Archive ${formatMonthLabel(currentKey)} and start ${nextLabel} now?\n\nOne-time costs will be removed, income will be cleared, and interval costs will advance. This cannot be undone.`)) return;
+
+    // Archive current month
+    const archive = {
+        month:          currentKey,
+        label:          formatMonthLabel(currentKey),
+        incomeEntries:  [...incomeEntries],
+        recurringCosts: [...recurringCosts],
+        checkpoints:    [...checkpoints],
+        startingBalance,
+        paidStatus:     { ...paidStatus },
+        totalIncome:    incomeEntries.reduce((s, e) => s + e.amount, 0),
+        totalCosts:     recurringCosts.reduce((s, c) => s + c.amount, 0),
+    };
+    monthlyArchives.unshift(archive);
+    if (monthlyArchives.length > 24) monthlyArchives.pop();
+
+    // Reset month-specific data, prune one-time costs, advance interval nextDueMonth
+    incomeEntries  = [];
+    checkpoints    = [];
+    recurringCosts = recurringCosts
+        .filter(c => (c.category || 'other') !== 'one-time')
+        .map(c => {
+            if ((c.intervalMonths || 1) <= 1) return c;
+            let next = c.nextDueMonth || currentKey;
+            while (monthKeyToIndex(next) <= monthKeyToIndex(currentKey)) {
+                next = addMonthsToKey(next, c.intervalMonths);
+            }
+            return { ...c, nextDueMonth: next };
+        });
+    paidStatus      = {};
+    spendingBudgets = spendingBudgets.map(b => ({
+        ...b,
+        expenses:  [],
+        exception: (b.exception?.month === currentKey) ? null : b.exception,
+    }));
+
+    // Save with paidMonth set to nextKey so the automatic rollover doesn't re-fire
+    try {
+        await ensureStoreDashboard();
+        await _root._hass.connection.sendMessagePromise({
+            type:     'lovelace/config/save',
+            url_path: STORE_URL_PATH,
+            config:   {
+                debts, recurringCosts, incomeEntries, checkpoints,
+                strategy, startingBalance, showMortgage,
+                paidStatus, paidMonth: nextKey,
+                monthlyArchives, spendingBudgets,
+            },
+        });
+        renderUI();
+        showSavedToast(`Started ${nextLabel} ✓`);
+    } catch (err) {
+        console.error('Debt Snowball: advance month failed —', err);
+        showErrorToast('Failed to advance month. Please try again.');
+    }
 }
 
 function formatMonthLabel(key) {
@@ -3458,6 +3797,16 @@ function monthKeyToIndex(key) {
 function addMonthsToKey(key, n) {
     const total = monthKeyToIndex(key) + n;
     return `${Math.floor(total / 12)}-${total % 12}`;
+}
+
+// Convert app month key (YYYY-M, 0-indexed month) ↔ HTML month input value (YYYY-MM, 1-indexed)
+function keyToHtmlMonth(key) {
+    const [year, month] = key.split('-').map(Number);
+    return `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+function htmlMonthToKey(htmlMonth) {
+    const [year, month] = htmlMonth.split('-').map(Number);
+    return `${year}-${month - 1}`;
 }
 
 function isCostDueThisMonth(cost) {
@@ -3478,12 +3827,17 @@ function updateCostModalIntervalVisibility() {
     const cat      = _root.getElementById('cost-category').value;
     const intGrp   = _root.getElementById('cost-interval-group');
     const custGrp  = _root.getElementById('cost-interval-custom-group');
+    const startGrp = _root.getElementById('cost-start-month-group');
     const isOneTime = cat === 'one-time';
     intGrp.style.display  = isOneTime ? 'none' : '';
-    if (isOneTime) custGrp.style.display = 'none';
-    else {
+    if (isOneTime) {
+        custGrp.style.display = 'none';
+        startGrp.style.display = 'none';
+    } else {
         const val = _root.getElementById('cost-interval').value;
-        custGrp.style.display = val === 'custom' ? '' : 'none';
+        const isMultiMonth = val === 'custom' || parseInt(val) > 1;
+        custGrp.style.display  = val === 'custom' ? '' : 'none';
+        startGrp.style.display = isMultiMonth ? '' : 'none';
     }
 }
 
@@ -3607,6 +3961,48 @@ function setupEventListeners() {
     addDebtBtn.addEventListener('click',   () => openDebtModal());
     addCostBtn.addEventListener('click',   () => openCostModal());
     addIncomeBtn.addEventListener('click', () => openIncomeModal());
+    _root.getElementById('advance-month-btn').addEventListener('click', advanceToNextMonth);
+    _root.getElementById('add-budget-btn').addEventListener('click', () => openBudgetModal());
+
+    _root.querySelectorAll('.close-budget-modal').forEach(b  => b.addEventListener('click', closeBudgetModal));
+    _root.querySelectorAll('.close-expense-modal').forEach(b => b.addEventListener('click', closeExpenseModal));
+
+    budgetForm.addEventListener('submit',  e => { e.preventDefault(); saveBudget(); });
+    expenseForm.addEventListener('submit', e => { e.preventDefault(); saveExpense(); });
+
+    _root.getElementById('budget-exception-toggle').addEventListener('change', () => {
+        const show = _root.getElementById('budget-exception-toggle').checked;
+        _root.getElementById('budget-exception-amount-group').style.display = show ? '' : 'none';
+    });
+
+    // Delegated click handler for all budget card interactions
+    _root.getElementById('budgets-list').addEventListener('click', e => {
+        const toggle = e.target.closest('[data-toggle-budget]');
+        if (toggle) {
+            const bid = toggle.dataset.toggleBudget;
+            if (expandedBudgets.has(bid)) expandedBudgets.delete(bid);
+            else expandedBudgets.add(bid);
+            renderSpendingBudgets();
+            return;
+        }
+        const addExp = e.target.closest('.btn-add-expense');
+        if (addExp) { openExpenseModal(addExp.dataset.budgetId); return; }
+
+        const editExp = e.target.closest('.btn-edit-expense');
+        if (editExp) { openExpenseModal(editExp.dataset.budgetId, editExp.dataset.expenseId); return; }
+
+        const delExp = e.target.closest('.btn-delete-expense');
+        if (delExp) { deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId); return; }
+
+        const override = e.target.closest('.btn-override-budget');
+        if (override) { openBudgetModal(override.dataset.budgetId, true); return; }
+
+        const editBudget = e.target.closest('.btn-edit-budget');
+        if (editBudget) { openBudgetModal(editBudget.dataset.budgetId); return; }
+
+        const delBudget = e.target.closest('.btn-delete-budget');
+        if (delBudget) { deleteBudget(delBudget.dataset.budgetId); return; }
+    });
     _root.getElementById('add-checkpoint-btn').addEventListener('click', () => openCheckpointModal());
     _root.getElementById('update-plan-btn').addEventListener('click',    () => renderUI());
 
@@ -3671,10 +4067,7 @@ function setupEventListeners() {
 
     // Cost modal: show/hide interval fields based on category and interval select
     _root.getElementById('cost-category').addEventListener('change', updateCostModalIntervalVisibility);
-    _root.getElementById('cost-interval').addEventListener('change', () => {
-        const isCustom = _root.getElementById('cost-interval').value === 'custom';
-        _root.getElementById('cost-interval-custom-group').style.display = isCustom ? '' : 'none';
-    });
+    _root.getElementById('cost-interval').addEventListener('change', updateCostModalIntervalVisibility);
 
     // Auto min-payment calc
     _root.getElementById('auto-min-btn').addEventListener('click', autoCalcMinPaymentCC);
@@ -3926,6 +4319,12 @@ function openCostModal(costId = null) {
                 intervalEl.value = 'custom';
                 _root.getElementById('cost-interval-custom').value = n;
             }
+            // Restore next due month
+            if (n > 1 && cost.nextDueMonth) {
+                _root.getElementById('cost-start-month').value = keyToHtmlMonth(cost.nextDueMonth);
+            } else {
+                _root.getElementById('cost-start-month').value = '';
+            }
         }
     } else {
         _root.getElementById('cost-modal-title').textContent = 'Add Cost';
@@ -4055,18 +4454,21 @@ function saveCost() {
         if (isNaN(amount))  throw new Error('Please enter a valid amount.');
         if (intervalMonths < 1) throw new Error('Interval must be at least 1 month.');
 
+        const startMonthInput = _root.getElementById('cost-start-month').value;
+        const startMonthKey = startMonthInput ? htmlMonthToKey(startMonthInput) : null;
+
         if (id) {
             const idx = recurringCosts.findIndex(c => c.id === id);
             if (idx !== -1) {
                 const existing = recurringCosts[idx];
-                // Preserve nextDueMonth when editing; reset if interval changed
+                // Use explicit start month if set; otherwise preserve existing nextDueMonth when interval unchanged
                 const nextDueMonth = intervalMonths > 1
-                    ? (existing.intervalMonths === intervalMonths ? existing.nextDueMonth : currentMonthKey())
+                    ? (startMonthKey ?? (existing.intervalMonths === intervalMonths ? existing.nextDueMonth : currentMonthKey()))
                     : undefined;
                 recurringCosts[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth };
             }
         } else {
-            const nextDueMonth = intervalMonths > 1 ? currentMonthKey() : undefined;
+            const nextDueMonth = intervalMonths > 1 ? (startMonthKey ?? currentMonthKey()) : undefined;
             recurringCosts.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth });
         }
 
@@ -4085,6 +4487,253 @@ function deleteCost(id) {
         delete paidStatus[id];
         saveData().catch(err => console.error("Debt Snowball: save failed —", err));
         showUndoToast('Recurring cost deleted', () => { recurringCosts.push(deleted); saveData().catch(err => console.error('Debt Snowball: save failed —', err)); });
+    });
+}
+
+// ─── Spending Budgets ────────────────────────────────────────────────────────
+
+function getBudgetAmount(budget) {
+    const exc = budget.exception;
+    if (exc && exc.month === currentMonthKey()) return exc.amount;
+    return budget.amount;
+}
+
+function renderSpendingBudgets() {
+    const container = _root.getElementById('budgets-list');
+    if (!container) return;
+
+    if (spendingBudgets.length === 0) {
+        container.innerHTML = `<p class="empty-state-text" style="color:var(--text-secondary);font-size:0.9rem;font-style:italic;padding:0.5rem 0;">No spending budgets yet. Click <strong>+ Add Budget</strong> to get started.</p>`;
+        return;
+    }
+
+    container.innerHTML = spendingBudgets.map(budget => {
+        const budgetAmt  = getBudgetAmount(budget);
+        const expenses   = budget.expenses || [];
+        const spent      = expenses.reduce((s, e) => s + e.amount, 0);
+        const over       = spent - budgetAmt;
+        const isOver     = over > 0;
+        const rawPct     = budgetAmt > 0 ? (spent / budgetAmt) * 100 : (spent > 0 ? 100 : 0);
+        const barPct     = Math.min(rawPct, 100);
+        const fillColor  = isOver ? 'var(--danger-color)' : rawPct < 70 ? 'var(--success-color)' : rawPct < 90 ? 'var(--warning-color)' : 'var(--danger-color)';
+        const isExpanded = expandedBudgets.has(budget.id);
+        const hasExc     = budget.exception?.month === currentMonthKey();
+
+        const expenseRows = expenses.length === 0
+            ? `<p class="budget-empty-text">No expenses logged yet.</p>`
+            : [...expenses].sort((a, b) => (b.date || '') > (a.date || '') ? 1 : -1).map(exp => `
+                <div class="budget-expense-row">
+                    <span class="expense-description">${exp.description}</span>
+                    <span class="expense-date">${exp.date ? new Date(exp.date + 'T00:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'}) : ''}</span>
+                    <span class="expense-amount">$${exp.amount.toFixed(2)}</span>
+                    <div class="expense-actions">
+                        <button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">✎</button>
+                        <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">✕</button>
+                    </div>
+                </div>`).join('');
+
+        const totalRow = expenses.length > 0 ? `
+            <div class="budget-total-row ${isOver ? 'budget-total-over' : 'budget-total-ok'}">
+                <span>Total: $${spent.toFixed(2)} / $${budgetAmt.toFixed(2)}</span>
+                ${isOver ? `<span style="color:var(--danger-color);">⚠ Over by $${over.toFixed(2)}</span>` : `<span style="color:var(--success-color);">$${(budgetAmt - spent).toFixed(2)} remaining</span>`}
+            </div>` : '';
+
+        return `
+        <div class="budget-card ${isOver ? 'budget-over' : ''}" data-budget-id="${budget.id}">
+            <div class="budget-card-header" data-toggle-budget="${budget.id}">
+                <div class="budget-header-left">
+                    <span class="budget-toggle-icon">${isExpanded ? '▼' : '▶'}</span>
+                    <span class="budget-name">${budget.name}</span>
+                    ${hasExc ? `<span class="budget-exception-badge">Override: $${budgetAmt.toFixed(2)}</span>` : ''}
+                </div>
+                <div class="budget-header-right">
+                    ${isOver
+                        ? `<span class="budget-over-label">⚠ Over by $${over.toFixed(2)}</span>`
+                        : `<span class="budget-remaining">$${(budgetAmt - spent).toFixed(2)} left</span>`}
+                    <span class="budget-spent-of">$${spent.toFixed(2)} / $${budgetAmt.toFixed(2)}</span>
+                </div>
+            </div>
+            <div class="budget-progress-track">
+                <div class="budget-progress-fill" style="width:${barPct}%; background:${fillColor};"></div>
+            </div>
+            ${isExpanded ? `
+            <div class="budget-expenses-panel">
+                ${expenseRows}
+                ${totalRow}
+                <div class="budget-card-actions">
+                    <button class="btn btn-secondary btn-sm btn-add-expense" data-budget-id="${budget.id}">+ Add Expense</button>
+                    <button class="btn btn-secondary btn-sm btn-override-budget" data-budget-id="${budget.id}">${hasExc ? '✎ Edit Override' : '⚡ Override Month'}</button>
+                    <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}">✎ Edit</button>
+                    <button class="btn btn-secondary btn-sm btn-delete-budget" data-budget-id="${budget.id}" style="margin-left:auto; border-color:var(--danger-color); color:var(--danger-color);">🗑 Delete</button>
+                </div>
+            </div>` : ''}
+        </div>`;
+    }).join('');
+}
+
+// ─── Budget Modal ─────────────────────────────────────────────────────────────
+function openBudgetModal(budgetId = null, focusException = false) {
+    budgetForm.reset();
+    _root.getElementById('budget-id').value = '';
+    _root.getElementById('budget-exception-amount-group').style.display = 'none';
+    _root.getElementById('budget-exception-toggle').checked = false;
+
+    if (budgetId) {
+        _root.getElementById('budget-modal-title').textContent = 'Edit Budget';
+        const budget = spendingBudgets.find(b => b.id === budgetId);
+        if (budget) {
+            _root.getElementById('budget-id').value     = budget.id;
+            _root.getElementById('budget-name').value   = budget.name;
+            _root.getElementById('budget-amount').value = budget.amount;
+            const hasExc = budget.exception?.month === currentMonthKey();
+            if (hasExc || focusException) {
+                _root.getElementById('budget-exception-toggle').checked = true;
+                _root.getElementById('budget-exception-amount-group').style.display = '';
+                if (hasExc) _root.getElementById('budget-exception-amount').value = budget.exception.amount;
+            }
+        }
+    } else {
+        _root.getElementById('budget-modal-title').textContent = 'Add Budget';
+    }
+
+    budgetModal.style.display = 'flex';
+    void budgetModal.offsetWidth;
+    budgetModal.classList.add('active');
+    setTimeout(() => budgetModal.querySelector('input:not([type=hidden])').focus(), 50);
+}
+
+function closeBudgetModal() {
+    budgetModal.classList.remove('active');
+    setTimeout(() => { budgetModal.style.display = 'none'; }, 300);
+}
+
+function saveBudget() {
+    try {
+        const id     = _root.getElementById('budget-id').value;
+        const name   = _root.getElementById('budget-name').value.trim();
+        const amount = parseFloat(_root.getElementById('budget-amount').value);
+        const useExc = _root.getElementById('budget-exception-toggle').checked;
+        const excAmt = parseFloat(_root.getElementById('budget-exception-amount').value);
+
+        if (!name)       throw new Error('Please enter a category name.');
+        if (isNaN(amount) || amount < 0) throw new Error('Please enter a valid budget amount.');
+        if (useExc && (isNaN(excAmt) || excAmt < 0)) throw new Error('Please enter a valid override amount.');
+
+        const exception = useExc ? { month: currentMonthKey(), amount: excAmt } : null;
+
+        if (id) {
+            const idx = spendingBudgets.findIndex(b => b.id === id);
+            if (idx !== -1) {
+                // Preserve existing expenses; only replace exception when toggle was used
+                const existing = spendingBudgets[idx];
+                const newException = useExc ? { month: currentMonthKey(), amount: excAmt }
+                    : (existing.exception?.month === currentMonthKey() ? null : existing.exception);
+                spendingBudgets[idx] = { ...existing, name, amount, exception: newException };
+            }
+        } else {
+            spendingBudgets.push({ id: Date.now().toString(), name, amount, exception, expenses: [] });
+        }
+
+        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+        closeBudgetModal();
+        renderSpendingBudgets();
+        showSavedToast(id ? 'Budget updated ✓' : 'Budget added ✓');
+    } catch (err) {
+        showErrorToast(err.message || 'Failed to save budget.');
+    }
+}
+
+function deleteBudget(id) {
+    const budget = spendingBudgets.find(b => b.id === id);
+    if (!budget) return;
+    if (!confirm(`Delete the "${budget.name}" budget and all its expenses for this month?`)) return;
+    spendingBudgets = spendingBudgets.filter(b => b.id !== id);
+    expandedBudgets.delete(id);
+    saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+    renderSpendingBudgets();
+    showSavedToast('Budget deleted ✓');
+}
+
+// ─── Expense Modal ────────────────────────────────────────────────────────────
+function openExpenseModal(budgetId, expenseId = null) {
+    expenseForm.reset();
+    _root.getElementById('expense-budget-id').value = budgetId;
+    _root.getElementById('expense-id').value = '';
+
+    const budget = spendingBudgets.find(b => b.id === budgetId);
+    const budgetLabel = budget ? ` — ${budget.name}` : '';
+
+    if (expenseId) {
+        _root.getElementById('expense-modal-title').textContent = `Edit Expense${budgetLabel}`;
+        const exp = budget?.expenses?.find(e => e.id === expenseId);
+        if (exp) {
+            _root.getElementById('expense-id').value          = exp.id;
+            _root.getElementById('expense-description').value = exp.description;
+            _root.getElementById('expense-amount').value      = exp.amount;
+            _root.getElementById('expense-date').value        = exp.date || '';
+        }
+    } else {
+        _root.getElementById('expense-modal-title').textContent = `Add Expense${budgetLabel}`;
+        // Default date to today
+        _root.getElementById('expense-date').value = new Date().toISOString().slice(0, 10);
+    }
+
+    expenseModal.style.display = 'flex';
+    void expenseModal.offsetWidth;
+    expenseModal.classList.add('active');
+    setTimeout(() => expenseModal.querySelector('input:not([type=hidden])').focus(), 50);
+}
+
+function closeExpenseModal() {
+    expenseModal.classList.remove('active');
+    setTimeout(() => { expenseModal.style.display = 'none'; }, 300);
+}
+
+function saveExpense() {
+    try {
+        const budgetId    = _root.getElementById('expense-budget-id').value;
+        const expenseId   = _root.getElementById('expense-id').value;
+        const description = _root.getElementById('expense-description').value.trim();
+        const amount      = parseFloat(_root.getElementById('expense-amount').value);
+        const date        = _root.getElementById('expense-date').value;
+
+        if (!description)          throw new Error('Please enter a description.');
+        if (isNaN(amount) || amount < 0) throw new Error('Please enter a valid amount.');
+
+        const budget = spendingBudgets.find(b => b.id === budgetId);
+        if (!budget) throw new Error('Budget not found.');
+
+        if (!budget.expenses) budget.expenses = [];
+
+        if (expenseId) {
+            const idx = budget.expenses.findIndex(e => e.id === expenseId);
+            if (idx !== -1) budget.expenses[idx] = { id: expenseId, description, amount, date };
+        } else {
+            budget.expenses.push({ id: Date.now().toString(), description, amount, date });
+        }
+
+        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+        closeExpenseModal();
+        expandedBudgets.add(budgetId);
+        renderSpendingBudgets();
+        showSavedToast(expenseId ? 'Expense updated ✓' : 'Expense added ✓');
+    } catch (err) {
+        showErrorToast(err.message || 'Failed to save expense.');
+    }
+}
+
+function deleteExpense(budgetId, expenseId) {
+    const budget = spendingBudgets.find(b => b.id === budgetId);
+    if (!budget) return;
+    const deleted = budget.expenses.find(e => e.id === expenseId);
+    if (!deleted) return;
+    budget.expenses = budget.expenses.filter(e => e.id !== expenseId);
+    saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+    renderSpendingBudgets();
+    showUndoToast('Expense deleted', () => {
+        budget.expenses.push(deleted);
+        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+        renderSpendingBudgets();
     });
 }
 
@@ -4369,6 +5018,7 @@ function renderUI() {
     });
     renderIncomeList();
     renderRecurringCostsList();
+    renderSpendingBudgets();
     
     const simResults = runSimulation(strategy);
     renderDebtsList(simResults);
