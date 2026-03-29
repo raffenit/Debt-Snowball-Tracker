@@ -922,6 +922,7 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
 /* ===== Income Cards ===== */
 .income-card {
     border-left: 4px solid var(--success-color) !important;
+    padding: 0.65rem 1rem !important;
 }
 
 .income-card:hover {
@@ -929,8 +930,136 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.15) !important;
 }
 
+/* Compact income card layout */
+.income-compact-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.income-compact-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.income-compact-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.income-compact-date {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.income-compact-right {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-shrink: 0;
+}
+
+.income-compact-amount {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--success-color);
+    margin-right: 0.25rem;
+}
+
+.btn-xs {
+    padding: 0.18rem 0.55rem;
+    font-size: 0.73rem;
+    line-height: 1.4;
+}
+
 .income-amount {
     color: var(--success-color) !important;
+}
+
+/* ===== Section Cards (Income / Recurring / Debts tab containers) ===== */
+.income-section, .recurring-section, .debts-section {
+    background-color: var(--card-bg);
+    background-image: linear-gradient(145deg, var(--card-bg-2), var(--card-bg));
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+    margin-bottom: 1.5rem;
+}
+
+.income-section {
+    border-left: 4px solid var(--success-color);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(52,201,122,0.07) inset;
+}
+
+.recurring-section {
+    border-left: 4px solid var(--warning-color);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(240,160,80,0.07) inset;
+}
+
+.debts-section {
+    border-left: 4px solid var(--accent-color);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(91,127,255,0.07) inset;
+}
+
+/* Budget tab card color accents */
+#bank-balances-card {
+    border-left: 4px solid var(--success-color);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(52,201,122,0.07) inset;
+}
+
+#payment-plan-section {
+    border-left: 4px solid var(--accent-color);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(91,127,255,0.07) inset;
+}
+
+/* ===== Cost Sub-section Headers ===== */
+.cost-subsection {
+    margin-bottom: 1.25rem;
+}
+
+.cost-subsection-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.45rem 0.8rem;
+    border-radius: 0.375rem;
+    font-weight: 600;
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+}
+
+.cost-subsection-total {
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+
+.cost-subsection-utility .cost-subsection-header {
+    background: rgba(45,212,191,0.1);
+    border-left: 3px solid var(--teal-color);
+    color: var(--teal-color);
+}
+
+.cost-subsection-subscription .cost-subsection-header {
+    background: rgba(129,140,248,0.1);
+    border-left: 3px solid #818cf8;
+    color: #a5b4fc;
+}
+
+.cost-subsection-other .cost-subsection-header {
+    background: rgba(240,160,80,0.1);
+    border-left: 3px solid var(--warning-color);
+    color: var(--warning-color);
 }
 
 .income-badge {
@@ -2431,7 +2560,7 @@ const PANEL_HTML = `<div class="app-container">
 
             <div class="tab-panel active" id="tab-payment-plan">
                 
-                <section class="card" style="margin-bottom: 1.5rem;">
+                <section id="bank-balances-card" class="card" style="margin-bottom: 1.5rem;">
                     <div style="margin-bottom: 0.75rem;">
                         <h2 style="margin-bottom: 0;">Bank Balances</h2>
                         <p class="subtitle" style="margin-bottom:0; font-size: 0.85rem;">Set your day 1 balance, and add mid-month checkpoints to sync the app with reality.</p>
@@ -2504,9 +2633,8 @@ const PANEL_HTML = `<div class="app-container">
                     <div class="section-header">
                         <div>
                             <h2>Recurring Costs</h2>
-                            <p class="subtitle" style="margin-bottom:0;">Fixed monthly expenses that never go away (utilities, rent, subscriptions, etc.)</p>
+                            <p class="subtitle" style="margin-bottom:0;">Fixed monthly bills grouped by category. <strong>Direct</strong> reduces your cash budget; <strong>Card</strong> does not.</p>
                             <p id="recurring-summary" class="subtitle" style="margin-top:0.35rem; color: var(--text-secondary); font-size: 0.95rem;"></p>
-                            <p class="subtitle" style="margin-top:0.35rem; color: var(--text-secondary); font-size: 0.95rem;">Use "Direct" for cash/bank transactions that reduce immediate budget. Use "Card" when you plan to charge it and it should not reduce this month's available funds for debt snowball.</p>
                         </div>
                         <button id="add-cost-btn" class="btn btn-warning">+ Add Cost</button>
                     </div>
@@ -2694,6 +2822,14 @@ const PANEL_HTML = `<div class="app-container">
             </div>
             <form id="cost-form">
                 <input type="hidden" id="cost-id">
+                <div class="input-group">
+                    <label for="cost-category">Category</label>
+                    <select id="cost-category">
+                        <option value="utility">Utility</option>
+                        <option value="subscription">Subscription</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
                 <div class="input-group">
                     <label for="cost-name">Name</label>
                     <input type="text" id="cost-name" required placeholder="e.g. Electric Bill">
@@ -3329,10 +3465,11 @@ function openCostModal(costId = null) {
         _root.getElementById('cost-modal-title').textContent = 'Edit Recurring Cost';
         const cost = recurringCosts.find(c => c.id === costId);
         if (cost) {
-            _root.getElementById('cost-id').value     = cost.id;
-            _root.getElementById('cost-name').value   = cost.name;
-            _root.getElementById('cost-amount').value = cost.amount;
-            _root.getElementById('cost-due-day').value = cost.dueDay || '';
+            _root.getElementById('cost-id').value          = cost.id;
+            _root.getElementById('cost-name').value        = cost.name;
+            _root.getElementById('cost-amount').value      = cost.amount;
+            _root.getElementById('cost-due-day').value     = cost.dueDay || '';
+            _root.getElementById('cost-category').value   = cost.category || 'other';
             _root.getElementById('cost-payment-method').value = cost.paymentMethod || 'direct';
             _root.getElementById('cost-amount-type').value = cost.amountType || 'fixed';
             _root.getElementById('cost-autopay-toggle').checked = !!cost.autoPay;
@@ -3450,6 +3587,7 @@ function saveCost() {
         const name          = _root.getElementById('cost-name').value;
         const amount        = parseFloat(_root.getElementById('cost-amount').value);
         const dueDay        = parseInt(_root.getElementById('cost-due-day').value) || 1;
+        const category      = _root.getElementById('cost-category').value || 'other';
         const paymentMethod = _root.getElementById('cost-payment-method').value || 'direct';
         const amountType    = _root.getElementById('cost-amount-type').value || 'fixed';
         const autoPay       = _root.getElementById('cost-autopay-toggle').checked;
@@ -3459,9 +3597,9 @@ function saveCost() {
 
         if (id) {
             const idx = recurringCosts.findIndex(c => c.id === id);
-            if (idx !== -1) recurringCosts[idx] = { id, name, amount, dueDay, paymentMethod, amountType, autoPay };
+            if (idx !== -1) recurringCosts[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay };
         } else {
-            recurringCosts.push({ id: Date.now().toString(), name, amount, dueDay, paymentMethod, amountType, autoPay });
+            recurringCosts.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay });
         }
 
         saveData().catch(err => console.error("Debt Snowball: save failed —", err));
@@ -3824,17 +3962,21 @@ function renderIncomeList() {
     const sorted = [...incomeEntries.sort((a,b) => a.date.localeCompare(b.date))];
 
     sorted.forEach((entry, idx) => {
-        const dateStr = new Date(entry.date+'T00:00:00').toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+        const dateStr = new Date(entry.date+'T00:00:00').toLocaleDateString(undefined, { month:'short', day:'numeric' });
         const el = document.createElement('div');
         el.className = 'debt-card income-card';
         el.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${idx * 0.08}s`;
         el.innerHTML = `
-            <div class="debt-name">${escHtml(entry.label)}<span class="income-badge">💰 Income</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Date</span><span class="debt-detail-value">${dateStr}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Amount</span><span class="debt-detail-value income-amount">${formatMoney(entry.amount)}</span></div>
-            <div class="debt-actions">
-                <button class="btn btn-secondary btn-edit-income" data-id="${entry.id}">Edit</button>
-                <button class="btn btn-danger btn-delete-income" data-id="${entry.id}">Delete</button>
+            <div class="income-compact-inner">
+                <div class="income-compact-info">
+                    <span class="income-compact-name">${escHtml(entry.label)}</span>
+                    <span class="income-compact-date">${dateStr}</span>
+                </div>
+                <div class="income-compact-right">
+                    <span class="income-compact-amount">${formatMoney(entry.amount)}</span>
+                    <button class="btn btn-xs btn-secondary btn-edit-income" data-id="${entry.id}">Edit</button>
+                    <button class="btn btn-xs btn-danger btn-delete-income" data-id="${entry.id}">Delete</button>
+                </div>
             </div>`;
         incomeListContainer.appendChild(el);
     });
@@ -3868,47 +4010,70 @@ function renderRecurringCostsList() {
         recurringSummaryEl.textContent = `Total Monthly Recurring: $${totalRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} (Direct $${directRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}, Card $${cardRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})})`;
     }
 
-    costsListContainer.style.display = 'grid';
+    costsListContainer.style.display = 'block';
     const sorted = [...recurringCosts].sort((a,b) => (a.dueDay||1) - (b.dueDay||1));
-const currentDay = new Date().getDate(); // <-- Add this above the loop
-    
-    sorted.forEach((cost, idx) => {
-        const isPastDue = (cost.dueDay || 1) <= currentDay; // <-- Add this inside the loop
-        const isCard = cost.paymentMethod === 'card';
-        
-        const paymentMethodLabel = isCard ? 'Credit / Debit Card' : 'Direct Pay (Bank / Cash)';
-        const paymentMethodBadge = isCard
-            ? '<span class="debt-type-badge card-badge">💳 Card</span>'
-            : '<span class="debt-type-badge direct-badge">🏦 Direct Pay</span>';
+    const currentDay = new Date().getDate();
 
-        const amountType = cost.amountType || 'fixed';
-        const amountTypeBadge = amountType === 'flexible'
-            ? '<span class="amount-type-badge flexible-badge">〜 Flexible</span>'
-            : '<span class="amount-type-badge fixed-badge">= Fixed</span>';
+    const categories = [
+        { key: 'utility',      label: '⚡ Utilities',     cls: 'cost-subsection-utility' },
+        { key: 'subscription', label: '📱 Subscriptions',  cls: 'cost-subsection-subscription' },
+        { key: 'other',        label: '📦 Other',          cls: 'cost-subsection-other' },
+    ];
 
-        const paidState = paidStatus[cost.id];
-        const el = document.createElement('div');
-        el.className = 'debt-card cost-card' +
-            (isCard ? ' cost-card-credit' : ' cost-card-direct') +
-            (paidState ? ' card-paid' : '');
-        el.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${idx * 0.08}s`;
+    let cardIndex = 0;
+    categories.forEach(({ key, label, cls }) => {
+        const group = sorted.filter(c => (c.category || 'other') === key);
+        if (group.length === 0) return;
 
-        const autoBadge  = cost.autoPay ? '<span class="autopay-badge">⚡ Auto-Pay</span>' : '';
-        const paidOverlay = paidState ? buildPaidOverlay(cost.autoPay) : '';
+        const section = document.createElement('div');
+        section.className = `cost-subsection ${cls}`;
 
-        el.innerHTML = `
-            ${paidOverlay}
-            <div class="debt-name">${escHtml(cost.name)}<span class="recurring-badge">♻ Recurring</span>${paymentMethodBadge}${amountTypeBadge}${autoBadge}</div>
-            <div class="debt-detail"><span class="debt-detail-label">Monthly Amount</span><span class="debt-detail-value cost-amount">${formatMoney(cost.amount)}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Due Day</span><span class="debt-detail-value">${formatOrdinal(cost.dueDay||1)} of each month</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Payment Method</span><span class="debt-detail-value">${paymentMethodLabel}</span></div>
-            <div class="paid-action-row">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue)}</div>
-            <div class="debt-actions">
-                <button class="btn btn-secondary btn-edit-cost" data-id="${cost.id}">Edit</button>
-                <button class="btn btn-danger btn-delete-cost" data-id="${cost.id}">Delete</button>
-            </div>`;
-        
-        costsListContainer.appendChild(el);
+        const header = document.createElement('div');
+        header.className = 'cost-subsection-header';
+        const groupTotal = group.reduce((s, c) => s + c.amount, 0);
+        header.innerHTML = `<span>${label}</span><span class="cost-subsection-total">${formatMoney(groupTotal)}/mo</span>`;
+        section.appendChild(header);
+
+        const grid = document.createElement('div');
+        grid.className = 'debts-list';
+        grid.style.display = 'grid';
+
+        group.forEach(cost => {
+            const isPastDue = (cost.dueDay || 1) <= currentDay;
+            const isCard = cost.paymentMethod === 'card';
+            const paymentMethodLabel = isCard ? 'Credit / Debit Card' : 'Direct Pay (Bank / Cash)';
+            const paymentMethodBadge = isCard
+                ? '<span class="debt-type-badge card-badge">💳 Card</span>'
+                : '<span class="debt-type-badge direct-badge">🏦 Direct Pay</span>';
+            const amountType = cost.amountType || 'fixed';
+            const amountTypeBadge = amountType === 'flexible'
+                ? '<span class="amount-type-badge flexible-badge">〜 Flexible</span>'
+                : '<span class="amount-type-badge fixed-badge">= Fixed</span>';
+            const paidState = paidStatus[cost.id];
+            const el = document.createElement('div');
+            el.className = 'debt-card cost-card' +
+                (isCard ? ' cost-card-credit' : ' cost-card-direct') +
+                (paidState ? ' card-paid' : '');
+            el.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${cardIndex * 0.08}s`;
+            cardIndex++;
+            const autoBadge   = cost.autoPay ? '<span class="autopay-badge">⚡ Auto-Pay</span>' : '';
+            const paidOverlay = paidState ? buildPaidOverlay(cost.autoPay) : '';
+            el.innerHTML = `
+                ${paidOverlay}
+                <div class="debt-name">${escHtml(cost.name)}<span class="recurring-badge">♻ Recurring</span>${paymentMethodBadge}${amountTypeBadge}${autoBadge}</div>
+                <div class="debt-detail"><span class="debt-detail-label">Monthly Amount</span><span class="debt-detail-value cost-amount">${formatMoney(cost.amount)}</span></div>
+                <div class="debt-detail"><span class="debt-detail-label">Due Day</span><span class="debt-detail-value">${formatOrdinal(cost.dueDay||1)} of each month</span></div>
+                <div class="debt-detail"><span class="debt-detail-label">Payment Method</span><span class="debt-detail-value">${paymentMethodLabel}</span></div>
+                <div class="paid-action-row">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue)}</div>
+                <div class="debt-actions">
+                    <button class="btn btn-secondary btn-edit-cost" data-id="${cost.id}">Edit</button>
+                    <button class="btn btn-danger btn-delete-cost" data-id="${cost.id}">Delete</button>
+                </div>`;
+            grid.appendChild(el);
+        });
+
+        section.appendChild(grid);
+        costsListContainer.appendChild(section);
     });
 
     costsListContainer.querySelectorAll('.btn-edit-cost').forEach(b   => b.addEventListener('click', e => openCostModal(e.target.dataset.id)));
