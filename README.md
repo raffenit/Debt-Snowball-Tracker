@@ -55,4 +55,4 @@ Home Assistant aggressively caches custom frontend panels. If you recently updat
 * **Companion App:** Go to App Configuration > Debugging > Clear Frontend Cache.
 
 **"Where is my data saved?"**
-Everything is saved in your browser's `localStorage`. If you clear your browser cookies/site data, your tracker will reset. **Please use the "Export Data" button in the app to periodically save a backup file to your computer!**
+All data is saved locally in the .storage/ directory of your home assistant server. **Please use the "Export Data" button in the app to periodically save a backup file to your computer in case the data becomes corrupted!**
