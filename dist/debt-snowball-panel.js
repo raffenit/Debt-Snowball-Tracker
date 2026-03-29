@@ -1021,6 +1021,49 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(91,127,255,0.07) inset;
 }
 
+/* ===== Recurring Due-This-Month Summary Bar ===== */
+.recurring-due-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem 1.25rem;
+    padding: 0.7rem 1rem;
+    margin-bottom: 1.25rem;
+    border-radius: 0.4rem;
+    background: rgba(240,160,80,0.08);
+    border-left: 3px solid var(--warning-color);
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    min-height: 2.5rem;
+}
+
+.recurring-due-summary:empty {
+    display: none;
+}
+
+.recurring-due-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--warning-color);
+    margin-right: 0.25rem;
+}
+
+.recurring-due-total {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--warning-color);
+}
+
+.recurring-due-breakdown {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
 /* ===== Cost Sub-section Headers ===== */
 .cost-subsection {
     margin-bottom: 1.25rem;
@@ -1696,14 +1739,51 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     border: 1px solid rgba(251, 191, 36, 0.35);
 }
 
+/* ===== Promo Section ===== */
+.promo-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.85rem;
+    border-radius: 0.4rem;
+    background: rgba(168, 85, 247, 0.12);
+    border-left: 3px solid var(--promo-color);
+    color: var(--promo-light);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.85rem;
+}
+
+.promo-section-grid {
+    margin-bottom: 1.5rem;
+}
+
+.regular-section-header {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0.85rem;
+    border-radius: 0.4rem;
+    background: rgba(99, 102, 241, 0.08);
+    border-left: 3px solid rgba(99, 102, 241, 0.5);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.85rem;
+}
+
 /* ===== Promo Card Accent ===== */
 .promo-card {
     border-left: 4px solid var(--promo-color) !important;
+    background: linear-gradient(135deg, rgba(168,85,247,0.06) 0%, var(--card-bg) 60%) !important;
 }
 
 .promo-card:hover {
     border-color: var(--promo-color) !important;
-    box-shadow: 0 10px 15px -3px rgba(168, 85, 247, 0.15) !important;
+    box-shadow: 0 10px 15px -3px rgba(168, 85, 247, 0.2) !important;
 }
 
 .promo-auto-note {
@@ -2714,18 +2794,18 @@ const PANEL_HTML = `<div class="app-container">
                     </div>
                     <div id="payment-plan-list" class="payment-schedule">
                         </div>
-                    <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem; font-weight: 600; font-size: 1.25rem;">
-                        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-                            <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Total Income</span>
-                            <span id="payment-plan-total-income" style="color: var(--success-color);">-</span>
+                    <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; font-weight: 600; font-size: 1.25rem;">
+                        <div style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 0;">
+                            <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Total Income</span>
+                            <span id="payment-plan-total-income" style="color: var(--success-color); font-size: clamp(0.95rem, 3vw, 1.25rem); word-break: break-all;">-</span>
                         </div>
-                        <div style="display: flex; flex-direction: column; align-items: center; gap: 0.25rem;">
-                            <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Total Expenses</span>
-                            <span id="payment-plan-total-expenses" style="color: var(--expense-color);">-</span>
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 0.25rem; min-width: 0;">
+                            <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Total Expenses</span>
+                            <span id="payment-plan-total-expenses" style="color: var(--expense-color); font-size: clamp(0.95rem, 3vw, 1.25rem); word-break: break-all;">-</span>
                         </div>
-                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem;">
-                            <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Next Month Start</span>
-                            <span id="payment-plan-next-month" style="color: var(--text-primary);">-</span>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; min-width: 0;">
+                            <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Next Month Start</span>
+                            <span id="payment-plan-next-month" style="color: var(--text-primary); font-size: clamp(0.95rem, 3vw, 1.25rem); word-break: break-all;">-</span>
                         </div>
                     </div>
                     </section>
@@ -2750,10 +2830,10 @@ const PANEL_HTML = `<div class="app-container">
                         <div>
                             <h2>Monthly Costs</h2>
                             <p class="subtitle" style="margin-bottom:0;">Bills grouped by category. <strong>One-Time</strong> costs are cleared at month end. <strong>Direct</strong> reduces your cash budget; <strong>Card</strong> does not.</p>
-                            <p id="recurring-summary" class="subtitle" style="margin-top:0.35rem; color: var(--text-secondary); font-size: 0.95rem;"></p>
                         </div>
                         <button id="add-cost-btn" class="btn btn-warning">+ Add Cost</button>
                     </div>
+                    <div id="recurring-summary" class="recurring-due-summary"></div>
                     <div id="costs-list" class="debts-list">
                         </div>
                     <div id="recurring-cost-summary" class="recurring-cost-summary" style="display:none"></div>
@@ -2767,7 +2847,10 @@ const PANEL_HTML = `<div class="app-container">
                             <h2>Your Debts</h2>
                             <p id="debts-summary" class="subtitle" style="margin-top:0.35rem; color: var(--text-secondary); font-size: 0.95rem;"></p>
                         </div>
-                        <button id="add-debt-btn" class="btn btn-primary">+ Add Debt</button>
+                        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                            <button id="mortgage-toggle-btn" class="btn btn-secondary" style="display:none;">Show Mortgage</button>
+                            <button id="add-debt-btn" class="btn btn-primary">+ Add Debt</button>
+                        </div>
                     </div>
                     <div id="debts-list" class="debts-list">
                         </div>
@@ -3179,6 +3262,7 @@ let incomeEntries = [];
 let checkpoints = [];
 let startingBalance = 0;
 let strategy = 'snowball'; // 'snowball' | 'avalanche'
+let showMortgage = true;   // toggle mortgage visibility
 let paidStatus = {};       // { [id: 'paid' | 'autopay' } — resets each calendar month
 let monthlyArchives = [];  // [{ month, label, incomeEntries, recurringCosts, checkpoints, startingBalance, totalIncome, totalCosts }]
 let paydownChart = null;
@@ -3268,6 +3352,7 @@ async function loadBackendData() {
             incomeEntries   = result.incomeEntries   || [];
             checkpoints     = result.checkpoints     || [];
             strategy        = result.strategy        || 'snowball';
+            showMortgage    = result.showMortgage !== false;
             startingBalance = result.startingBalance || 0;
             monthlyArchives = result.monthlyArchives || [];
 
@@ -3348,7 +3433,7 @@ async function saveData() {
         url_path:  STORE_URL_PATH,
         config:    {
             debts, recurringCosts, incomeEntries, checkpoints,
-            strategy, startingBalance,
+            strategy, startingBalance, showMortgage,
             paidStatus, paidMonth: currentMonthKey(),
             monthlyArchives,
         },
@@ -3595,6 +3680,12 @@ function setupEventListeners() {
     _root.getElementById('auto-min-btn').addEventListener('click', autoCalcMinPaymentCC);
     _root.getElementById('debt-balance').addEventListener('input', updateAutoMinHint);
     _root.getElementById('debt-rate').addEventListener('input', updateAutoMinHint);
+
+    // Mortgage toggle
+    _root.getElementById('mortgage-toggle-btn').addEventListener('click', () => {
+        showMortgage = !showMortgage;
+        saveData().then(() => renderUI()).catch(err => console.error("Debt Snowball: save failed —", err));
+    });
 
     // Strategy toggle
     _root.querySelectorAll('.strategy-btn').forEach(btn => {
@@ -4371,21 +4462,18 @@ function renderRecurringCostsList() {
     costsListContainer.innerHTML = '';
     const recurringSummaryEl = _root.getElementById('recurring-summary');
 
-    if (recurringCosts.length === 0) {
-        if (recurringSummaryEl) {
-            recurringSummaryEl.textContent = 'Total Monthly Recurring: $0.00 (direct $0.00, card $0.00)';
-        }
-        costsListContainer.innerHTML = '<div class="empty-state">No recurring costs added yet. Click "+ Add Cost" to get started.</div>';
-        costsListContainer.style.display = 'block';
-        return;
-    }
-
     const activeCosts    = recurringCosts.filter(isCostDueThisMonth);
     const totalRecurring  = activeCosts.reduce((sum, c) => sum + c.amount, 0);
     const directRecurring = activeCosts.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
     const cardRecurring   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
     if (recurringSummaryEl) {
-        recurringSummaryEl.textContent = `Due This Month: $${totalRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} (Direct $${directRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}, Card $${cardRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})})`;
+        recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${totalRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span><span class="recurring-due-breakdown">🏦 Direct ${formatMoney(directRecurring)} &nbsp;·&nbsp; 💳 Card ${formatMoney(cardRecurring)}</span>`;
+    }
+
+    if (recurringCosts.length === 0) {
+        costsListContainer.innerHTML = '<div class="empty-state">No recurring costs added yet. Click "+ Add Cost" to get started.</div>';
+        costsListContainer.style.display = 'block';
+        return;
     }
 
     costsListContainer.style.display = 'block';
@@ -4473,7 +4561,14 @@ function renderRecurringCostsList() {
 // ─── Debts List ──────────────────────────────────────────────────────────────
 function renderDebtsList(simResults) {
     debtsListContainer.innerHTML = '';
-    const debtsSummaryEl = _root.getElementById('debts-summary');
+    const debtsSummaryEl    = _root.getElementById('debts-summary');
+    const mortgageToggleBtn = _root.getElementById('mortgage-toggle-btn');
+
+    const hasMortgage = debts.some(d => d.type === 'mortgage');
+    if (mortgageToggleBtn) {
+        mortgageToggleBtn.style.display = hasMortgage ? '' : 'none';
+        mortgageToggleBtn.textContent   = showMortgage ? 'Hide Mortgage' : 'Show Mortgage';
+    }
 
     if (debts.length === 0) {
         if (debtsSummaryEl) debtsSummaryEl.textContent = 'Total Debt: $0.00';
@@ -4487,21 +4582,30 @@ function renderDebtsList(simResults) {
         debtsSummaryEl.textContent = `Total Debt: $${totalDebt.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     }
 
-    debtsListContainer.style.display = 'grid';
-    const ordered = getStrategyOrder(debts, strategy);
-    const currentDay = new Date().getDate(); // <-- Add this above the loop
-    
-    ordered.forEach((debt, idx) => {
-        const isPastDue = (debt.dueDay || 1) <= currentDay; // <-- Add this inside the loop
+    debtsListContainer.style.display = 'block';
+    const ordered    = getStrategyOrder(debts, strategy);
+    const currentDay = new Date().getDate();
+
+    // Apply mortgage filter; keep global order index for order badge numbers
+    const visible = showMortgage ? ordered : ordered.filter(d => d.type !== 'mortgage');
+
+    const promoDebts   = visible.filter(d => d.promoZeroInterest);
+    const regularDebts = visible.filter(d => !d.promoZeroInterest);
+
+    // The "target" debt is the first in the full visible list
+    const targetId = visible[0]?.id;
+
+    function buildDebtCard(debt, globalIdx) {
+        const isPastDue    = (debt.dueDay || 1) <= currentDay;
         const payoffMonths = simResults?.debtPayoffMonths?.[debt.id];
-        const isTarget     = idx === 0;
+        const isTarget     = debt.id === targetId;
         const paidState    = paidStatus[debt.id];
 
-        const debtElt   = document.createElement('div');
+        const debtElt = document.createElement('div');
         debtElt.className = 'debt-card' +
             (debt.promoZeroInterest ? ' promo-card' : '') +
             (paidState ? ' card-paid' : '');
-        debtElt.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${idx * 0.09}s`;
+        debtElt.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${globalIdx * 0.09}s`;
 
         const promoBadge = debt.promoZeroInterest ? '<span class="promo-badge">🎉 0% Promo</span>' : '';
         const autoBadge  = debt.autoPay ? '<span class="autopay-badge">⚡ Auto-Pay</span>' : '';
@@ -4552,7 +4656,7 @@ function renderDebtsList(simResults) {
 
         debtElt.innerHTML = `
             ${paidOverlay}
-            <div class="debt-order-badge" title="${strategy === 'snowball' ? 'Payoff order: smallest balance first' : 'Payoff order: highest interest first'}">${idx + 1}</div>
+            <div class="debt-order-badge" title="${strategy === 'snowball' ? 'Payoff order: smallest balance first' : 'Payoff order: highest interest first'}">${globalIdx + 1}</div>
             <div class="debt-name">${escHtml(debt.name)}</div>
             <div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.35rem;">${typeBadge}${promoBadge}${autoBadge}</div>
             ${targetBadge}
@@ -4569,8 +4673,37 @@ function renderDebtsList(simResults) {
                 <button class="btn btn-danger btn-delete" data-id="${debt.id}">Delete</button>
             </div>`;
 
-        debtsListContainer.appendChild(debtElt);
-    });
+        return debtElt;
+    }
+
+    function appendSection(debtsSubset, globalOffset, headerEl) {
+        const wrapper = document.createElement('div');
+        if (headerEl) wrapper.appendChild(headerEl);
+        const grid = document.createElement('div');
+        grid.className = 'debts-list';
+        grid.style.display = 'grid';
+        debtsSubset.forEach((debt, i) => grid.appendChild(buildDebtCard(debt, globalOffset + i)));
+        wrapper.appendChild(grid);
+        debtsListContainer.appendChild(wrapper);
+    }
+
+    if (promoDebts.length > 0) {
+        const header = document.createElement('div');
+        header.className = 'promo-section-header';
+        const promoTotal = promoDebts.reduce((s, d) => s + d.balance, 0);
+        header.innerHTML = `<span>🎉 0% Promo — Pay Off Before Rate Jumps!</span><span>${formatMoney(promoTotal)}</span>`;
+        appendSection(promoDebts, 0, header);
+    }
+
+    if (regularDebts.length > 0) {
+        let header = null;
+        if (promoDebts.length > 0) {
+            header = document.createElement('div');
+            header.className = 'regular-section-header';
+            header.textContent = '📋 Standard Debts';
+        }
+        appendSection(regularDebts, promoDebts.length, header);
+    }
 
     debtsListContainer.querySelectorAll('.btn-edit').forEach(b   => b.addEventListener('click', e => openDebtModal(e.target.dataset.id)));
     debtsListContainer.querySelectorAll('.btn-delete').forEach(b => b.addEventListener('click', e => deleteDebt(e.target.dataset.id)));
