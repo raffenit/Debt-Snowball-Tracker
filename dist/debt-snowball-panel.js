@@ -292,6 +292,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .debt-detail-value {
     font-weight: 600;
     color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.debt-balance-row {
+    align-items: baseline;
+    margin-bottom: 1rem;
+}
+
+.debt-balance-value {
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
 }
 
 .debt-actions {
@@ -2184,6 +2197,12 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.schedule-badge-override {
+    background: rgba(251, 191, 36, 0.12);
+    color: #fcd34d;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
 .schedule-badge-start {
     background: rgba(91, 127, 255, 0.15);
     color: #a5b8ff;
@@ -2586,16 +2605,25 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
     flex-shrink: 0;
 }
 
-/* ===== Snowball Target Banner ===== */
+/* ===== Snowball/Avalanche Target Banner ===== */
 .snowball-target-banner {
-    background: linear-gradient(135deg, rgba(91,127,255,0.12), rgba(52,201,122,0.07));
-    border: 1px solid rgba(91,127,255,0.28);
-    border-radius: 6px;
-    padding: 0.4rem 0.75rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #a5b8ff;
-    margin-bottom: 0.75rem;
+    background: linear-gradient(135deg, rgba(91,127,255,0.22), rgba(52,201,122,0.12));
+    border: 1.5px solid rgba(91,127,255,0.55);
+    border-radius: 8px;
+    padding: 0.5rem 0.85rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #c4d0ff;
+    margin-bottom: 0.85rem;
+    letter-spacing: 0.01em;
+    box-shadow: 0 0 12px rgba(91,127,255,0.18), inset 0 0 12px rgba(91,127,255,0.06);
+    text-shadow: 0 0 10px rgba(91,127,255,0.5);
+}
+
+/* ===== Target card highlight ===== */
+.snowball-target-card {
+    border-color: rgba(91,127,255,0.45) !important;
+    box-shadow: 0 0 0 1px rgba(91,127,255,0.2), 0 4px 24px rgba(91,127,255,0.12) !important;
 }
 
 /* ===== Payoff Months Row ===== */
@@ -2748,6 +2776,36 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
 .schedule-row-paid {
     opacity: 0.6;
     background: rgba(16,185,129,0.03) !important;
+}
+
+.schedule-today-marker {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.5rem 0;
+    pointer-events: none;
+}
+.schedule-today-marker::before,
+.schedule-today-marker::after {
+    content: '';
+    flex: 1;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-color));
+}
+.schedule-today-marker::after {
+    background: linear-gradient(90deg, var(--accent-color), transparent);
+}
+.schedule-today-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-color);
+    white-space: nowrap;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid rgba(99,102,241,0.35);
+    border-radius: 999px;
+    background: rgba(99,102,241,0.08);
 }
 
 .schedule-action-col {
@@ -4007,6 +4065,8 @@ let paydownChart = null;
 let lastSimPayoffDate = null; // used for countdown ticker
 let countdownInterval = null;
 let viewingArchiveIndex = null; // null = current month, number = index into monthlyArchives
+let workingMonthKey = null;    // the month the data is for — may be ahead of the calendar if user advanced early
+let minPayOverrides = {};      // { [debtId]: amount } — this-month-only minimum payment overrides
 
 // ─── DOM Elements ───────────────────────────────────────────────────────────
 const debtsListContainer    = _root.getElementById('debts-list');
@@ -4097,13 +4157,21 @@ async function loadBackendData() {
             strategy        = result.strategy        || 'snowball';
             showMortgage    = result.showMortgage !== false;
             startingBalance = result.startingBalance || 0;
-            monthlyArchives = result.monthlyArchives || [];
-            spendingBudgets = result.spendingBudgets  || [];
+            monthlyArchives  = result.monthlyArchives  || [];
+            spendingBudgets  = result.spendingBudgets  || [];
+            minPayOverrides  = result.minPayOverrides  || {};
 
             const prevMonth = result.paidMonth;
             const thisMonth = currentMonthKey();
 
-            if (prevMonth && prevMonth !== thisMonth) {
+            // workingMonthKey is whichever is later: the stored month or the calendar month.
+            // This means if the user advanced early, workingMonthKey stays at the advanced month.
+            workingMonthKey = (prevMonth && monthKeyToIndex(prevMonth) > monthKeyToIndex(thisMonth))
+                ? prevMonth
+                : thisMonth;
+
+            // Only archive if the calendar has moved *past* the stored month (not when user advanced ahead).
+            if (prevMonth && monthKeyToIndex(thisMonth) > monthKeyToIndex(prevMonth)) {
                 // Archive the closing month before clearing
                 const archive = {
                     month:          prevMonth,
@@ -4134,6 +4202,7 @@ async function loadBackendData() {
                         return { ...c, nextDueMonth: next };
                     });
                 paidStatus      = {};
+                minPayOverrides = {};
                 spendingBudgets = spendingBudgets.map(b => ({
                     ...b,
                     expenses:  [],
@@ -4141,7 +4210,8 @@ async function loadBackendData() {
                 }));
 
                 saveData().catch(err => console.error('Debt Snowball: rollover save failed —', err));
-            } else if (prevMonth === thisMonth && result.paidStatus) {
+            } else if (result.paidStatus) {
+                // Covers: stored month == calendar month, OR stored month is ahead (user advanced early)
                 paidStatus = result.paidStatus;
             } else {
                 paidStatus = {};
@@ -4183,8 +4253,8 @@ async function saveData() {
         config:    {
             debts, recurringCosts, incomeEntries, checkpoints,
             strategy, startingBalance, showMortgage,
-            paidStatus, paidMonth: currentMonthKey(),
-            monthlyArchives, spendingBudgets,
+            paidStatus, paidMonth: workingMonthKey || currentMonthKey(),
+            monthlyArchives, spendingBudgets, minPayOverrides,
         },
     });
 }
@@ -4196,7 +4266,7 @@ function currentMonthKey() {
 
 // ─── Manual Month Advance ─────────────────────────────────────────────────────
 async function advanceToNextMonth() {
-    const currentKey = currentMonthKey();
+    const currentKey = workingMonthKey || currentMonthKey();
     const nextKey    = addMonthsToKey(currentKey, 1);
     const nextLabel  = formatMonthLabel(nextKey);
 
@@ -4231,6 +4301,7 @@ async function advanceToNextMonth() {
             return { ...c, nextDueMonth: next };
         });
     paidStatus      = {};
+    minPayOverrides = {};
     spendingBudgets = spendingBudgets.map(b => ({
         ...b,
         expenses:  [],
@@ -4250,6 +4321,7 @@ async function advanceToNextMonth() {
                 monthlyArchives, spendingBudgets,
             },
         });
+        workingMonthKey = nextKey;
         renderUI();
         showSavedToast(`Started ${nextLabel} ✓`);
     } catch (err) {
@@ -4308,13 +4380,15 @@ function generateBiweeklyForMonth(label, amount, anchorDateStr, monthKey) {
 }
 
 // Carry recurring income entries forward into newMonthKey.
-// Monthly entries get their date updated; biweekly entries are regenerated; one-time entries are dropped.
+// Monthly entries (and legacy entries with no scheduleType) get their date updated;
+// biweekly entries are regenerated; explicit one-time entries are dropped.
 function generateRecurringIncomeForMonth(oldEntries, newMonthKey) {
     const [y, m] = newMonthKey.split('-').map(Number);
     const newEntries = [];
 
-    // Monthly recurring: update date to same day in new month
-    oldEntries.filter(e => e.scheduleType === 'monthly').forEach(e => {
+    // Monthly recurring: update date to same day in new month.
+    // Legacy entries with no scheduleType are treated as monthly.
+    oldEntries.filter(e => !e.scheduleType || e.scheduleType === 'monthly').forEach(e => {
         const day     = e.scheduleDay || parseInt(e.date.split('-')[2]);
         const lastDay = new Date(y, m + 1, 0).getDate();
         const actual  = Math.min(day, lastDay);
@@ -4347,12 +4421,20 @@ function htmlMonthToKey(htmlMonth) {
 }
 
 function isCostDueThisMonth(cost) {
+    const key = workingMonthKey || currentMonthKey();
+    if ((cost.category || 'other') === 'one-time') {
+        // One-time costs are only due in the month they were added (or legacy ones with no addedMonth)
+        return !cost.addedMonth || cost.addedMonth === key;
+    }
     if ((cost.intervalMonths || 1) <= 1) return true;
-    const next = cost.nextDueMonth || currentMonthKey();
-    return monthKeyToIndex(next) <= monthKeyToIndex(currentMonthKey());
+    const next = cost.nextDueMonth || key;
+    return monthKeyToIndex(next) <= monthKeyToIndex(key);
 }
 
 function isCostDueInMonth(cost, monthKey) {
+    if ((cost.category || 'other') === 'one-time') {
+        return !cost.addedMonth || cost.addedMonth === monthKey;
+    }
     if ((cost.intervalMonths || 1) <= 1) return true;
     const next = cost.nextDueMonth || monthKey;
     return monthKeyToIndex(next) <= monthKeyToIndex(monthKey);
@@ -4760,6 +4842,39 @@ function setupEventListeners() {
             else if (type === 'recurring') openCostModal(id);
             else if (type === 'income') openIncomeModal(id);
             else if (type === 'checkpoint') openCheckpointModal(id);
+            return;
+        }
+
+        // Override min payment — toggle inline form
+        const overrideBtn = e.target.closest('.btn-override-min');
+        if (overrideBtn) {
+            const form = _root.getElementById(`override-form-${overrideBtn.dataset.id}`);
+            if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
+            return;
+        }
+        const cancelBtn = e.target.closest('.btn-override-cancel');
+        if (cancelBtn) {
+            const form = _root.getElementById(`override-form-${cancelBtn.dataset.id}`);
+            if (form) form.style.display = 'none';
+            return;
+        }
+        const saveBtn = e.target.closest('.btn-override-save');
+        if (saveBtn) {
+            const id  = saveBtn.dataset.id;
+            const form = _root.getElementById(`override-form-${id}`);
+            const val  = parseFloat(form?.querySelector('.override-input')?.value);
+            if (isNaN(val) || val < 0) { showErrorToast('Enter a valid amount.'); return; }
+            minPayOverrides[id] = val;
+            saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+            renderPaymentPlan();
+            return;
+        }
+        const clearBtn = e.target.closest('.btn-override-clear');
+        if (clearBtn) {
+            delete minPayOverrides[clearBtn.dataset.id];
+            saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+            renderPaymentPlan();
+            return;
         }
     });
 
@@ -5132,6 +5247,8 @@ function saveCost() {
         const startMonthInput = _root.getElementById('cost-start-month').value;
         const startMonthKey = startMonthInput ? htmlMonthToKey(startMonthInput) : null;
 
+        const addedMonth = category === 'one-time' ? (workingMonthKey || currentMonthKey()) : undefined;
+
         if (id) {
             const idx = recurringCosts.findIndex(c => c.id === id);
             if (idx !== -1) {
@@ -5140,11 +5257,11 @@ function saveCost() {
                 const nextDueMonth = intervalMonths > 1
                     ? (startMonthKey ?? (existing.intervalMonths === intervalMonths ? existing.nextDueMonth : currentMonthKey()))
                     : undefined;
-                recurringCosts[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth };
+                recurringCosts[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth };
             }
         } else {
             const nextDueMonth = intervalMonths > 1 ? (startMonthKey ?? currentMonthKey()) : undefined;
-            recurringCosts.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth });
+            recurringCosts.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
         }
 
         saveData().catch(err => console.error("Debt Snowball: save failed —", err));
@@ -5169,7 +5286,7 @@ function deleteCost(id) {
 
 function getBudgetAmount(budget) {
     const exc = budget.exception;
-    if (exc && exc.month === currentMonthKey()) return exc.amount;
+    if (exc && exc.month === (workingMonthKey || currentMonthKey())) return exc.amount;
     return budget.amount;
 }
 
@@ -5220,7 +5337,7 @@ function renderSpendingBudgets() {
         const barPct     = Math.min(rawPct, 100);
         const isExpanded = expandedBudgets.has(budget.id);
         const showInline = inlineExpenseBudget === budget.id;
-        const hasExc     = budget.exception?.month === currentMonthKey();
+        const hasExc     = budget.exception?.month === (workingMonthKey || currentMonthKey());
 
         // Gradient fill for premium look
         let fillGradient;
@@ -5372,15 +5489,16 @@ function saveBudget() {
         if (isNaN(amount) || amount < 0) throw new Error('Please enter a valid budget amount.');
         if (useExc && (isNaN(excAmt) || excAmt < 0)) throw new Error('Please enter a valid override amount.');
 
-        const exception = useExc ? { month: currentMonthKey(), amount: excAmt } : null;
+        const _wk = workingMonthKey || currentMonthKey();
+        const exception = useExc ? { month: _wk, amount: excAmt } : null;
 
         if (id) {
             const idx = spendingBudgets.findIndex(b => b.id === id);
             if (idx !== -1) {
                 // Preserve existing expenses; only replace exception when toggle was used
                 const existing = spendingBudgets[idx];
-                const newException = useExc ? { month: currentMonthKey(), amount: excAmt }
-                    : (existing.exception?.month === currentMonthKey() ? null : existing.exception);
+                const newException = useExc ? { month: _wk, amount: excAmt }
+                    : (existing.exception?.month === _wk ? null : existing.exception);
                 spendingBudgets[idx] = { ...existing, name, amount, exception: newException };
             }
         } else {
@@ -5511,7 +5629,7 @@ function saveIncome() {
             const idx = incomeEntries.findIndex(e => e.id === id);
             if (idx !== -1) incomeEntries[idx] = { id, ...entryBase };
         } else if (scheduleType === 'biweekly') {
-            const generated = generateBiweeklyForMonth(label, amount, date, currentMonthKey());
+            const generated = generateBiweeklyForMonth(label, amount, date, workingMonthKey || currentMonthKey());
             if (generated.length === 0) throw new Error('No occurrences of this schedule fall in the current month. Choose a date within the current month as the starting point.');
             incomeEntries.push(...generated);
         } else {
@@ -5892,15 +6010,17 @@ function renderRecurringCostsList() {
     costsListContainer.innerHTML = '';
     const recurringSummaryEl = _root.getElementById('recurring-summary');
 
-    const activeCosts    = recurringCosts.filter(isCostDueThisMonth);
-    const totalRecurring  = activeCosts.reduce((sum, c) => sum + c.amount, 0);
-    const directRecurring = activeCosts.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
-    const cardRecurring   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
+    // Only show costs due this month — handles one-times (by addedMonth), interval costs,
+    // and the edge case of the page staying open across a month boundary without a reload.
+    const visibleCosts    = recurringCosts.filter(isCostDueThisMonth);
+    const totalRecurring  = visibleCosts.reduce((sum, c) => sum + c.amount, 0);
+    const directRecurring = visibleCosts.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
+    const cardRecurring   = visibleCosts.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
     if (recurringSummaryEl) {
         recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${totalRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span><span class="recurring-due-breakdown">🏦 Direct ${formatMoney(directRecurring)} &nbsp;·&nbsp; 💳 Card ${formatMoney(cardRecurring)}</span>`;
     }
 
-    if (recurringCosts.length === 0) {
+    if (visibleCosts.length === 0) {
         costsListContainer.innerHTML = `
             <div class="empty-state">
                 No recurring costs yet.<br>Add your bills, subscriptions, and utilities.
@@ -5913,7 +6033,7 @@ function renderRecurringCostsList() {
     }
 
     costsListContainer.style.display = 'block';
-    const sorted = [...recurringCosts].sort((a,b) => (a.dueDay||1) - (b.dueDay||1));
+    const sorted = [...visibleCosts].sort((a,b) => (a.dueDay||1) - (b.dueDay||1));
     const currentDay = new Date().getDate();
 
     const categories = [
@@ -6097,7 +6217,8 @@ function renderDebtsList(simResults) {
         const debtElt = document.createElement('div');
         debtElt.className = 'debt-card' +
             (debt.promoZeroInterest ? ' promo-card' : '') +
-            (paidState ? ' card-paid' : '');
+            (paidState ? ' card-paid' : '') +
+            (isTarget ? ' snowball-target-card' : '');
         debtElt.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${globalIdx * 0.09}s`;
 
         const promoBadge = debt.promoZeroInterest ? '<span class="promo-badge">🎉 0% Promo</span>' : '';
@@ -6153,7 +6274,7 @@ function renderDebtsList(simResults) {
             <div class="debt-name">${escHtml(debt.name)}</div>
             <div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.35rem;">${typeBadge}${promoBadge}${autoBadge}</div>
             ${targetBadge}
-            <div class="debt-detail"><span class="debt-detail-label">Balance</span><span class="debt-detail-value">${formatMoney(debt.balance)}</span></div>
+            <div class="debt-detail debt-balance-row"><span class="debt-detail-label">Balance</span><span class="debt-detail-value debt-balance-value">${formatMoney(debt.balance)}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Interest Rate</span><span class="debt-detail-value">${rateDisplay}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Min Payment</span><span class="debt-detail-value">${formatMoney(debt.minPayment)} ${minPayNote}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Due Day</span><span class="debt-detail-value">${formatOrdinal(debt.dueDay||1)} of each month</span></div>
@@ -6606,7 +6727,7 @@ function renderPaymentPlan() {
     const _checkpoints  = archiveData ? (archiveData.checkpoints    || []) : checkpoints;
     const _startBal     = archiveData ? (archiveData.startingBalance || 0)  : startingBalance;
     const _paidStatus   = archiveData ? (archiveData.paidStatus      || {}) : paidStatus;
-    const _monthKey     = archiveData ? archiveData.month : currentMonthKey();
+    const _monthKey     = archiveData ? archiveData.month : (workingMonthKey || currentMonthKey());
 
     // ── Month title & navigation ───────────────────────────────────────────────
     const monthTitleEl = _root.getElementById('payment-plan-month-title');
@@ -6660,17 +6781,20 @@ function renderPaymentPlan() {
     });
 
     const sortedDebts   = getStrategyOrder(debts.filter(d => d.balance > 0), strategy);
-    const totalMinPay   = sortedDebts.reduce((s,d) => s + d.minPayment, 0);
+    const _overrides    = isArchiveView ? {} : minPayOverrides;
+    const totalMinPay   = sortedDebts.reduce((s,d) => s + (_overrides[d.id] ?? d.minPayment), 0);
     const totalInc      = _income.reduce((s,e) => s + e.amount, 0);
     const totalRec      = _costs.filter(c => isCostDueInMonth(c, _monthKey)).reduce((s,c) => s + c.amount, 0);
     const extra         = Math.max(0, totalInc - totalRec - totalMinPay);
     const targetId      = sortedDebts[0]?.id;
 
     sortedDebts.forEach(debt => {
-        const day    = debt.dueDay || 1;
+        const day      = debt.dueDay || 1;
         const isTarget = debt.id === targetId;
-        const amount = isTarget ? Math.min(debt.balance, debt.minPayment + extra) : Math.min(debt.balance, debt.minPayment);
-        events.push({ type:'debt', id: debt.id, name: debt.name, day, amount, minPayment: debt.minPayment, balance: debt.balance, isSnowballTarget: isTarget, autoPay: !!debt.autoPay, sortKey: day * 1000 + 2 });
+        const effMin   = _overrides[debt.id] ?? debt.minPayment;
+        const amount   = isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
+        const hasOverride = debt.id in _overrides;
+        events.push({ type:'debt', id: debt.id, name: debt.name, day, amount, minPayment: debt.minPayment, effMin, hasOverride, balance: debt.balance, isSnowballTarget: isTarget, autoPay: !!debt.autoPay, sortKey: day * 1000 + 2 });
     });
 
     events.sort((a,b) => a.sortKey - b.sortKey);
@@ -6798,7 +6922,17 @@ function renderPaymentPlan() {
     section.style.display = 'block';
 
     // --- UI CREATION: Build the visual rows ---
+    let todayMarkerInserted = isArchiveView; // skip in archive view
     schedule.forEach((item, index) => {
+        // Insert "Today" marker before the first item on or after today
+        if (!todayMarkerInserted && (item.day || 1) >= currentDay) {
+            todayMarkerInserted = true;
+            const marker = document.createElement('div');
+            marker.className = 'schedule-today-marker';
+            marker.innerHTML = `<span class="schedule-today-label">Today — ${today.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</span>`;
+            list.appendChild(marker);
+        }
+
         const itemPaid = _paidStatus[item.id];
         const row      = document.createElement('div');
 
@@ -6908,21 +7042,43 @@ function renderPaymentPlan() {
             }
         }
 
+        // Override badge + button (debt rows in current month only)
+        const overrideBadge = (!isArchiveView && item.type === 'debt' && item.hasOverride)
+            ? `<span class="schedule-badge schedule-badge-override" title="Min payment overridden this month">✏ Override</span>`
+            : '';
+
+        const overrideBtnHtml = (!isArchiveView && item.type === 'debt')
+            ? `<button class="btn-override-min" data-id="${item.id}" data-min="${item.minPayment}" data-current="${item.effMin}" title="${item.hasOverride ? 'Edit or clear override' : 'Override minimum payment'}">${item.hasOverride ? 'Override ✏' : 'Override'}</button>`
+            : '';
+
+        // Inline override form (rendered into row, shown/hidden via JS)
+        const overrideFormHtml = (!isArchiveView && item.type === 'debt') ? `
+            <div class="override-form" id="override-form-${item.id}" style="display:none;">
+                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-top:0.5rem; padding:0.5rem 0.75rem; background:rgba(91,127,255,0.07); border:1px solid rgba(91,127,255,0.25); border-radius:6px;">
+                    <span style="font-size:0.78rem; color:var(--text-secondary); white-space:nowrap;">Min payment <span style="color:var(--text-primary);">($${item.minPayment.toFixed(2)})</span> →</span>
+                    <input class="override-input" type="number" min="0" step="0.01" placeholder="${item.effMin.toFixed(2)}" value="${item.hasOverride ? item.effMin.toFixed(2) : ''}" style="width:90px; padding:0.2rem 0.4rem; border-radius:4px; border:1px solid rgba(91,127,255,0.4); background:rgba(7,6,26,0.6); color:var(--text-primary); font-size:0.85rem;">
+                    <button class="btn-override-save" data-id="${item.id}" style="padding:0.2rem 0.6rem; font-size:0.78rem; font-weight:600; border-radius:4px; border:1px solid rgba(91,127,255,0.5); background:rgba(91,127,255,0.15); color:#c4d0ff; cursor:pointer;">Save</button>
+                    ${item.hasOverride ? `<button class="btn-override-clear" data-id="${item.id}" style="padding:0.2rem 0.6rem; font-size:0.78rem; font-weight:600; border-radius:4px; border:1px solid rgba(239,68,68,0.4); background:rgba(239,68,68,0.1); color:#fca5a5; cursor:pointer;">Clear</button>` : ''}
+                    <button class="btn-override-cancel" data-id="${item.id}" style="padding:0.2rem 0.5rem; font-size:0.78rem; background:transparent; border:none; color:var(--text-secondary); cursor:pointer;">✕</button>
+                </div>
+            </div>` : '';
+
+        const detailText = item.type === 'debt' && item.isSnowballTarget ? 'Minimum + Snowball Extra'
+            : item.type === 'debt' ? 'Minimum Payment'
+            : item.type === 'recurring' && (item.isCard || item.paymentMethod === 'card') ? 'Charged to credit card'
+            : item.type === 'recurring' ? 'Paid from bank account'
+            : item.type === 'checkpoint' ? 'Resets the running balance for calculations below'
+            : '';
+
         row.innerHTML = `
             <div class="schedule-date-col"><span class="schedule-icon">${icon}</span><span class="schedule-day">${dayLabel}</span></div>
             <div class="schedule-info-col">
                 <div class="schedule-name" style="margin-bottom:0.25rem;">${escHtml(item.name)}</div>
                 <div class="schedule-badges" style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.25rem;">
-                    ${typeBadge} ${statusBadges} ${paidBadge}
+                    ${typeBadge} ${statusBadges} ${paidBadge} ${overrideBadge}
                 </div>
-                <div class="schedule-detail">${
-                    item.type === 'debt' && item.isSnowballTarget ? 'Minimum + Snowball Extra'
-                    : item.type === 'debt' ? 'Minimum Payment'
-                    : item.type === 'recurring' && (item.isCard || item.paymentMethod === 'card') ? 'Charged to credit card'
-                    : item.type === 'recurring' ? 'Paid from bank account'
-                    : item.type === 'checkpoint' ? 'Resets the running balance for calculations below'
-                    : ''
-                }</div>
+                <div class="schedule-detail">${detailText}</div>
+                ${overrideFormHtml}
             </div>
             <div class="schedule-right-col">
                 <div class="schedule-amount-col ${amountClass}"><span class="col-label">${amountLabel}</span>${sign}$${item.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
@@ -6931,11 +7087,20 @@ function renderPaymentPlan() {
 
             <div class="schedule-action-col" style="display:flex; flex-direction:column; gap:0.35rem; align-items:flex-end; justify-content:center;">
                 ${paidBtnHtml}
+                ${overrideBtnHtml}
                 ${editBtnHtml}
             </div>`;
 
         list.appendChild(row);
     });
+
+    // If every item was before today (end-of-month edge case), append marker at the bottom
+    if (!todayMarkerInserted) {
+        const marker = document.createElement('div');
+        marker.className = 'schedule-today-marker';
+        marker.innerHTML = `<span class="schedule-today-label">Today — ${today.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</span>`;
+        list.appendChild(marker);
+    }
 
     const totalIncEl  = _root.getElementById('payment-plan-total-income');
     const totalExpEl  = _root.getElementById('payment-plan-total-expenses');
