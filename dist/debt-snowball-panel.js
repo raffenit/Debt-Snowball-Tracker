@@ -14,6 +14,19 @@
  *       module_url: /hacsfiles/debt-snowball-ha/debt-snowball-panel.js
  */
 
+// Version marker - check console to verify which file is loaded
+const PANEL_VERSION = '2.1.0-checkpoint-edit';
+const PANEL_BUILD_DATE = '2025-04-18';
+
+// Detect installation path for debugging
+const currentScript = document.currentScript;
+const scriptSrc = currentScript?.src || 'unknown';
+const installType = scriptSrc.includes('hacsfiles') ? 'HACS' :
+                    scriptSrc.includes('local') ? 'Manual (/local/)' :
+                    scriptSrc.includes('community') ? 'HACS (community)' : 'Unknown';
+console.info(`📊 Debt Snowball Tracker v${PANEL_VERSION} (${PANEL_BUILD_DATE})`);
+console.info(`   Loaded from: ${installType} (${scriptSrc})`);
+
 const PANEL_CSS = `:root {
     --bg-color: #07061a;           /* Deep midnight */
     --card-bg: #0f0d2a;            /* Dark indigo */
@@ -3439,6 +3452,7 @@ debt-snowball-panel .tab-panel.active {
 const PANEL_HTML = `<div class="app-container">
         <header class="header">
             <h1>Debt Snowball Tracker</h1>
+            <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})" style="font-size:0.65rem;color:var(--text-secondary);opacity:0.6;margin-left:auto;margin-right:0.5rem;">v${PANEL_VERSION}</span>
             <div class="header-actions">
                 <button id="history-btn" class="btn btn-secondary" style="background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.4); color: #c084fc;">📅 History</button>
                 <label for="import-file" class="btn btn-secondary" style="background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: #60a5fa;">
