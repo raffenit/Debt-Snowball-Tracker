@@ -69,7 +69,7 @@ export function runSimulation(strat) {
     const perDebtMonthly = {};
     simDebts.forEach(d => { perDebtMonthly[d.id] = [d.balance]; });
 
-    while (simDebts.some(d => d.balance > 0) && monthsElapsed < MAX_MONTHS) {
+    while (simDebts.some(d => d.balance > 0) && monthsElapsed < MAX_SIMULATION_MONTHS) {
         monthsElapsed++;
         let availableCash = effectiveBudget + (monthsElapsed === 1 ? startingBalance : 0); // eslint-disable-line no-unused-vars
 

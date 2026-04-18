@@ -3516,6 +3516,14 @@ const PANEL_HTML = `<div class="app-container">
                                 <span id="month-overview-expenses" style="font-size: 1.1rem; font-weight: 600; color: var(--expense-color);">-</span>
                             </div>
                         </div>
+
+                        <!-- Spending Budgets Summary (only shows if budgets exist) -->
+                        <div id="month-overview-budgets" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(99,102,241,0.15);">
+                            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">💳 Spending Budgets (Card Charges)</div>
+                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem;" id="month-overview-budgets-grid">
+                            </div>
+                        </div>
+
                         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(99,102,241,0.15); display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                             <!-- Next Month Start -->
                             <div style="display: flex; flex-direction: column; gap: 0.2rem;">
@@ -7052,6 +7060,54 @@ function renderPaymentPlan() {
             bufferIcon = '⚡';
         }
         ovBuffer.innerHTML = `<span style="color:${bufferColor};">${bufferIcon} ${formatMoney(bufferAmount)}</span>`;
+    }
+
+    // --- Spending Budgets Summary ---
+    const ovBudgetsContainer = _root.getElementById('month-overview-budgets');
+    const ovBudgetsGrid = _root.getElementById('month-overview-budgets-grid');
+
+    if (ovBudgetsContainer && ovBudgetsGrid && spendingBudgets.length > 0) {
+        ovBudgetsContainer.style.display = 'block';
+
+        // Calculate budget status for each
+        const budgetSummaries = spendingBudgets.map(budget => {
+            const budgeted = getBudgetAmount(budget);
+            const spent = (budget.expenses || []).reduce((s, e) => s + e.amount, 0);
+            const remaining = budgeted - spent;
+            const percentUsed = budgeted > 0 ? (spent / budgeted) * 100 : 0;
+            return { name: budget.name, budgeted, spent, remaining, percentUsed };
+        });
+
+        // Render grid
+        ovBudgetsGrid.innerHTML = budgetSummaries.map(b => {
+            const colorClass = b.percentUsed > 100 ? 'color: var(--danger-color);' :
+                              b.percentUsed > 80 ? 'color: var(--warning-color);' :
+                              'color: var(--success-color);';
+            const statusIcon = b.percentUsed > 100 ? '🔴' : b.percentUsed > 80 ? '⚡' : '✓';
+
+            return `
+                <div style="background: rgba(7,6,26,0.4); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(99,102,241,0.2);">
+                    <div style="font-size: 0.65rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${b.name}</div>
+                    <div style="font-size: 0.9rem; font-weight: 600; ${colorClass}">${statusIcon} ${formatMoney(b.remaining)}</div>
+                    <div style="font-size: 0.6rem; color: var(--text-secondary);">of ${formatMoney(b.budgeted)}</div>
+                </div>
+            `;
+        }).join('');
+
+        // Add total row
+        const totalBudgeted = budgetSummaries.reduce((s, b) => s + b.budgeted, 0);
+        const totalSpent = budgetSummaries.reduce((s, b) => s + b.spent, 0);
+        const totalRemaining = totalBudgeted - totalSpent;
+
+        ovBudgetsGrid.innerHTML += `
+            <div style="background: rgba(168,85,247,0.1); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(168,85,247,0.3);">
+                <div style="font-size: 0.65rem; color: var(--text-secondary);">TOTAL BUDGETS</div>
+                <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">${formatMoney(totalRemaining)}</div>
+                <div style="font-size: 0.6rem; color: var(--text-secondary);">remaining</div>
+            </div>
+        `;
+    } else if (ovBudgetsContainer) {
+        ovBudgetsContainer.style.display = 'none';
     }
 
     section.style.display = 'block';
