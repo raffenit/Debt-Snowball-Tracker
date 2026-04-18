@@ -4224,6 +4224,16 @@ async function loadBackendData() {
 
             // Only archive if the calendar has moved *past* the stored month (not when user advanced ahead).
             if (prevMonth && monthKeyToIndex(thisMonth) > monthKeyToIndex(prevMonth)) {
+                // Calculate final balance (next month's starting balance)
+                const _cp = result.checkpoints || [];
+                const _inc = result.incomeEntries || [];
+                const _cst = (result.recurringCosts || []).filter(c => isCostDueInMonth(c, prevMonth));
+                const day1Cp = _cp.find(cp => cp.day === 1);
+                let cashPool = day1Cp ? day1Cp.amount : 0;
+                const totalIncome = _inc.reduce((s, e) => s + e.amount, 0);
+                const totalCosts = _cst.reduce((s, c) => s + c.amount, 0);
+                const finalBalance = cashPool + totalIncome - totalCosts;
+
                 // Archive the closing month before clearing
                 const archive = {
                     month:          prevMonth,
@@ -4235,13 +4245,17 @@ async function loadBackendData() {
                     paidStatus:     result.paidStatus     || {},
                     totalIncome:    (result.incomeEntries  || []).reduce((s, e) => s + e.amount, 0),
                     totalCosts:     (result.recurringCosts || []).filter(c => isCostDueInMonth(c, prevMonth)).reduce((s, c) => s + c.amount, 0),
+                    finalBalance,
                 };
                 monthlyArchives.unshift(archive);
                 if (monthlyArchives.length > 24) monthlyArchives.pop();
 
                 // Clear month-specific data; prune one-time costs; advance interval nextDueMonth
                 incomeEntries  = generateRecurringIncomeForMonth(result.incomeEntries || [], thisMonth);
-                checkpoints    = [];
+                // Create day 1 checkpoint with the final balance from previous month
+                checkpoints    = finalBalance > 0
+                    ? [{ id: 'cp_' + Date.now(), day: 1, amount: finalBalance }]
+                    : [];
                 recurringCosts = recurringCosts
                     .filter(c => (c.category || 'other') !== 'one-time')
                     .map(c => {
@@ -4339,9 +4353,21 @@ async function advanceToNextMonth() {
     monthlyArchives.unshift(archive);
     if (monthlyArchives.length > 24) monthlyArchives.pop();
 
+    // Calculate final balance for next month's day 1 checkpoint
+    const day1CpCurrent = checkpoints.find(cp => cp.day === 1);
+    let currentCash = day1CpCurrent ? day1CpCurrent.amount : 0;
+    const currentIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const currentCosts = recurringCosts
+        .filter(c => isCostDueInMonth(c, currentKey) && (c.category || 'other') !== 'one-time')
+        .reduce((s, c) => s + c.amount, 0);
+    const finalBalanceForNext = currentCash + currentIncome - currentCosts;
+
     // Reset month-specific data, prune one-time costs, advance interval nextDueMonth
     incomeEntries  = generateRecurringIncomeForMonth(incomeEntries, nextKey);
-    checkpoints    = [];
+    // Create day 1 checkpoint with the calculated final balance
+    checkpoints    = finalBalanceForNext > 0
+        ? [{ id: 'cp_' + Date.now(), day: 1, amount: finalBalanceForNext }]
+        : [];
     recurringCosts = recurringCosts
         .filter(c => (c.category || 'other') !== 'one-time')
         .map(c => {
@@ -6036,11 +6062,6 @@ function updateHASensors(simResults, schedule) {
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 function renderUI() {
-    const startingBalanceInput = _root.getElementById('starting-bank-balance');
-    if (startingBalanceInput && document.activeElement !== startingBalanceInput) {
-        startingBalanceInput.value = startingBalance.toFixed(2);
-    }
-
     // Render checkpoints list
     renderCheckpointsList();
 
@@ -6557,10 +6578,14 @@ function runSimulation(strat) {
     const perDebtMonthly = {};
     simDebts.forEach(d => { perDebtMonthly[d.id] = [d.balance]; });
 
+    // Get day 1 checkpoint amount for initial cash
+    const day1Checkpoint = checkpoints.find(cp => cp.day === 1);
+    const day1Balance = day1Checkpoint ? day1Checkpoint.amount : 0;
+
     while (simDebts.some(d => d.balance > 0) && monthsElapsed < MAX_MONTHS) {
         monthsElapsed++;
         // Add starting cash in first month to the monthly available amount
-        let availableCash = effectiveBudget + (monthsElapsed === 1 ? startingBalance : 0); // eslint-disable-line no-unused-vars
+        let availableCash = effectiveBudget + (monthsElapsed === 1 ? day1Balance : 0); // eslint-disable-line no-unused-vars
 
         // 1. Accrue interest
         simDebts.forEach(d => {
