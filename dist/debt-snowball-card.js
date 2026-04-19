@@ -1982,6 +1982,49 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border-color: rgba(168,85,247,0.65);
     color: #e9d5ff;
 }
+
+/* Min payment override button (in schedule rows) */
+.btn-override-min {
+    background: linear-gradient(135deg, rgba(168,85,247,0.12) 0%, rgba(91,127,255,0.08) 100%);
+    border: 1px solid rgba(168,85,247,0.3);
+    color: #c084fc;
+    border-radius: 20px;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+.btn-override-min:hover {
+    background: linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(91,127,255,0.15) 100%);
+    border-color: rgba(168,85,247,0.5);
+    color: #d8b4fe;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(168,85,247,0.15);
+}
+
+/* Budget card override button */
+.btn-override-budget {
+    background: linear-gradient(135deg, rgba(168,85,247,0.12) 0%, rgba(91,127,255,0.08) 100%);
+    border: 1px solid rgba(168,85,247,0.3);
+    color: #c084fc;
+    border-radius: 20px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+.btn-override-budget:hover {
+    background: linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(91,127,255,0.15) 100%);
+    border-color: rgba(168,85,247,0.5);
+    color: #d8b4fe;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(168,85,247,0.15);
+}
+
 .budget-total-row {
     display: flex;
     justify-content: flex-end;
