@@ -558,20 +558,20 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }
 
     /* Larger touch targets on tablet */
-    debt-snowball-panel .btn {
+    debt-snowball-card .btn {
         padding: 0.75rem 1.375rem;
         min-height: 44px;
     }
 
-    debt-snowball-panel .tab-btn {
+    debt-snowball-card .tab-btn {
         padding: 0.75rem 1.25rem;
         min-height: 44px;
     }
 
-    debt-snowball-panel input[type="number"],
-    debt-snowball-panel input[type="text"],
-    debt-snowball-panel input[type="date"],
-    debt-snowball-panel select {
+    debt-snowball-card input[type="number"],
+    debt-snowball-card input[type="text"],
+    debt-snowball-card input[type="date"],
+    debt-snowball-card select {
         padding: 0.875rem 1rem;
         min-height: 48px;
     }
@@ -640,18 +640,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         font-size: 0.9rem;
     }
 
-    debt-snowball-panel input[type="number"],
-    debt-snowball-panel input[type="text"],
-    debt-snowball-panel input[type="date"],
-    debt-snowball-panel select {
+    debt-snowball-card input[type="number"],
+    debt-snowball-card input[type="text"],
+    debt-snowball-card input[type="date"],
+    debt-snowball-card select {
         padding: 0.875rem 1rem;
         font-size: 1rem;
         min-height: 48px;
     }
 
-    .btn {
+    debt-snowball-card .btn {
         min-height: 44px;
         font-size: 0.9rem;
+    }
+
+    debt-snowball-card .tab-btn {
+        padding: 0.625rem 0.5rem;
+        font-size: 0.85rem;
     }
 
     .modal {
@@ -798,7 +803,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         font-size: 0.95rem;
     }
 
-    debt-snowball-panel .tab-panel.active {
+    debt-snowball-card .tab-panel.active {
         gap: 1.5rem;
     }
 
@@ -969,34 +974,34 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* Animate section headers when tab becomes active */
-debt-snowball-panel .tab-panel.active .section-header {
+debt-snowball-card .tab-panel.active .section-header {
     animation: slideInLeft 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-debt-snowball-panel .tab-panel.active .section-header:nth-of-type(2) {
+debt-snowball-card .tab-panel.active .section-header:nth-of-type(2) {
     animation-delay: 0.05s;
 }
 
-debt-snowball-panel .tab-panel.active .section-header:nth-of-type(3) {
+debt-snowball-card .tab-panel.active .section-header:nth-of-type(3) {
     animation-delay: 0.1s;
 }
 
 /* Animate summary bars at the bottom of each section */
-debt-snowball-panel .tab-panel.active .income-summary,
-debt-snowball-panel .tab-panel.active .debt-payments-summary,
-debt-snowball-panel .tab-panel.active .recurring-cost-summary {
+debt-snowball-card .tab-panel.active .income-summary,
+debt-snowball-card .tab-panel.active .debt-payments-summary,
+debt-snowball-card .tab-panel.active .recurring-cost-summary {
     animation: fadeIn 0.4s ease backwards 0.3s;
 }
 
 /* Animate stat boxes on payment plan tab */
-debt-snowball-panel .tab-panel.active .stat-box {
+debt-snowball-card .tab-panel.active .stat-box {
     animation: cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-debt-snowball-panel .tab-panel.active .stat-box:nth-child(1) { animation-delay: 0.05s; }
-debt-snowball-panel .tab-panel.active .stat-box:nth-child(2) { animation-delay: 0.12s; }
-debt-snowball-panel .tab-panel.active .stat-box:nth-child(3) { animation-delay: 0.19s; }
-debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0.26s; }
+debt-snowball-card .tab-panel.active .stat-box:nth-child(1) { animation-delay: 0.05s; }
+debt-snowball-card .tab-panel.active .stat-box:nth-child(2) { animation-delay: 0.12s; }
+debt-snowball-card .tab-panel.active .stat-box:nth-child(3) { animation-delay: 0.19s; }
+debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0.26s; }
 
 /* ===== Warning Button ===== */
 .btn-warning {
@@ -3311,11 +3316,11 @@ debt-snowball-panel .tab-panel.active .stat-box:nth-child(4) { animation-delay: 
 }
 
 /* ===== Tab Panels ===== */
-debt-snowball-panel .tab-panel {
+.tab-panel {
     display: none !important;
 }
 
-debt-snowball-panel .tab-panel.active {
+.tab-panel.active {
     display: flex !important;
     flex-direction: column;
     gap: 2.5rem;
@@ -4081,6 +4086,10 @@ class DebtSnowballCard extends HTMLElement {
     }
   
     connectedCallback() {
+        // Guard against multiple injections when HA re-renders
+        if (this._initialized) return;
+        this._initialized = true;
+
         // Load Google Fonts
         if (!document.querySelector('link[data-debt-snowball-font]')) {
             const fontLink = document.createElement('link');
