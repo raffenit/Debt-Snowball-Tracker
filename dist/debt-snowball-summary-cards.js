@@ -10,6 +10,19 @@
  */
 
 const SUMMARY_CSS = `
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+ha-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 :root {
   --ds-bg: #0f0d2a;
   --ds-card-bg: #13113a;

@@ -27,7 +27,23 @@ const installType = scriptSrc.includes('hacsfiles') ? 'HACS' :
 console.info(`📊 Debt Snowball Tracker v${PANEL_VERSION} (${PANEL_BUILD_DATE})`);
 console.info(`   Loaded from: ${installType} (${scriptSrc})`);
 
-const PANEL_CSS = `:root {
+const PANEL_CSS = `
+:host {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+}
+
+ha-card {
+    width: 100%;
+    height: 100%;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+:root {
     --bg-color: #07061a;           /* Deep midnight */
     --card-bg: #0f0d2a;            /* Dark indigo */
     --card-bg-2: #13113a;          /* Slightly lighter indigo */
@@ -57,6 +73,12 @@ const PANEL_CSS = `:root {
     padding: 0;
 }
 
+debt-snowball-card {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
 body {
     font-family: 'DM Sans', 'Outfit', ui-sans-serif, system-ui, sans-serif;
     background-color: var(--bg-color);
@@ -65,12 +87,15 @@ body {
         radial-gradient(ellipse 40% 30% at 80% 80%, rgba(40, 60, 180, 0.12) 0%, transparent 60%);
     color: var(--text-primary);
     line-height: 1.5;
+    min-height: 100vh;
 }
 
 .app-container {
+    width: 100%;
     max-width: 100%;
-    margin: 0 auto;
-    padding: 2rem 1rem;
+    margin: 0;
+    padding: 2rem;
+    min-height: 100vh;
 }
 
 .header {
