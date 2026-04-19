@@ -4574,6 +4574,7 @@ async function loadBackendData() {
                     incomeEntries:  result.incomeEntries  || [],
                     recurringCosts: result.recurringCosts || [],
                     checkpoints:    result.checkpoints    || [],
+                    debts:          result.debts          || [],
                     startingBalance: result.startingBalance || 0,
                     paidStatus:     result.paidStatus     || {},
                     totalIncome:    (result.incomeEntries  || []).reduce((s, e) => s + e.amount, 0),
@@ -4678,6 +4679,7 @@ async function advanceToNextMonth() {
         incomeEntries:  [...incomeEntries],
         recurringCosts: [...recurringCosts],
         checkpoints:    [...checkpoints],
+        debts:          debts.map(d => ({...d})),
         startingBalance,
         paidStatus:     { ...paidStatus },
         totalIncome:    incomeEntries.reduce((s, e) => s + e.amount, 0),
@@ -6678,13 +6680,19 @@ function renderDebtsList(simResults) {
     const debtsSummaryEl    = _root.getElementById('debts-summary');
     const mortgageToggleBtn = _root.getElementById('mortgage-toggle-btn');
 
-    const hasMortgage = debts.some(d => d.type === 'mortgage');
+    // ── Archive-view wiring ────────────────────────────────────────────────────
+    const isArchiveView = viewingArchiveIndex !== null && !!monthlyArchives[viewingArchiveIndex];
+    const archiveData   = isArchiveView ? monthlyArchives[viewingArchiveIndex] : null;
+    const _debts        = archiveData ? (archiveData.debts || debts) : debts;
+    const _paidStatus   = archiveData ? (archiveData.paidStatus || {}) : paidStatus;
+
+    const hasMortgage = _debts.some(d => d.type === 'mortgage');
     if (mortgageToggleBtn) {
         mortgageToggleBtn.style.display = hasMortgage ? '' : 'none';
         mortgageToggleBtn.textContent   = showMortgage ? 'Hide Mortgage' : 'Show Mortgage';
     }
 
-    if (debts.length === 0) {
+    if (_debts.length === 0) {
         if (debtsSummaryEl) debtsSummaryEl.textContent = 'Total Debt: $0.00';
         debtsListContainer.innerHTML = `
             <div class="empty-state">
@@ -6697,13 +6705,13 @@ function renderDebtsList(simResults) {
         return;
     }
 
-    const totalDebt = debts.reduce((sum, d) => sum + d.balance, 0);
+    const totalDebt = _debts.reduce((sum, d) => sum + d.balance, 0);
     if (debtsSummaryEl) {
         debtsSummaryEl.textContent = `Total Debt: $${totalDebt.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     }
 
     debtsListContainer.style.display = 'block';
-    const ordered    = getStrategyOrder(debts, strategy);
+    const ordered    = getStrategyOrder(_debts, strategy);
     const currentDay = new Date().getDate();
 
     // Apply mortgage filter; keep global order index for order badge numbers
@@ -6719,7 +6727,7 @@ function renderDebtsList(simResults) {
         const isPastDue    = (debt.dueDay || 1) <= currentDay;
         const payoffMonths = simResults?.debtPayoffMonths?.[debt.id];
         const isTarget     = debt.id === targetId;
-        const paidState    = paidStatus[debt.id];
+        const paidState    = _paidStatus[debt.id];
 
         const debtElt = document.createElement('div');
         debtElt.className = 'debt-card' +
@@ -7021,12 +7029,47 @@ function renderVisualization(simResults) {
     const payoffBoxAlt      = _root.getElementById('stat-payoff-box');
     const windfallBar       = _root.getElementById('windfall-bar');
 
-    const initialTotalDebt = debts.reduce((s,d) => s + d.balance, 0);
+    // Get archive data if in archive view
+    const isArchiveViewTimeline = viewingArchiveIndex !== null && !!monthlyArchives[viewingArchiveIndex];
+    const archiveDataForDebt = isArchiveViewTimeline ? monthlyArchives[viewingArchiveIndex] : null;
+    const debtsForCalc = archiveDataForDebt ? (archiveDataForDebt.debts || debts) : debts;
+    
+    const initialTotalDebt = debtsForCalc.reduce((s,d) => s + d.balance, 0);
     statTotalDebt.textContent = formatMoney(initialTotalDebt);
 
     stratDesc.textContent = strategy === 'snowball'
         ? 'Snowball: paying the smallest balance first. Quick wins build momentum and keep you motivated.'
         : 'Avalanche: paying the highest interest rate first. Mathematically optimal — minimises total interest paid.';
+
+    // Show archive notice for historical months
+    if (isArchiveViewTimeline) {
+        countdownBox.style.display    = 'none';
+        payoffBoxAlt.style.display    = 'block';
+        _root.getElementById('stat-payoff-date-alt').textContent = 'Historical Data';
+        statTotalInterest.textContent = '-';
+        statSavingsBox.style.display  = 'none';
+        windfallBar.style.display     = 'none';
+        stopCountdown();
+        
+        const totalDebtArchive = (archiveDataForDebt.debts || []).reduce((s,d) => s + d.balance, 0);
+        
+        timelineChart.innerHTML = `
+            <div class="timeline-error-card" style="background: linear-gradient(145deg, rgba(91,127,255,0.08) 0%, rgba(168,85,247,0.05) 100%); border-color: rgba(91,127,255,0.2);">
+                <span class="timeline-error-icon">📅</span>
+                <div class="timeline-error-title">${formatMonthLabel(archiveDataForDebt.month)}</div>
+                <div class="timeline-error-message">
+                    This is a historical view. The timeline projection shows future payoff estimates based on <strong>current</strong> data, not historical snapshots.<br><br>
+                    <strong>Total Debt this month:</strong> ${formatMoney(totalDebtArchive)}<br>
+                    <strong>Income:</strong> ${formatMoney(archiveDataForDebt.totalIncome || 0)}<br>
+                    <strong>Costs:</strong> ${formatMoney(archiveDataForDebt.totalCosts || 0)}
+                </div>
+                <div class="timeline-error-actions">
+                    <button class="btn btn-primary" onclick="document.getElementById('plan-next-month-btn').click()">📅 Return to Current Month</button>
+                </div>
+            </div>`;
+        renderPaydownChart([], {});
+        return;
+    }
 
     if (debts.length === 0) {
         countdownBox.style.display    = 'none';
@@ -7283,6 +7326,7 @@ function renderPaymentPlan() {
     const _income       = archiveData ? (archiveData.incomeEntries  || []) : incomeEntries;
     const _costs        = archiveData ? (archiveData.recurringCosts || []) : recurringCosts;
     const _checkpoints  = archiveData ? (archiveData.checkpoints    || []) : checkpoints;
+    const _debts        = archiveData ? (archiveData.debts           || debts) : debts;
     const _startBal     = archiveData ? (archiveData.startingBalance || 0)  : startingBalance;
     const _paidStatus   = archiveData ? (archiveData.paidStatus      || {}) : paidStatus;
     const _monthKey     = archiveData ? archiveData.month : (workingMonthKey || currentMonthKey());
@@ -7339,7 +7383,7 @@ function renderPaymentPlan() {
         });
     });
 
-    const sortedDebts   = getStrategyOrder(debts.filter(d => d.balance > 0), strategy);
+    const sortedDebts   = getStrategyOrder(_debts.filter(d => d.balance > 0), strategy);
     const _overrides    = isArchiveView ? {} : minPayOverrides;
     const totalMinPay   = sortedDebts.reduce((s,d) => s + (_overrides[d.id] ?? d.minPayment), 0);
     const totalInc      = _income.reduce((s,e) => s + e.amount, 0);
