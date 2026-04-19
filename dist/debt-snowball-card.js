@@ -212,8 +212,21 @@ body {
     background-image: linear-gradient(145deg, var(--card-bg-2), var(--card-bg));
     border-radius: var(--radius);
     padding: 1.5rem 2rem;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255,255,255,0.04) inset;
+    box-shadow: 
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 1px 0 rgba(255,255,255,0.05) inset,
+        0 0 0 1px rgba(255,255,255,0.02);
     border: 1px solid var(--border-color);
+    transition: box-shadow 0.3s ease, transform 0.2s ease;
+}
+.card:hover {
+    box-shadow: 
+        0 16px 48px rgba(0, 0, 0, 0.55),
+        0 6px 16px rgba(0, 0, 0, 0.35),
+        0 1px 0 rgba(255,255,255,0.06) inset,
+        0 0 0 1px rgba(91,127,255,0.1);
+    transform: translateY(-2px);
 }
 
 h2 {
@@ -301,13 +314,20 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.22s ease, border-color 0.22s ease;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    box-shadow: 
+        0 6px 20px rgba(0, 0, 0, 0.35),
+        0 2px 6px rgba(0, 0, 0, 0.2),
+        0 0 0 1px rgba(255,255,255,0.02);
 }
 
 .debt-card:hover {
-    border-color: rgba(91,127,255,0.45);
-    transform: translateY(-3px);
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(91, 127, 255, 0.18), 0 0 24px rgba(91,127,255,0.06);
+    border-color: rgba(91,127,255,0.5);
+    transform: translateY(-4px);
+    box-shadow: 
+        0 20px 44px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(91, 127, 255, 0.25),
+        0 0 32px rgba(91,127,255,0.12),
+        0 0 64px rgba(91,127,255,0.06);
 }
 
 .debt-name {
@@ -1175,44 +1195,107 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 /* ===== Section Cards (Income / Recurring / Debts tab containers) ===== */
-.income-section, .recurring-section, .debts-section {
+.income-section, .recurring-section, .debts-section, .spending-budgets-section {
     background-color: var(--card-bg);
     background-image: linear-gradient(145deg, var(--card-bg-2), var(--card-bg));
     border-radius: var(--radius);
     padding: 1.5rem;
     border: 1px solid var(--border-color);
     margin-bottom: 1.5rem;
-    transition: box-shadow 0.2s ease;
+    transition: box-shadow 0.3s ease, transform 0.2s ease;
 }
 
-.income-section:hover, .recurring-section:hover, .debts-section:hover {
-    box-shadow: 0 12px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03);
+.income-section:hover, .recurring-section:hover, .debts-section:hover, .spending-budgets-section:hover {
+    box-shadow: 
+        0 16px 48px rgba(0,0,0,0.45),
+        0 0 0 1px rgba(255,255,255,0.05),
+        0 0 32px rgba(91,127,255,0.1);
+    transform: translateY(-2px);
 }
 
 .income-section {
     border-left: 4px solid var(--success-color);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(52,201,122,0.07) inset;
+    box-shadow: 
+        0 10px 36px rgba(0,0,0,0.45),
+        0 0 32px rgba(52,201,122,0.12) inset,
+        0 0 0 1px rgba(52,201,122,0.1);
+}
+.income-section:hover {
+    box-shadow: 
+        0 14px 44px rgba(0,0,0,0.5),
+        0 0 40px rgba(52,201,122,0.15) inset,
+        0 0 24px rgba(52,201,122,0.1);
 }
 
 .recurring-section {
     border-left: 4px solid var(--warning-color);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(240,160,80,0.07) inset;
+    box-shadow: 
+        0 10px 36px rgba(0,0,0,0.45),
+        0 0 32px rgba(240,160,80,0.12) inset,
+        0 0 0 1px rgba(240,160,80,0.1);
+}
+.recurring-section:hover {
+    box-shadow: 
+        0 14px 44px rgba(0,0,0,0.5),
+        0 0 40px rgba(240,160,80,0.15) inset,
+        0 0 24px rgba(240,160,80,0.1);
 }
 
 .debts-section {
     border-left: 4px solid var(--accent-color);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(91,127,255,0.07) inset;
+    box-shadow: 
+        0 10px 36px rgba(0,0,0,0.45),
+        0 0 32px rgba(91,127,255,0.12) inset,
+        0 0 0 1px rgba(91,127,255,0.1);
+}
+.debts-section:hover {
+    box-shadow: 
+        0 14px 44px rgba(0,0,0,0.5),
+        0 0 40px rgba(91,127,255,0.15) inset,
+        0 0 24px rgba(91,127,255,0.1);
+}
+
+.spending-budgets-section {
+    border-left: 4px solid #a855f7;
+    box-shadow: 
+        0 10px 36px rgba(0,0,0,0.45),
+        0 0 32px rgba(168,85,247,0.12) inset,
+        0 0 0 1px rgba(168,85,247,0.1);
+}
+.spending-budgets-section:hover {
+    box-shadow: 
+        0 14px 44px rgba(0,0,0,0.5),
+        0 0 40px rgba(168,85,247,0.15) inset,
+        0 0 24px rgba(168,85,247,0.1);
 }
 
 /* Budget tab card color accents */
 #bank-balances-card {
     border-left: 4px solid var(--success-color);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(52,201,122,0.07) inset;
+    box-shadow: 
+        0 10px 36px rgba(0,0,0,0.45),
+        0 0 32px rgba(52,201,122,0.12) inset,
+        0 0 0 1px rgba(52,201,122,0.1);
+}
+#bank-balances-card:hover {
+    box-shadow: 
+        0 14px 44px rgba(0,0,0,0.5),
+        0 0 40px rgba(52,201,122,0.15) inset,
+        0 0 20px rgba(52,201,122,0.1);
 }
 
 #payment-plan-section {
     border-left: 4px solid var(--accent-color);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 24px rgba(91,127,255,0.07) inset;
+    box-shadow: 
+        0 10px 36px rgba(0,0,0,0.45),
+        0 0 32px rgba(91,127,255,0.12) inset,
+        0 0 0 1px rgba(91,127,255,0.1);
+}
+#payment-plan-section:hover {
+    box-shadow: 
+        0 14px 44px rgba(0,0,0,0.5),
+        0 0 40px rgba(91,127,255,0.15) inset,
+        0 0 20px rgba(91,127,255,0.1);
 }
 
 /* ===== Recurring Due-This-Month Summary Bar ===== */
@@ -1456,22 +1539,38 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border: 1px solid var(--border-color);
     border-left: 3px solid var(--accent-color);
     border-radius: var(--radius);
-    margin-bottom: 0.75rem;
     overflow: hidden;
+    margin-bottom: 0.75rem;
     transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
     animation: cardReveal 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards 0s;
+    box-shadow: 
+        0 6px 20px rgba(0,0,0,0.35),
+        0 2px 6px rgba(0,0,0,0.2),
+        0 0 0 1px rgba(255,255,255,0.02);
 }
 .budget-card:hover {
-    box-shadow: 0 8px 24px rgba(0,0,0,0.3), 0 0 0 1px rgba(91,127,255,0.15);
-    transform: translateY(-1px);
+    box-shadow: 
+        0 14px 36px rgba(0,0,0,0.4),
+        0 0 0 1px rgba(91,127,255,0.2),
+        0 0 24px rgba(91,127,255,0.1);
+    transform: translateY(-3px);
+    border-color: rgba(91,127,255,0.4);
 }
 .budget-card.budget-over {
     border-left-color: var(--danger-color);
     border-color: rgba(239,68,68,0.35);
     animation: pulseGlow 2.5s ease-in-out infinite;
+    box-shadow: 
+        0 6px 20px rgba(0,0,0,0.35),
+        0 0 16px rgba(244,88,122,0.1),
+        0 0 0 1px rgba(244,88,122,0.08);
 }
 .budget-card.budget-over:hover {
-    box-shadow: 0 8px 24px rgba(244,88,122,0.2), 0 0 0 1px rgba(244,88,122,0.25);
+    box-shadow: 
+        0 14px 36px rgba(244,88,122,0.25),
+        0 0 0 1px rgba(244,88,122,0.3),
+        0 0 32px rgba(244,88,122,0.15);
+    border-color: rgba(244,88,122,0.5);
 }
 .budget-card-header {
     display: flex;
@@ -1750,6 +1849,26 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 .btn-sm {
     padding: 0.35rem 0.75rem;
     font-size: 0.8rem;
+}
+.btn-override {
+    background: linear-gradient(135deg, rgba(168,85,247,0.15) 0%, rgba(91,127,255,0.1) 100%);
+    border: 1px solid rgba(168,85,247,0.35);
+    color: #c084fc;
+    border-radius: 20px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+.btn-override:hover {
+    background: linear-gradient(135deg, rgba(168,85,247,0.25) 0%, rgba(91,127,255,0.18) 100%);
+    border-color: rgba(168,85,247,0.55);
+    color: #d8b4fe;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(168,85,247,0.2);
+}
+.btn-override.active {
+    background: linear-gradient(135deg, rgba(168,85,247,0.35) 0%, rgba(91,127,255,0.25) 100%);
+    border-color: rgba(168,85,247,0.65);
+    color: #e9d5ff;
 }
 .budget-total-row {
     display: flex;
@@ -3327,6 +3446,61 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     animation: fadeIn 0.3s ease;
 }
 
+/* ===== Month Header ===== */
+.month-header {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, rgba(91,127,255,0.1) 0%, rgba(168,85,247,0.08) 50%, rgba(91,127,255,0.1) 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(91,127,255,0.2);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 
+        0 8px 32px rgba(0,0,0,0.4),
+        0 0 48px rgba(91,127,255,0.08) inset,
+        0 0 0 1px rgba(255,255,255,0.03);
+}
+.month-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(91,127,255,0.6), rgba(168,85,247,0.6), rgba(91,127,255,0.6), transparent);
+    box-shadow: 0 0 12px rgba(91,127,255,0.4);
+}
+.month-header::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(91,127,255,0.6), rgba(168,85,247,0.6), rgba(91,127,255,0.6), transparent);
+    box-shadow: 0 0 12px rgba(91,127,255,0.4);
+}
+.month-header h1 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    background: linear-gradient(110deg, #a5b8ff 0%, #c084fc 50%, #a5b8ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0;
+    text-transform: uppercase;
+}
+.month-header .subtitle {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
 /* ===== Debt Modal Layout Update ===== */
 #debt-modal .modal-content {
     max-width: 700px;
@@ -3482,8 +3656,10 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
 const PANEL_HTML = `<div class="app-container">
         <header class="header">
-            <h1>Debt Snowball Tracker</h1>
-            <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})" style="font-size:0.65rem;color:var(--text-secondary);opacity:0.6;margin-left:auto;margin-right:0.5rem;">v${PANEL_VERSION}</span>
+            <div style="display:flex;flex-direction:column;align-items:flex-start;">
+                <h1>Debt Snowball Tracker</h1>
+                <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})" style="font-size:0.65rem;color:var(--text-secondary);opacity:0.6;margin-top:0.25rem;">v${PANEL_VERSION}</span>
+            </div>
             <div class="header-actions">
                 <button id="history-btn" class="btn btn-secondary" style="background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.4); color: #c084fc;">📅 History</button>
                 <label for="import-file" class="btn btn-secondary" style="background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: #60a5fa;">
@@ -3507,7 +3683,10 @@ const PANEL_HTML = `<div class="app-container">
 
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; gap:0.5rem;">
                     <button id="plan-prev-month-btn" class="btn btn-secondary" style="padding:0.3rem 0.7rem; font-size:0.8rem; white-space:nowrap; visibility:hidden;">← Previous</button>
-                    <h2 id="payment-plan-month-title" style="margin:0; text-align:center; flex:1;"></h2>
+                    <div class="month-header" style="flex:1; margin:0;">
+                        <h1 id="payment-plan-month-title"></h1>
+                        <div class="subtitle">Payment Plan</div>
+                    </div>
                     <button id="plan-next-month-btn" class="btn btn-primary" style="padding:0.3rem 0.7rem; font-size:0.8rem; white-space:nowrap; visibility:hidden;">Current Month →</button>
                 </div>
 
@@ -3601,11 +3780,27 @@ const PANEL_HTML = `<div class="app-container">
             </div>
 
             <div class="tab-panel" id="tab-income">
+                <div class="month-header">
+                    <h1 id="income-month-title"></h1>
+                    <div class="subtitle">Budget</div>
+                </div>
+
+                <section class="spending-budgets-section">
+                    <div class="section-header">
+                        <div>
+                            <h2>Spending Budgets</h2>
+                            <p class="subtitle" style="margin-bottom:0;">Track discretionary spending with category limits. Expenses clear at month end.</p>
+                        </div>
+                        <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
+                    </div>
+                    <div id="budgets-list" style="margin-top: 0.25rem;"></div>
+                </section>
+
                 <section class="income-section">
                     <div class="section-header">
                         <div>
-                            <h2>Monthly Income</h2>
-                            <p class="subtitle" style="margin-bottom:0;">Add each paycheck, deposit, or other income for the current month with its expected date.</p>
+                            <h2>Income</h2>
+                            <p class="subtitle" style="margin-bottom:0;">Add each paycheck, deposit, or other income for this month with its expected date.</p>
                         </div>
                         <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
                             <button id="advance-month-btn" class="btn btn-secondary" title="Archive this month and start fresh for next month early">⏭ Next Month</button>
@@ -3620,9 +3815,9 @@ const PANEL_HTML = `<div class="app-container">
                 <section class="recurring-section">
                     <div class="section-header">
                         <div>
-                            <h2>Monthly Bills & Expenses</h2>
+                            <h2>Bills & Expenses</h2>
                             <p class="subtitle" style="margin-bottom:0;">
-                                <strong>Monthly</strong> = Every month · 
+                                <strong>Recurring</strong> = Every month · 
                                 <strong>Quarterly</strong> = Every 3 months · 
                                 <strong>Annual</strong> = Once per year · 
                                 <strong style="color:var(--danger-color);">One-Time</strong> = This month only (deleted next month)
@@ -3635,20 +3830,13 @@ const PANEL_HTML = `<div class="app-container">
                         </div>
                     <div id="recurring-cost-summary" class="recurring-cost-summary" style="display:none"></div>
                 </section>
-
-                <section class="spending-budgets-section">
-                    <div class="section-header">
-                        <div>
-                            <h2>Spending Budgets</h2>
-                            <p class="subtitle" style="margin-bottom:0;">Track discretionary spending against monthly limits. Expenses clear each month.</p>
-                        </div>
-                        <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
-                    </div>
-                    <div id="budgets-list" style="margin-top: 0.25rem;"></div>
-                </section>
             </div>
 
             <div class="tab-panel" id="tab-debts">
+                <div class="month-header">
+                    <h1 id="debts-month-title"></h1>
+                    <div class="subtitle">Your Debts</div>
+                </div>
                 <section class="debts-section">
                     <div class="section-header">
                         <div>
@@ -3667,6 +3855,10 @@ const PANEL_HTML = `<div class="app-container">
             </div>
 
             <div class="tab-panel" id="tab-timeline">
+                <div class="month-header">
+                    <h1 id="timeline-month-title"></h1>
+                    <div class="subtitle">Payoff Timeline</div>
+                </div>
                 <section class="visualization-section card">
                     <div class="viz-header">
                         <h2>Payoff Timeline</h2>
@@ -3925,7 +4117,7 @@ const PANEL_HTML = `<div class="app-container">
                     <input type="text" id="budget-name" required placeholder="e.g. Groceries">
                 </div>
                 <div class="input-group">
-                    <label for="budget-amount">Monthly Budget ($)</label>
+                    <label for="budget-amount">Budget Limit ($)</label>
                     <input type="number" id="budget-amount" min="0" step="0.01" required placeholder="e.g. 500">
                 </div>
                 <div class="input-group promo-toggle-group">
@@ -3940,7 +4132,7 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group" id="budget-exception-amount-group" style="display:none;">
                     <label for="budget-exception-amount">This Month's Override Amount ($)</label>
                     <input type="number" id="budget-exception-amount" min="0" step="0.01" placeholder="e.g. 750">
-                    <p class="subtitle" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem;">Reverts to the regular monthly budget next month.</p>
+                    <p class="subtitle" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem;">Reverts to the regular budget next month.</p>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-budget-modal">Cancel</button>
@@ -5499,7 +5691,7 @@ function renderSpendingBudgets() {
     if (spendingBudgets.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
-                No spending budgets yet.<br>Track discretionary spending by setting a monthly limit for each category.
+                No spending budgets yet.<br>Track discretionary spending by setting a spending limit for each category.
                 <br><button class="empty-cta-btn" id="empty-add-budget-btn">+ Add Your First Budget</button>
             </div>`;
         const emptyBtn = container.querySelector('#empty-add-budget-btn');
@@ -5626,7 +5818,7 @@ function renderSpendingBudgets() {
                 ${inlineForm}
                 <div class="budget-card-actions">
                     ${addExpBtn}
-                    <button class="btn btn-secondary btn-sm btn-override-budget" data-budget-id="${budget.id}">${hasExc ? '✎ Edit Override' : '⚡ Override Month'}</button>
+                    <button class="btn btn-sm btn-override btn-override-budget" data-budget-id="${budget.id}">${hasExc ? '✎ Edit' : '⚡ Override'}</button>
                     <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}">✎ Edit</button>
                     <button class="btn btn-secondary btn-sm btn-delete-budget" data-budget-id="${budget.id}" style="margin-left:auto; border-color:var(--danger-color); color:var(--danger-color);">🗑 Delete</button>
                 </div>
@@ -6956,10 +7148,17 @@ function renderPaymentPlan() {
 
     // ── Month title & navigation ───────────────────────────────────────────────
     const monthTitleEl = _root.getElementById('payment-plan-month-title');
+    const incomeMonthEl = _root.getElementById('income-month-title');
+    const debtsMonthEl = _root.getElementById('debts-month-title');
+    const timelineMonthEl = _root.getElementById('timeline-month-title');
     const prevBtn      = _root.getElementById('plan-prev-month-btn');
     const nextBtn      = _root.getElementById('plan-next-month-btn');
 
-    if (monthTitleEl) monthTitleEl.textContent = formatMonthLabel(_monthKey) + ' — Payment Plan';
+    const monthDisplay = formatMonthLabel(_monthKey);
+    if (monthTitleEl) monthTitleEl.textContent = monthDisplay;
+    if (incomeMonthEl) incomeMonthEl.textContent = monthDisplay;
+    if (debtsMonthEl) debtsMonthEl.textContent = monthDisplay;
+    if (timelineMonthEl) timelineMonthEl.textContent = monthDisplay;
 
     if (prevBtn) {
         const prevIdx = isArchiveView ? viewingArchiveIndex + 1 : 0;
