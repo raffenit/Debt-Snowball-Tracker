@@ -64,7 +64,7 @@ describe('formatMoney', () => {
     test('one decimal place is padded', () => assert.equal(formatMoney(5.5), '$5.50'));
     test('zero', () => assert.equal(formatMoney(0), '$0.00'));
     test('large number has comma separators', () => assert.equal(formatMoney(1234567.89), '$1,234,567.89'));
-    test('negative value', () => assert.equal(formatMoney(-250.50), '$-250.50'));
+    test('negative value', () => assert.equal(formatMoney(-250.50), '-$250.50'));
     test('three decimal places are rounded', () => assert.equal(formatMoney(1.005), '$1.01'));
 });
 

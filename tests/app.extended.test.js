@@ -23,6 +23,7 @@ import {
     runSimulationWithWindfall,
     setDebts,
     setRecurringCosts,
+    setOneTimeCosts,
     setIncomeEntries,
     setStartingBalance,
 } from './helpers.js';
@@ -86,8 +87,9 @@ describe('card-charged recurring costs are excluded from effectiveBudget', () =>
         // Without one-time cost: effectiveBudget = 1500 - 0 = 1500, minPayment = 100, valid
         // With one-time cost of $2000: if counted, effectiveBudget would be negative
         // But one-time costs should NOT affect timeline projection
-        setRecurringCosts([
-            { id: 'r1', name: 'Emergency', amount: 2000, dueDay: 1, paymentMethod: 'direct', category: 'one-time', addedMonth: '2026-03' },
+        setRecurringCosts([]);
+        setOneTimeCosts([
+            { id: 'r1', name: 'Emergency', amount: 2000, dueDay: 1, paymentMethod: 'direct' },
         ]);
         const r = runSimulation('snowball');
         // Timeline should remain valid because one-time costs are excluded from effectiveBudget
@@ -328,6 +330,33 @@ describe('runSimulationWithWindfall cascades across multiple debts', () => {
         const r = runSimulationWithWindfall(0, 'snowball');
         assert.ok(r.monthsElapsed >= baseline.monthsElapsed,
             'zero windfall should not improve on baseline');
+    });
+
+    test('windfall larger than total debt pays everything off', () => {
+        const r = runSimulationWithWindfall(5000, 'snowball');
+        // When all debts are paid off, runSimulation returns invalid (no debts left)
+        assert.equal(r.valid, false, 'no debts remain to simulate');
+        const totalAllocated = r.allocation.reduce((s, a) => s + a.applied, 0);
+        assert.equal(totalAllocated, 1200, 'should only apply what was needed (200 + 1000)');
+    });
+
+    test('avalanche strategy applies windfall to highest-rate debt first', () => {
+        // d2 has higher rate (20% vs 10%), so avalanche targets d2 first
+        const r = runSimulationWithWindfall(600, 'avalanche');
+        const d1alloc = r.allocation.find(a => a.name === 'Small');
+        const d2alloc = r.allocation.find(a => a.name === 'Medium');
+        assert.ok(d2alloc, 'Medium should have allocation');
+        assert.equal(d2alloc.applied, 600); // all goes to highest-rate debt
+        assert.ok(!d1alloc || d1alloc.applied === 0, 'Small should get nothing');
+    });
+
+    test('windfall reduces months and interest vs baseline', () => {
+        const baseline = runSimulation('snowball');
+        const r = runSimulationWithWindfall(300, 'snowball');
+        assert.ok(r.monthsElapsed < baseline.monthsElapsed,
+            'windfall should reduce payoff time');
+        assert.ok(r.totalInterestPaid < baseline.totalInterestPaid,
+            'windfall should reduce total interest');
     });
 });
 

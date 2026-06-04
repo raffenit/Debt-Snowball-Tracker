@@ -7,11 +7,13 @@ import { currentMonthKey } from './date-utils.js';
 // ── State setters (mirrors app.js globals) ───────────────────────────────────
 let debts = [];
 let recurringCosts = [];
+let oneTimeCosts = [];
 let incomeEntries = [];
 let startingBalance = 0;
 
 export function setDebts(d)            { debts = d; }
 export function setRecurringCosts(c)   { recurringCosts = c; }
+export function setOneTimeCosts(c)     { oneTimeCosts = c; }
 export function setIncomeEntries(e)    { incomeEntries = e; }
 export function setStartingBalance(b)  { startingBalance = b; }
 
@@ -41,14 +43,12 @@ export function getStrategyOrder(debtList, strat) {
 // One-time costs are excluded because timeline projects multi-month future.
 export function runSimulation(strat) {
     const totalIncome          = incomeEntries.reduce((s,e) => s + e.amount, 0);
-    // For timeline projection, exclude one-time costs from effectiveBudget calculation
-    const monthlyCostsOnly     = recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
-    const totalRecurringDirect = monthlyCostsOnly.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurringCard   = monthlyCostsOnly.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurring       = monthlyCostsOnly.reduce((s,c) => s + c.amount, 0);
+    // Timeline projection uses recurring costs only; one-time costs are separate.
+    const totalRecurringDirect = recurringCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
+    const totalRecurringCard   = recurringCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
+    const totalRecurring       = recurringCosts.reduce((s,c) => s + c.amount, 0);
     // Only direct-payment costs reduce the immediate cash available for debt payoff;
     // card-charged costs are already folded into the card's minimum payment.
-    // Note: one-time costs are excluded because timeline projects multi-month future.
     const effectiveBudget      = totalIncome - totalRecurringDirect;
 
     if (debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {

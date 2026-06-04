@@ -21,6 +21,8 @@ export {
     generateBiweeklyForMonth,
     generateRecurringIncomeForMonth,
     intervalLabel,
+    keyToHtmlMonth,
+    htmlMonthToKey,
 } from '../src/date-utils.js';
 
 // Simulation engine
@@ -30,9 +32,15 @@ export {
     runSimulationWithWindfall,
     setDebts,
     setRecurringCosts,
+    setOneTimeCosts,
     setIncomeEntries,
     setStartingBalance,
 } from '../src/simulation.js';
+
+// Rollover logic
+export {
+    calculateMonthRollover,
+} from '../src/rollover.js';
 
 // Constants
 export {

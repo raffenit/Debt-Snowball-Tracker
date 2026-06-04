@@ -1,3 +1,4 @@
+// ─── 00-header.js ─────────────────────────────────────────────────────────────────
 /**
  * Debt Snowball Tracker — Home Assistant Lovelace Card
  * 
@@ -27,6 +28,8 @@ const installType = scriptSrc.includes('hacsfiles') ? 'HACS' :
 console.info(`📊 Debt Snowball Tracker v${PANEL_VERSION} (${PANEL_BUILD_DATE})`);
 console.info(`   Loaded from: ${installType} (${scriptSrc})`);
 
+
+// ─── 10-template.js ─────────────────────────────────────────────────────────────────
 const PANEL_CSS = `
 :host {
     display: block;
@@ -4470,6 +4473,8 @@ class DebtSnowballCard extends HTMLElement {
     });
   }
 
+
+// ─── 20-state.js ─────────────────────────────────────────────────────────────────
   _initApp() {
     // _root is used throughout the app to scope DOM queries to this panel
     const _root = this;
@@ -4477,7 +4482,8 @@ class DebtSnowballCard extends HTMLElement {
 
     // ─── Data Models ────────────────────────────────────────────────────────────
 let debts = [];
-let recurringCosts = [];
+let recurringCosts = [];   // Monthly, quarterly, annual costs (NOT one-time)
+let oneTimeCosts = [];     // One-time expenses for the current month only
 let incomeEntries = [];
 let checkpoints = [];
 let startingBalance = 0;
@@ -4519,6 +4525,9 @@ const expenseModal          = _root.getElementById('expense-modal');
 const expenseForm           = _root.getElementById('expense-form');
 const checkpointModal       = _root.getElementById('checkpoint-modal');
 const checkpointForm        = _root.getElementById('checkpoint-form');
+
+
+// ─── 30-storage.js ─────────────────────────────────────────────────────────────────
 
 // ─── HA Backend Data Storage ─────────────────────────────────────────────────
 // Storage mechanism: a dedicated hidden Lovelace dashboard used purely as a
@@ -4589,6 +4598,15 @@ async function loadBackendData() {
             spendingBudgets  = result.spendingBudgets  || [];
             minPayOverrides  = result.minPayOverrides  || {};
 
+            // Backward-compat: oneTimeCosts may not exist in older saved data.
+            // If missing, migrate any one-time entries from recurringCosts.
+            if (result.oneTimeCosts) {
+                oneTimeCosts = result.oneTimeCosts;
+            } else {
+                oneTimeCosts = recurringCosts.filter(c => (c.category || 'other') === 'one-time');
+                recurringCosts = recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
+            }
+
             const prevMonth = result.paidMonth;
             const thisMonth = currentMonthKey();
 
@@ -4600,57 +4618,21 @@ async function loadBackendData() {
 
             // Only archive if the calendar has moved *past* the stored month (not when user advanced ahead).
             if (prevMonth && monthKeyToIndex(thisMonth) > monthKeyToIndex(prevMonth)) {
-                // Calculate final balance (next month's starting balance)
-                const _cp = result.checkpoints || [];
-                const _inc = result.incomeEntries || [];
-                const _cst = (result.recurringCosts || []).filter(c => isCostDueInMonth(c, prevMonth));
-                const day1Cp = _cp.find(cp => cp.day === 1);
-                let cashPool = day1Cp ? day1Cp.amount : 0;
-                const totalIncome = _inc.reduce((s, e) => s + e.amount, 0);
-                const totalCosts = _cst.reduce((s, c) => s + c.amount, 0);
-                const finalBalance = cashPool + totalIncome - totalCosts;
+                const rollover = calculateMonthRollover({
+                    debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
+                    startingBalance, paidStatus, spendingBudgets,
+                }, prevMonth, thisMonth);
 
-                // Archive the closing month before clearing
-                const archive = {
-                    month:          prevMonth,
-                    label:          formatMonthLabel(prevMonth),
-                    incomeEntries:  result.incomeEntries  || [],
-                    recurringCosts: result.recurringCosts || [],
-                    checkpoints:    result.checkpoints    || [],
-                    debts:          result.debts          || [],
-                    startingBalance: result.startingBalance || 0,
-                    paidStatus:     result.paidStatus     || {},
-                    totalIncome:    (result.incomeEntries  || []).reduce((s, e) => s + e.amount, 0),
-                    totalCosts:     (result.recurringCosts || []).filter(c => isCostDueInMonth(c, prevMonth)).reduce((s, c) => s + c.amount, 0),
-                    finalBalance,
-                };
-                monthlyArchives.unshift(archive);
+                monthlyArchives.unshift(rollover.archive);
                 if (monthlyArchives.length > 24) monthlyArchives.pop();
 
-                // Clear month-specific data; prune one-time costs; advance interval nextDueMonth
-                incomeEntries  = generateRecurringIncomeForMonth(result.incomeEntries || [], thisMonth);
-                // Create day 1 checkpoint with the final balance from previous month
-                checkpoints    = finalBalance > 0
-                    ? [{ id: 'cp_' + Date.now(), day: 1, amount: finalBalance }]
-                    : [];
-                recurringCosts = recurringCosts
-                    .filter(c => (c.category || 'other') !== 'one-time')
-                    .map(c => {
-                        if ((c.intervalMonths || 1) <= 1) return c;
-                        let next = c.nextDueMonth || prevMonth;
-                        // Advance until next is strictly past the closing month
-                        while (monthKeyToIndex(next) <= monthKeyToIndex(prevMonth)) {
-                            next = addMonthsToKey(next, c.intervalMonths);
-                        }
-                        return { ...c, nextDueMonth: next };
-                    });
-                paidStatus      = {};
-                minPayOverrides = {};
-                spendingBudgets = spendingBudgets.map(b => ({
-                    ...b,
-                    expenses:  [],
-                    exception: (b.exception?.month === prevMonth) ? null : b.exception,
-                }));
+                incomeEntries   = rollover.nextState.incomeEntries;
+                checkpoints     = rollover.nextState.checkpoints;
+                recurringCosts  = rollover.nextState.recurringCosts;
+                oneTimeCosts    = rollover.nextState.oneTimeCosts;
+                paidStatus      = rollover.nextState.paidStatus;
+                minPayOverrides = rollover.nextState.minPayOverrides;
+                spendingBudgets = rollover.nextState.spendingBudgets;
 
                 saveData().catch(err => console.error('Debt Snowball: rollover save failed —', err));
             } else if (result.paidStatus) {
@@ -4694,7 +4676,7 @@ async function saveData() {
         type:      'lovelace/config/save',
         url_path:  STORE_URL_PATH,
         config:    {
-            debts, recurringCosts, incomeEntries, checkpoints,
+            debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
             strategy, startingBalance, showMortgage,
             paidStatus, paidMonth: workingMonthKey || currentMonthKey(),
             monthlyArchives, spendingBudgets, minPayOverrides,
@@ -4708,6 +4690,9 @@ function currentMonthKey() {
 }
 
 // ─── Manual Month Advance ─────────────────────────────────────────────────────
+
+
+// ─── 40-advance.js ─────────────────────────────────────────────────────────────────
 async function advanceToNextMonth() {
     const currentKey = workingMonthKey || currentMonthKey();
     const nextKey    = addMonthsToKey(currentKey, 1);
@@ -4715,54 +4700,21 @@ async function advanceToNextMonth() {
 
     if (!confirm(`Archive ${formatMonthLabel(currentKey)} and start ${nextLabel} now?\n\nOne-time costs will be removed, income will be cleared, and interval costs will advance. This cannot be undone.`)) return;
 
-    // Archive current month
-    const archive = {
-        month:          currentKey,
-        label:          formatMonthLabel(currentKey),
-        incomeEntries:  [...incomeEntries],
-        recurringCosts: [...recurringCosts],
-        checkpoints:    [...checkpoints],
-        debts:          debts.map(d => ({...d})),
-        startingBalance,
-        paidStatus:     { ...paidStatus },
-        totalIncome:    incomeEntries.reduce((s, e) => s + e.amount, 0),
-        totalCosts:     recurringCosts.filter(c => isCostDueInMonth(c, currentKey)).reduce((s, c) => s + c.amount, 0),
-    };
-    monthlyArchives.unshift(archive);
+    const result = calculateMonthRollover({
+        debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
+        startingBalance, paidStatus, spendingBudgets,
+    }, currentKey, nextKey);
+
+    monthlyArchives.unshift(result.archive);
     if (monthlyArchives.length > 24) monthlyArchives.pop();
 
-    // Calculate final balance for next month's day 1 checkpoint
-    const day1CpCurrent = checkpoints.find(cp => cp.day === 1);
-    let currentCash = day1CpCurrent ? day1CpCurrent.amount : 0;
-    const currentIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
-    const currentCosts = recurringCosts
-        .filter(c => isCostDueInMonth(c, currentKey) && (c.category || 'other') !== 'one-time')
-        .reduce((s, c) => s + c.amount, 0);
-    const finalBalanceForNext = currentCash + currentIncome - currentCosts;
-
-    // Reset month-specific data, prune one-time costs, advance interval nextDueMonth
-    incomeEntries  = generateRecurringIncomeForMonth(incomeEntries, nextKey);
-    // Create day 1 checkpoint with the calculated final balance
-    checkpoints    = finalBalanceForNext > 0
-        ? [{ id: 'cp_' + Date.now(), day: 1, amount: finalBalanceForNext }]
-        : [];
-    recurringCosts = recurringCosts
-        .filter(c => (c.category || 'other') !== 'one-time')
-        .map(c => {
-            if ((c.intervalMonths || 1) <= 1) return c;
-            let next = c.nextDueMonth || currentKey;
-            while (monthKeyToIndex(next) <= monthKeyToIndex(currentKey)) {
-                next = addMonthsToKey(next, c.intervalMonths);
-            }
-            return { ...c, nextDueMonth: next };
-        });
-    paidStatus      = {};
-    minPayOverrides = {};
-    spendingBudgets = spendingBudgets.map(b => ({
-        ...b,
-        expenses:  [],
-        exception: (b.exception?.month === currentKey) ? null : b.exception,
-    }));
+    incomeEntries   = result.nextState.incomeEntries;
+    checkpoints     = result.nextState.checkpoints;
+    recurringCosts  = result.nextState.recurringCosts;
+    oneTimeCosts    = result.nextState.oneTimeCosts;
+    paidStatus      = result.nextState.paidStatus;
+    minPayOverrides = result.nextState.minPayOverrides;
+    spendingBudgets = result.nextState.spendingBudgets;
 
     // Save with paidMonth set to nextKey so the automatic rollover doesn't re-fire
     try {
@@ -4771,12 +4723,13 @@ async function advanceToNextMonth() {
             type:     'lovelace/config/save',
             url_path: STORE_URL_PATH,
             config:   {
-                debts, recurringCosts, incomeEntries, checkpoints,
+                debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
                 strategy, startingBalance, showMortgage,
                 paidStatus, paidMonth: nextKey,
                 monthlyArchives, spendingBudgets,
             },
         });
+        viewingArchiveIndex = null;
         workingMonthKey = nextKey;
         renderUI();
         showSavedToast(`Started ${nextLabel} ✓`);
@@ -4785,6 +4738,9 @@ async function advanceToNextMonth() {
         showErrorToast('Failed to advance month. Please try again.');
     }
 }
+
+
+// ─── 50-pure.js ─────────────────────────────────────────────────────────────────
 
 function formatMonthLabel(key) {
     const [year, month] = key.split('-').map(Number);
@@ -4835,16 +4791,16 @@ function generateBiweeklyForMonth(label, amount, anchorDateStr, monthKey) {
     return entries;
 }
 
-// Carry recurring income entries forward into newMonthKey.
+// Carry recurring income entries forward into monthKey.
 // Monthly entries (and legacy entries with no scheduleType) get their date updated;
 // biweekly entries are regenerated; explicit one-time entries are dropped.
-function generateRecurringIncomeForMonth(oldEntries, newMonthKey) {
-    const [y, m] = newMonthKey.split('-').map(Number);
+function generateRecurringIncomeForMonth(entries, monthKey) {
+    const [y, m] = monthKey.split('-').map(Number);
     const newEntries = [];
 
     // Monthly recurring: update date to same day in new month.
     // Legacy entries with no scheduleType are treated as monthly.
-    oldEntries.filter(e => !e.scheduleType || e.scheduleType === 'monthly').forEach(e => {
+    entries.filter(e => !e.scheduleType || e.scheduleType === 'monthly').forEach(e => {
         const day     = e.scheduleDay || parseInt(e.date.split('-')[2]);
         const lastDay = new Date(y, m + 1, 0).getDate();
         const actual  = Math.min(day, lastDay);
@@ -4855,11 +4811,11 @@ function generateRecurringIncomeForMonth(oldEntries, newMonthKey) {
 
     // Biweekly: deduplicate templates by (label|amount|anchorDate) then regenerate
     const seen = new Set();
-    oldEntries.filter(e => e.scheduleType === 'biweekly' && e.scheduleAnchorDate).forEach(e => {
+    entries.filter(e => e.scheduleType === 'biweekly' && e.scheduleAnchorDate).forEach(e => {
         const key = `${e.label}|${e.amount}|${e.scheduleAnchorDate}`;
         if (!seen.has(key)) {
             seen.add(key);
-            newEntries.push(...generateBiweeklyForMonth(e.label, e.amount, e.scheduleAnchorDate, newMonthKey));
+            newEntries.push(...generateBiweeklyForMonth(e.label, e.amount, e.scheduleAnchorDate, monthKey));
         }
     });
 
@@ -4876,8 +4832,8 @@ function htmlMonthToKey(htmlMonth) {
     return `${year}-${month - 1}`;
 }
 
-function isCostDueThisMonth(cost) {
-    const key = workingMonthKey || currentMonthKey();
+function isCostDueThisMonth(cost, monthKey) {
+    const key = monthKey || workingMonthKey || currentMonthKey();
     if ((cost.category || 'other') === 'one-time') {
         // One-time costs are only due in the month they were added (or legacy ones with no addedMonth)
         return !cost.addedMonth || cost.addedMonth === key;
@@ -4903,6 +4859,128 @@ function intervalLabel(n) {
     if (n === 12) return '📆 Annual';
     return `📆 Every ${n} mo.`;
 }
+
+function formatOrdinal(day) {
+    const s = ['th','st','nd','rd'], v = day % 100;
+    return day + (s[(v-20)%10] || s[v] || s[0]);
+}
+
+function formatMoney(n) {
+    const currency = (typeof _root !== 'undefined' && _root._currency) ? _root._currency : 'USD';
+    const language = (typeof _root !== 'undefined' && _root._language) ? _root._language : undefined;
+
+    try {
+        return new Intl.NumberFormat(language, {
+            style: 'currency',
+            currency: currency,
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(n);
+    } catch (e) {
+        return Number(n).toLocaleString(language, { style: 'currency', currency: 'USD' });
+    }
+}
+
+function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function calcAutoMin(balance, aprPct) {
+    if (!balance || balance <= 0) return null;
+    const monthlyInterest = balance * (aprPct / 100 / 12);
+    const onePercent      = balance * 0.01;
+    return Math.max(25, parseFloat((onePercent + monthlyInterest).toFixed(2)));
+}
+
+function getStrategyOrder(debtList, strat) {
+    const copy = [...debtList];
+    if (strat === 'avalanche') {
+        copy.sort((a,b) => {
+            const ra = a.promoZeroInterest ? (a.originalRate || 0) : a.rate;
+            const rb = b.promoZeroInterest ? (b.originalRate || 0) : b.rate;
+            return rb - ra || a.balance - b.balance;
+        });
+    } else {
+        copy.sort((a,b) => a.balance - b.balance);
+    }
+    return copy;
+}
+
+function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
+    const {
+        debts,
+        recurringCosts,
+        oneTimeCosts = [],
+        incomeEntries,
+        checkpoints,
+        startingBalance,
+        paidStatus,
+        spendingBudgets,
+    } = state;
+
+    const archive = {
+        month: closingMonthKey,
+        label: formatMonthLabel(closingMonthKey),
+        incomeEntries: [...incomeEntries],
+        recurringCosts: [...recurringCosts],
+        oneTimeCosts: [...oneTimeCosts],
+        checkpoints: [...checkpoints],
+        debts: debts.map(d => ({ ...d })),
+        startingBalance,
+        paidStatus: { ...paidStatus },
+        totalIncome: incomeEntries.reduce((s, e) => s + e.amount, 0),
+        totalCosts: [
+            ...recurringCosts.filter(c => isCostDueInMonth(c, closingMonthKey)),
+            ...oneTimeCosts,
+        ].reduce((s, c) => s + c.amount, 0),
+    };
+
+    const day1Cp = checkpoints.find(cp => cp.day === 1);
+    let cashPool = day1Cp ? day1Cp.amount : 0;
+    const totalIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const totalCosts = [
+        ...recurringCosts.filter(c => isCostDueInMonth(c, closingMonthKey)),
+        ...oneTimeCosts,
+    ].reduce((s, c) => s + c.amount, 0);
+    const finalBalance = cashPool + totalIncome - totalCosts;
+    archive.finalBalance = finalBalance;
+
+    const nextIncome = generateRecurringIncomeForMonth(incomeEntries, nextMonthKey);
+    const nextCheckpoints = finalBalance > 0
+        ? [{ id: 'cp_' + Date.now(), day: 1, amount: finalBalance }]
+        : [];
+    // Defensive: strip any one-time costs that may still be in recurringCosts (backward compat)
+    const cleanRecurring = recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
+    const nextCosts = cleanRecurring.map(c => {
+        if ((c.intervalMonths || 1) <= 1) return c;
+        let next = c.nextDueMonth || closingMonthKey;
+        while (monthKeyToIndex(next) <= monthKeyToIndex(closingMonthKey)) {
+            next = addMonthsToKey(next, c.intervalMonths);
+        }
+        return { ...c, nextDueMonth: next };
+    });
+    const nextBudgets = spendingBudgets.map(b => ({
+        ...b,
+        expenses: [],
+        exception: (b.exception?.month === closingMonthKey) ? null : b.exception,
+    }));
+
+    return {
+        archive,
+        nextState: {
+            incomeEntries: nextIncome,
+            checkpoints: nextCheckpoints,
+            recurringCosts: nextCosts,
+            oneTimeCosts: [],
+            paidStatus: {},
+            minPayOverrides: {},
+            spendingBudgets: nextBudgets,
+        },
+    };
+}
+
+
+// ─── 60-modals.js ─────────────────────────────────────────────────────────────────
 
 function updateCostModalIntervalVisibility() {
     const cat      = _root.getElementById('cost-category').value;
@@ -4993,11 +5071,11 @@ function openArchiveModal() {
             summary.appendChild(incDetail);
         }
 
-        // Costs detail toggle
+        // Recurring costs detail toggle
         if (a.recurringCosts && a.recurringCosts.length > 0) {
             const costBtn = document.createElement('button');
             costBtn.className = 'archive-detail-toggle';
-            costBtn.textContent = `▶ Cost entries (${a.recurringCosts.length})`;
+            costBtn.textContent = `▶ Recurring costs (${a.recurringCosts.length})`;
             const costDetail = document.createElement('div');
             costDetail.className = 'archive-detail-section';
             a.recurringCosts.forEach(c => {
@@ -5009,11 +5087,34 @@ function openArchiveModal() {
             costBtn.addEventListener('click', () => {
                 costDetail.classList.toggle('open');
                 costBtn.textContent = costDetail.classList.contains('open')
-                    ? `▼ Cost entries (${a.recurringCosts.length})`
-                    : `▶ Cost entries (${a.recurringCosts.length})`;
+                    ? `▼ Recurring costs (${a.recurringCosts.length})`
+                    : `▶ Recurring costs (${a.recurringCosts.length})`;
             });
             summary.appendChild(costBtn);
             summary.appendChild(costDetail);
+        }
+
+        // One-time costs detail toggle
+        if (a.oneTimeCosts && a.oneTimeCosts.length > 0) {
+            const otBtn = document.createElement('button');
+            otBtn.className = 'archive-detail-toggle';
+            otBtn.textContent = `▶ One-time costs (${a.oneTimeCosts.length})`;
+            const otDetail = document.createElement('div');
+            otDetail.className = 'archive-detail-section';
+            a.oneTimeCosts.forEach(c => {
+                const row = document.createElement('div');
+                row.className = 'archive-detail-item';
+                row.innerHTML = `<span>${escHtml(c.name)} <span style="opacity:0.6;font-size:0.75em;">one-time</span></span><span>${fmt(c.amount)}</span>`;
+                otDetail.appendChild(row);
+            });
+            otBtn.addEventListener('click', () => {
+                otDetail.classList.toggle('open');
+                otBtn.textContent = otDetail.classList.contains('open')
+                    ? `▼ One-time costs (${a.oneTimeCosts.length})`
+                    : `▶ One-time costs (${a.oneTimeCosts.length})`;
+            });
+            summary.appendChild(otBtn);
+            summary.appendChild(otDetail);
         }
 
         detailWrap.appendChild(summary);
@@ -5037,6 +5138,8 @@ function showModal(modal) {
     modal.classList.add('active');
 }
 
+
+// ─── 70-events.js ─────────────────────────────────────────────────────────────────
 // ─── Event Listeners ─────────────────────────────────────────────────────────
 function setupEventListeners() {
 
@@ -5248,11 +5351,11 @@ function setupEventListeners() {
     _root.getElementById('plan-prev-month-btn').addEventListener('click', () => {
         const btn = _root.getElementById('plan-prev-month-btn');
         const idx = parseInt(btn.dataset.archiveIdx ?? '0');
-        if (idx < monthlyArchives.length) { viewingArchiveIndex = idx; renderPaymentPlan(); }
+        if (idx < monthlyArchives.length) { viewingArchiveIndex = idx; renderUI(); }
     });
     _root.getElementById('plan-next-month-btn').addEventListener('click', () => {
         viewingArchiveIndex = null;
-        renderPaymentPlan();
+        renderUI();
     });
 
     // Income schedule type hint
@@ -5432,6 +5535,9 @@ function autoCalcMinPayment() {
     }
 }
 
+
+// ─── 80-render-modals.js ─────────────────────────────────────────────────────────────────
+
 // ─── Checkpoints List Rendering ───────────────────────────────────────────────
 function renderCheckpointsList() {
     const container = _root.getElementById('checkpoints-list');
@@ -5540,7 +5646,7 @@ function openCostModal(costId = null) {
 
     if (costId) {
         _root.getElementById('cost-modal-title').textContent = 'Edit Cost';
-        const cost = recurringCosts.find(c => c.id === costId);
+        const cost = recurringCosts.find(c => c.id === costId) || oneTimeCosts.find(c => c.id === costId);
         if (cost) {
             _root.getElementById('cost-id').value              = cost.id;
             _root.getElementById('cost-name').value            = cost.name;
@@ -5787,19 +5893,30 @@ function saveCost() {
 
         const addedMonth = category === 'one-time' ? (workingMonthKey || currentMonthKey()) : undefined;
 
+        const targetArray = category === 'one-time' ? oneTimeCosts : recurringCosts;
+        const sourceArray = category === 'one-time' ? recurringCosts : oneTimeCosts;
+
         if (id) {
-            const idx = recurringCosts.findIndex(c => c.id === id);
+            // Find in current or other array (user may have changed category)
+            const idx = targetArray.findIndex(c => c.id === id);
+            const otherIdx = sourceArray.findIndex(c => c.id === id);
             if (idx !== -1) {
-                const existing = recurringCosts[idx];
-                // Use explicit start month if set; otherwise preserve existing nextDueMonth when interval unchanged
+                const existing = targetArray[idx];
                 const nextDueMonth = intervalMonths > 1
                     ? (startMonthKey ?? (existing.intervalMonths === intervalMonths ? existing.nextDueMonth : currentMonthKey()))
                     : undefined;
-                recurringCosts[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth };
+                targetArray[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth };
+            } else if (otherIdx !== -1) {
+                // Moved from other array — remove from old, add to new
+                const [moved] = sourceArray.splice(otherIdx, 1);
+                const nextDueMonth = intervalMonths > 1
+                    ? (startMonthKey ?? currentMonthKey())
+                    : undefined;
+                targetArray.push({ id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
             }
         } else {
             const nextDueMonth = intervalMonths > 1 ? (startMonthKey ?? currentMonthKey()) : undefined;
-            recurringCosts.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
+            targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
         }
 
         saveData().catch(err => console.error("Debt Snowball: save failed —", err));
@@ -5812,11 +5929,25 @@ function saveCost() {
 
 function deleteCost(id) {
     showInlineConfirm(id, 'cost', () => {
-        const deleted = recurringCosts.find(c => c.id === id);
-        recurringCosts = recurringCosts.filter(c => c.id !== id);
-        delete paidStatus[id];
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-        showUndoToast('Recurring cost deleted', () => { recurringCosts.push(deleted); saveData().catch(err => console.error('Debt Snowball: save failed —', err)); });
+        let deleted = recurringCosts.find(c => c.id === id);
+        let array = recurringCosts;
+        if (!deleted) {
+            deleted = oneTimeCosts.find(c => c.id === id);
+            array = oneTimeCosts;
+        }
+        if (deleted) {
+            array = array.filter(c => c.id !== id);
+            if (array === recurringCosts) recurringCosts = array;
+            else oneTimeCosts = array;
+            delete paidStatus[id];
+            saveData().catch(err => console.error("Debt Snowball: save failed —", err));
+            showUndoToast('Cost deleted', () => {
+                array.push(deleted);
+                if (array === recurringCosts) recurringCosts = array;
+                else oneTimeCosts = array;
+                saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+            });
+        }
     });
 }
 
@@ -6290,7 +6421,7 @@ function showErrorToast(message) {
 
 // ─── Export / Import ─────────────────────────────────────────────────────────
 function exportData() {
-    const dataStr = JSON.stringify({ debts, incomeEntries, recurringCosts, checkpoints, strategy }, null, 2);
+    const dataStr = JSON.stringify({ debts, incomeEntries, recurringCosts, oneTimeCosts, checkpoints, strategy }, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
     const link    = document.createElement('a');
     link.setAttribute('href', dataUri);
@@ -6316,6 +6447,7 @@ function importData(e) {
             try {
                 if (data.debts)          debts          = data.debts;
                 if (data.recurringCosts) recurringCosts = data.recurringCosts;
+                if (data.oneTimeCosts)   oneTimeCosts   = data.oneTimeCosts;
                 if (data.incomeEntries)  incomeEntries  = data.incomeEntries;
                 if (data.checkpoints)    checkpoints    = data.checkpoints;
                 if (data.strategy)       strategy       = data.strategy;
@@ -6460,38 +6592,8 @@ function renderUI() {
     if (schedule !== null) updateHASensors(simResults, schedule);
 }
 
-function formatOrdinal(day) {
-    const s = ['th','st','nd','rd'], v = day % 100;
-    return day + (s[(v-20)%10] || s[v] || s[0]);
-}
 
-function formatMoney(n) {
-    // Pull the currency and language we caught in Step 1. 
-    // (_root is your panel instance where we saved them)
-    const currency = _root._currency || 'USD';
-    const language = _root._language || undefined; // undefined falls back to browser default
-
-    try {
-        return new Intl.NumberFormat(language, {
-            style: 'currency',
-            currency: currency,
-            // These ensure you always get $0.00 instead of $0
-            minimumFractionDigits: 2, 
-            maximumFractionDigits: 2
-        }).format(n);
-    } catch (e) {
-        // Safe fallback just in case the browser doesn't recognize the currency code
-        return Number(n).toLocaleString(language, { 
-            style: 'currency', 
-            currency: 'USD' 
-        });
-    }
-}
-
-function escHtml(str) {
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
+// ─── 81-render-lists.js ─────────────────────────────────────────────────────────────────
 // ─── Income List ─────────────────────────────────────────────────────────────
 function renderIncomeList() {
     incomeListContainer.innerHTML = '';
@@ -6546,21 +6648,25 @@ function renderRecurringCostsList() {
     costsListContainer.innerHTML = '';
     const recurringSummaryEl = _root.getElementById('recurring-summary');
 
-    // Only show costs due this month — handles one-times (by addedMonth), interval costs,
-    // and the edge case of the page staying open across a month boundary without a reload.
-    const visibleCosts    = recurringCosts.filter(isCostDueThisMonth);
-    const totalRecurring  = visibleCosts.reduce((sum, c) => sum + c.amount, 0);
-    const directRecurring = visibleCosts.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
-    const cardRecurring   = visibleCosts.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
+    // Recurring costs only (one-time costs are rendered separately)
+    const visibleRecurring = recurringCosts.filter(c => isCostDueThisMonth(c));
+    const totalRecurring   = visibleRecurring.reduce((sum, c) => sum + c.amount, 0);
+    const directRecurring  = visibleRecurring.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
+    const cardRecurring    = visibleRecurring.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
+    const totalOneTime     = oneTimeCosts.reduce((sum, c) => sum + c.amount, 0);
+    const grandTotal       = totalRecurring + totalOneTime;
+
     if (recurringSummaryEl) {
-        recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${totalRecurring.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span><span class="recurring-due-breakdown">🏦 Direct ${formatMoney(directRecurring)} &nbsp;·&nbsp; 💳 Card ${formatMoney(cardRecurring)}</span>`;
+        const otLabel = totalOneTime > 0 ? ` + ${formatMoney(totalOneTime)} one-time` : '';
+        recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span><span class="recurring-due-breakdown">🏦 Direct ${formatMoney(directRecurring)} &nbsp;·&nbsp; 💳 Card ${formatMoney(cardRecurring)}${otLabel}</span>`;
     }
 
-    if (visibleCosts.length === 0) {
+    const hasAnyCosts = visibleRecurring.length > 0 || oneTimeCosts.length > 0;
+    if (!hasAnyCosts) {
         costsListContainer.innerHTML = `
             <div class="empty-state">
-                No recurring costs yet.<br>Add your bills, subscriptions, and utilities.
-                <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Recurring Cost</button>
+                No costs yet.<br>Add your bills, subscriptions, and one-time expenses.
+                <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Cost</button>
             </div>`;
         costsListContainer.style.display = 'block';
         const emptyBtn = costsListContainer.querySelector('#empty-add-cost-btn');
@@ -6569,19 +6675,19 @@ function renderRecurringCostsList() {
     }
 
     costsListContainer.style.display = 'block';
-    const sorted = [...visibleCosts].sort((a,b) => (a.dueDay||1) - (b.dueDay||1));
     const currentDay = new Date().getDate();
+    let cardIndex = 0;
 
+    // ── Recurring sections ──────────────────────────────────────────────────
+    const recurringSorted = [...visibleRecurring].sort((a,b) => (a.dueDay||1) - (b.dueDay||1));
     const categories = [
-        { key: 'utility',      label: '⚡ Utilities (Monthly Bills)',              cls: 'cost-subsection-utility' },
-        { key: 'subscription', label: '📱 Subscriptions (Recurring Services)',    cls: 'cost-subsection-subscription' },
-        { key: 'other',        label: '📦 Other Recurring Bills',                  cls: 'cost-subsection-other' },
-        { key: 'one-time',     label: '🔴 ONE-TIME EXPENSES (This Month Only)',   cls: 'cost-subsection-onetime' },
+        { key: 'utility',      label: '⚡ Utilities (Monthly Bills)',           cls: 'cost-subsection-utility' },
+        { key: 'subscription', label: '📱 Subscriptions (Recurring Services)',   cls: 'cost-subsection-subscription' },
+        { key: 'other',        label: '📦 Other Recurring Bills',               cls: 'cost-subsection-other' },
     ];
 
-    let cardIndex = 0;
     categories.forEach(({ key, label, cls }) => {
-        const group = sorted.filter(c => (c.category || 'other') === key);
+        const group = recurringSorted.filter(c => (c.category || 'other') === key);
         if (group.length === 0) return;
 
         const section = document.createElement('div');
@@ -6590,9 +6696,7 @@ function renderRecurringCostsList() {
         const isCompact     = key === 'utility' || key === 'subscription';
         const isCollapsible = isCompact;
         const isExpanded    = expandedCostSections.has(key);
-        const groupActive   = group.filter(isCostDueThisMonth);
-        const groupTotal    = groupActive.reduce((s, c) => s + c.amount, 0);
-        const totalSuffix   = key === 'one-time' ? '' : '/mo';
+        const groupTotal    = group.reduce((s, c) => s + c.amount, 0);
 
         const header = document.createElement('div');
         header.className = 'cost-subsection-header' + (isCollapsible ? ' cost-section-collapsible' : '');
@@ -6600,7 +6704,7 @@ function renderRecurringCostsList() {
         const toggleIcon = isCollapsible
             ? `<span class="cost-section-toggle-icon${isExpanded ? '' : ' collapsed'}">▼</span>`
             : '';
-        header.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">${toggleIcon}${label}</span><span class="cost-subsection-total">${formatMoney(groupTotal)}${totalSuffix}</span>`;
+        header.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">${toggleIcon}${label}</span><span class="cost-subsection-total">${formatMoney(groupTotal)}/mo</span>`;
         section.appendChild(header);
 
         if (!isCollapsible || isExpanded) {
@@ -6612,107 +6716,125 @@ function renderRecurringCostsList() {
                 grid.style.gap = '0.4rem';
             }
 
-            group.forEach(cost => {
-                const isPastDue = (cost.dueDay || 1) <= currentDay;
-                const isCard    = cost.paymentMethod === 'card';
-                const isDue     = isCostDueThisMonth(cost);
-                const intN      = cost.intervalMonths || 1;
-                const isOneTime = key === 'one-time';
-                const paidState = paidStatus[cost.id];
-
-                const paymentMethodBadge = isCard
-                    ? '<span class="debt-type-badge card-badge">💳 Card</span>'
-                    : '<span class="debt-type-badge direct-badge">🏦 Direct</span>';
-                const amountTypeBadge = (cost.amountType || 'fixed') === 'flexible'
-                    ? '<span class="amount-type-badge flexible-badge">〜 Flexible</span>'
-                    : '';
-                // Frequency badge - more prominent
-                let freqBadge;
-                if (isOneTime) {
-                    freqBadge = '<span class="interval-badge" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);">🔴 ONE-TIME</span>';
-                } else if (intN > 1) {
-                    freqBadge = `<span class="interval-badge">${intervalLabel(intN)}</span>`;
-                } else {
-                    freqBadge = '<span class="interval-badge" style="background:rgba(99,102,241,0.1);color:var(--primary-light);border:1px solid rgba(99,102,241,0.25);">📅 Monthly</span>';
-                }
-                const notDueBadge = (!isDue && intN > 1)
-                    ? `<span class="not-due-badge">Next: ${formatMonthLabel(cost.nextDueMonth)}</span>` : '';
-                const autoBadge   = (!isOneTime && cost.autoPay) ? '<span class="autopay-badge">⚡ Auto-Pay</span>' : '';
-                const paidOverlay = paidState ? buildPaidOverlay(cost.autoPay) : '';
-                // Due frequency text
-                let dueFreq;
-                if (isOneTime) {
-                    dueFreq = 'One-Time Only';
-                } else if (intN > 1) {
-                    dueFreq = intervalLabel(intN).replace('📆 ', '');
-                } else {
-                    dueFreq = 'Monthly';
-                }
-
-                const el = document.createElement('div');
-                el.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${cardIndex * 0.08}s`;
-                cardIndex++;
-
-                if (isCompact) {
-                    el.className = 'debt-card cost-card cost-card-compact' +
-                        (isCard ? ' cost-card-credit' : ' cost-card-direct') +
-                        (paidState ? ' card-paid' : '') +
-                        (isDue ? '' : ' not-due-month');
-                    const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
-                    const metaParts  = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
-                    el.innerHTML = `
-                        ${paidOverlay}
-                        <div class="cost-compact-body">
-                            <div class="cost-compact-info">
-                                <div class="cost-compact-name-row">
-                                    <span class="cost-compact-name">${escHtml(cost.name)}</span>
-                                    <span class="cost-amount cost-compact-amount">${formatMoney(cost.amount)}</span>
-                                </div>
-                                ${badgesHtml ? `<div class="cost-compact-badges">${badgesHtml}</div>` : ''}
-                                <div class="cost-compact-meta">${metaParts.map((p, i) => i < metaParts.length - 1 ? `<span>${p}</span><span class="cost-meta-dot">·</span>` : `<span>${p}</span>`).join('')}</div>
-                            </div>
-                            <div class="cost-compact-actions">
-                                ${isDue ? `<div class="cost-compact-paid">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue)}</div>` : ''}
-                                <div class="cost-mini-actions">
-                                    <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
-                                    <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
-                                </div>
-                            </div>
-                        </div>`;
-                } else {
-                    el.className = 'debt-card cost-card' +
-                        (isCard ? ' cost-card-credit' : ' cost-card-direct') +
-                        (paidState ? ' card-paid' : '') +
-                        (isDue ? '' : ' not-due-month') +
-                        (isOneTime ? ' cost-card-onetime' : '');
-                    const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
-                    const amountLabel = isOneTime ? 'One-Time Amount' : (intN > 1 ? 'Amount' : 'Monthly Amount');
-                    const paymentMethodLabel = isCard ? 'Credit / Debit Card' : 'Direct Pay (Bank / Cash)';
-                    const dueValue = `${formatOrdinal(cost.dueDay||1)} (${dueFreq})`;
-                    el.innerHTML = `
-                        ${paidOverlay}
-                        <div class="debt-name">${escHtml(cost.name)}</div>
-                        ${badgesHtml ? `<div class="cost-badges-line">${badgesHtml}</div>` : ''}
-                        <div class="debt-detail"><span class="debt-detail-label">${amountLabel}</span><span class="debt-detail-value cost-amount">${formatMoney(cost.amount)}</span></div>
-                        <div class="debt-detail"><span class="debt-detail-label">Due</span><span class="debt-detail-value">${dueValue}</span></div>
-                        <div class="debt-detail"><span class="debt-detail-label">Payment</span><span class="debt-detail-value">${paymentMethodLabel}</span></div>
-                        <div class="paid-action-row">${isDue ? buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue) : ''}</div>
-                        <div class="cost-icon-actions">
-                            <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
-                            <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
-                        </div>`;
-                }
-                grid.appendChild(el);
-            });
-
+            group.forEach(cost => renderCostCard(cost, grid, false, currentDay));
             section.appendChild(grid);
         }
         costsListContainer.appendChild(section);
     });
 
+    // ── One-time section ────────────────────────────────────────────────────
+    if (oneTimeCosts.length > 0) {
+        const otSection = document.createElement('div');
+        otSection.className = 'cost-subsection cost-subsection-onetime';
+        const otTotal = oneTimeCosts.reduce((s, c) => s + c.amount, 0);
+
+        const otHeader = document.createElement('div');
+        otHeader.className = 'cost-subsection-header';
+        otHeader.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">🔴 ONE-TIME EXPENSES (This Month Only)</span><span class="cost-subsection-total">${formatMoney(otTotal)}</span>`;
+        otSection.appendChild(otHeader);
+
+        const otGrid = document.createElement('div');
+        otGrid.className = 'debts-list';
+        otGrid.style.display = 'grid';
+        oneTimeCosts.forEach(cost => renderCostCard(cost, otGrid, true, currentDay));
+        otSection.appendChild(otGrid);
+        costsListContainer.appendChild(otSection);
+    }
+
     costsListContainer.querySelectorAll('.btn-edit-cost').forEach(b   => b.addEventListener('click', e => openCostModal(e.target.dataset.id)));
     costsListContainer.querySelectorAll('.btn-delete-cost').forEach(b => b.addEventListener('click', e => deleteCost(e.target.dataset.id)));
     costsListContainer.querySelectorAll('.btn-mark-paid').forEach(b   => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === 'true')));
+}
+
+function renderCostCard(cost, grid, isOneTime, currentDay) {
+    const isPastDue = (cost.dueDay || 1) <= currentDay;
+    const isCard    = cost.paymentMethod === 'card';
+    const isDue     = isOneTime || isCostDueThisMonth(cost);
+    const intN      = cost.intervalMonths || 1;
+    const paidState = paidStatus[cost.id];
+
+    const paymentMethodBadge = isCard
+        ? '<span class="debt-type-badge card-badge">💳 Card</span>'
+        : '<span class="debt-type-badge direct-badge">🏦 Direct</span>';
+    const amountTypeBadge = (cost.amountType || 'fixed') === 'flexible'
+        ? '<span class="amount-type-badge flexible-badge">〜 Flexible</span>'
+        : '';
+
+    let freqBadge;
+    if (isOneTime) {
+        freqBadge = '<span class="interval-badge" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);">🔴 ONE-TIME</span>';
+    } else if (intN > 1) {
+        freqBadge = `<span class="interval-badge">${intervalLabel(intN)}</span>`;
+    } else {
+        freqBadge = '<span class="interval-badge" style="background:rgba(99,102,241,0.1);color:var(--primary-light);border:1px solid rgba(99,102,241,0.25);">📅 Monthly</span>';
+    }
+    const notDueBadge = (!isDue && intN > 1)
+        ? `<span class="not-due-badge">Next: ${formatMonthLabel(cost.nextDueMonth)}</span>` : '';
+    const autoBadge   = (!isOneTime && cost.autoPay) ? '<span class="autopay-badge">⚡ Auto-Pay</span>' : '';
+    const paidOverlay = paidState ? buildPaidOverlay(cost.autoPay) : '';
+
+    let dueFreq;
+    if (isOneTime) {
+        dueFreq = 'One-Time Only';
+    } else if (intN > 1) {
+        dueFreq = intervalLabel(intN).replace('📆 ', '');
+    } else {
+        dueFreq = 'Monthly';
+    }
+
+    const el = document.createElement('div');
+    const isCompact = !isOneTime && (cost.category === 'utility' || cost.category === 'subscription');
+
+    if (isCompact) {
+        el.className = 'debt-card cost-card cost-card-compact' +
+            (isCard ? ' cost-card-credit' : ' cost-card-direct') +
+            (paidState ? ' card-paid' : '') +
+            (isDue ? '' : ' not-due-month');
+        const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
+        const metaParts  = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
+        el.innerHTML = `
+            ${paidOverlay}
+            <div class="cost-compact-body">
+                <div class="cost-compact-info">
+                    <div class="cost-compact-name-row">
+                        <span class="cost-compact-name">${escHtml(cost.name)}</span>
+                        <span class="cost-amount cost-compact-amount">${formatMoney(cost.amount)}</span>
+                    </div>
+                    ${badgesHtml ? `<div class="cost-compact-badges">${badgesHtml}</div>` : ''}
+                    <div class="cost-compact-meta">${metaParts.map((p, i) => i < metaParts.length - 1 ? `<span>${p}</span><span class="cost-meta-dot">·</span>` : `<span>${p}</span>`).join('')}</div>
+                </div>
+                <div class="cost-compact-actions">
+                    ${isDue ? `<div class="cost-compact-paid">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue)}</div>` : ''}
+                    <div class="cost-mini-actions">
+                        <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
+                        <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
+                    </div>
+                </div>
+            </div>`;
+    } else {
+        el.className = 'debt-card cost-card' +
+            (isCard ? ' cost-card-credit' : ' cost-card-direct') +
+            (paidState ? ' card-paid' : '') +
+            (isDue ? '' : ' not-due-month') +
+            (isOneTime ? ' cost-card-onetime' : '');
+        const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
+        const amountLabel = isOneTime ? 'One-Time Amount' : (intN > 1 ? 'Amount' : 'Monthly Amount');
+        const paymentMethodLabel = isCard ? 'Credit / Debit Card' : 'Direct Pay (Bank / Cash)';
+        const dueValue = `${formatOrdinal(cost.dueDay||1)} (${dueFreq})`;
+        el.innerHTML = `
+            ${paidOverlay}
+            <div class="debt-name">${escHtml(cost.name)}</div>
+            ${badgesHtml ? `<div class="cost-badges-line">${badgesHtml}</div>` : ''}
+            <div class="debt-detail"><span class="debt-detail-label">${amountLabel}</span><span class="debt-detail-value cost-amount">${formatMoney(cost.amount)}</span></div>
+            <div class="debt-detail"><span class="debt-detail-label">Due</span><span class="debt-detail-value">${dueValue}</span></div>
+            <div class="debt-detail"><span class="debt-detail-label">Payment</span><span class="debt-detail-value">${paymentMethodLabel}</span></div>
+            <div class="paid-action-row">${isDue ? buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue) : ''}</div>
+            <div class="cost-icon-actions">
+                <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
+                <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
+            </div>`;
+    }
+    grid.appendChild(el);
 }
 
 // Section collapse/expand — delegated on the container so it survives re-renders
@@ -6905,37 +7027,21 @@ function buildPaidOverlay(autoPay) {
         </div>`;
 }
 
-// ─── Strategy Sorting ────────────────────────────────────────────────────────
-function getStrategyOrder(debtList, strat) {
-    const copy = [...debtList];
-    if (strat === 'avalanche') {
-        copy.sort((a,b) => {
-            const ra = a.promoZeroInterest ? (a.originalRate || 0) : a.rate;
-            const rb = b.promoZeroInterest ? (b.originalRate || 0) : b.rate;
-            return rb - ra || a.balance - b.balance;
-        });
-    } else {
-        copy.sort((a,b) => a.balance - b.balance);
-    }
-    return copy;
-}
 
+// ─── 82-render-payment.js ─────────────────────────────────────────────────────────────────
 // ─── Core Simulation ─────────────────────────────────────────────────────────
 // Date-aware: income arrives on its specific day-of-month, payments are only
 // made after sufficient cash has arrived. Returns a rich result object used
 // for both the chart and the debt cards.
 function runSimulation(strat) {
     const totalIncome         = incomeEntries.reduce((s,e) => s + e.amount, 0);
-    const activeCosts          = recurringCosts.filter(isCostDueThisMonth);
-    // For timeline projection, exclude one-time costs from effectiveBudget calculation
-    // since they only apply to this month, not future months being simulated.
-    const monthlyCostsOnly     = activeCosts.filter(c => (c.category || 'other') !== 'one-time');
-    const totalRecurringDirect = monthlyCostsOnly.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurringCard   = monthlyCostsOnly.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurring       = monthlyCostsOnly.reduce((s,c) => s + c.amount, 0);
+    const activeCosts          = recurringCosts.filter(c => isCostDueThisMonth(c));
+    // Timeline projection uses recurring costs only; one-time costs are separate.
+    const totalRecurringDirect = activeCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
+    const totalRecurringCard   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
+    const totalRecurring       = activeCosts.reduce((s,c) => s + c.amount, 0);
     // Only direct-payment costs reduce the immediate cash available for debt payoff;
     // card-charged costs are already folded into the card's minimum payment.
-    // Note: one-time costs are excluded because timeline projects multi-month future.
     const effectiveBudget = totalIncome - totalRecurringDirect;
 
     if (debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
@@ -7157,10 +7263,9 @@ function renderVisualization(simResults) {
             message = 'You need to add income entries before we can calculate your payoff timeline. Tell us about your paychecks, deposits, or any other monthly income.';
             primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click(); setTimeout(() => document.getElementById('add-income-btn').click(), 100)">➕ Add Income</button>`;
         } else if ((effectiveBudget || 0) <= 0) {
-            const _active              = recurringCosts.filter(isCostDueThisMonth);
-            const _monthlyOnly         = _active.filter(c => (c.category || 'other') !== 'one-time');
-            const totalRecurringDirect = _monthlyOnly.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-            const totalRecurringCard   = _monthlyOnly.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
+            const _active              = recurringCosts.filter(c => isCostDueThisMonth(c));
+            const totalRecurringDirect = _active.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
+            const totalRecurringCard   = _active.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
             icon = '📉';
             title = 'Budget Over-Committed';
             message = `Your income of ${formatMoney(totalIncome)} is entirely consumed by direct recurring costs of ${formatMoney(totalRecurringDirect)}.${totalRecurringCard > 0 ? ` (Card-charged costs of ${formatMoney(totalRecurringCard)} are already factored into card payments.)` : ''} You need to either increase income or reduce costs to free up money for debt payoff.`;
@@ -7368,6 +7473,7 @@ function renderPaymentPlan() {
     const archiveData   = isArchiveView ? monthlyArchives[viewingArchiveIndex] : null;
     const _income       = archiveData ? (archiveData.incomeEntries  || []) : incomeEntries;
     const _costs        = archiveData ? (archiveData.recurringCosts || []) : recurringCosts;
+    const _oneTimeCosts = archiveData ? (archiveData.oneTimeCosts   || []) : oneTimeCosts;
     const _checkpoints  = archiveData ? (archiveData.checkpoints    || []) : checkpoints;
     const _debts        = archiveData ? (archiveData.debts           || debts) : debts;
     const _startBal     = archiveData ? (archiveData.startingBalance || 0)  : startingBalance;
@@ -7426,11 +7532,29 @@ function renderPaymentPlan() {
         });
     });
 
+    // One-time costs always apply to the current month
+    _oneTimeCosts.forEach(cost => {
+        events.push({
+            type: 'one-time',
+            id: cost.id,
+            name: cost.name,
+            day: cost.dueDay || 1,
+            amount: cost.amount,
+            paymentMethod: cost.paymentMethod || 'direct',
+            amountType: cost.amountType || 'fixed',
+            autoPay: !!cost.autoPay,
+            sortKey: (cost.dueDay || 1) * 1000 + 1
+        });
+    });
+
     const sortedDebts   = getStrategyOrder(_debts.filter(d => d.balance > 0), strategy);
     const _overrides    = isArchiveView ? {} : minPayOverrides;
     const totalMinPay   = sortedDebts.reduce((s,d) => s + (_overrides[d.id] ?? d.minPayment), 0);
     const totalInc      = _income.reduce((s,e) => s + e.amount, 0);
-    const totalRec      = _costs.filter(c => isCostDueInMonth(c, _monthKey)).reduce((s,c) => s + c.amount, 0);
+    const totalRec      = [
+        ..._costs.filter(c => isCostDueInMonth(c, _monthKey)),
+        ..._oneTimeCosts,
+    ].reduce((s,c) => s + c.amount, 0);
     const extra         = Math.max(0, totalInc - totalRec - totalMinPay);
     const targetId      = sortedDebts[0]?.id;
 
@@ -7866,6 +7990,8 @@ function renderPaymentPlan() {
     return isArchiveView ? null : schedule;
 }
 
+
+// ─── 83-render-support.js ─────────────────────────────────────────────────────────────────
 // ─── Countdown Timer ─────────────────────────────────────────────────────────
 function startCountdown(payoffDate) {
     stopCountdown();
@@ -7884,15 +8010,6 @@ function updateCountdownDisplay(payoffDate) {
     if (diff <= 0) { el.textContent = '🎉 Debt Free!'; return; }
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
     el.textContent = days.toLocaleString();
-}
-
-// ─── Auto Min-Payment Calculator (Credit Card formula) ───────────────────────
-// Standard formula: max($25, 1% of balance + monthly interest)
-function calcAutoMin(balance, aprPct) {
-    if (!balance || balance <= 0) return null;
-    const monthlyInterest = balance * (aprPct / 100 / 12);
-    const onePercent      = balance * 0.01;
-    return Math.max(25, parseFloat((onePercent + monthlyInterest).toFixed(2)));
 }
 
 function autoCalcMinPaymentCC() {
@@ -8200,3 +8317,5 @@ window.customCards.push({
   preview: false,
   documentationURL: "https://github.com/raffenit/debt-snowball-tracker"
 });
+
+

@@ -15,6 +15,8 @@ import {
     generateBiweeklyForMonth,
     generateRecurringIncomeForMonth,
     intervalLabel,
+    keyToHtmlMonth,
+    htmlMonthToKey,
 } from './helpers.js';
 
 // ─── monthKeyToIndex ─────────────────────────────────────────────────────────
@@ -160,6 +162,20 @@ describe('isCostDueInMonth', () => {
         assert.equal(isCostDueInMonth(custom, '2026-0'), true);  // Jan - due
         assert.equal(isCostDueInMonth(custom, '2026-1'), false); // Feb - not due
         assert.equal(isCostDueInMonth(custom, '2026-4'), true);  // May - due (4 months later)
+    });
+
+    test('monthly costs survive spurious second argument (Array.filter index bug regression)', () => {
+        // When isCostDueThisMonth is used as a direct filter callback:
+        //   arr.filter(isCostDueThisMonth)
+        // JavaScript passes (element, index, array) to the callback.
+        // For monthly costs (intervalMonths <= 1) the function returns true early,
+        // so the index argument is harmless. For interval costs, the index would
+        // be passed to monthKeyToIndex and crash. The fix is to always wrap:
+        //   arr.filter(c => isCostDueThisMonth(c))
+        const cost = { category: 'utility', intervalMonths: 1, amount: 100 };
+        assert.equal(isCostDueThisMonth(cost, 0), true);  // index 0 (falsy)
+        assert.equal(isCostDueThisMonth(cost, 1), true);  // index 1 (truthy)
+        assert.equal(isCostDueThisMonth(cost, 5), true);  // index 5 (truthy)
     });
 });
 
@@ -371,5 +387,35 @@ describe('date utility edge cases', () => {
         assert.equal(isCostDueInMonth(annual, '2025-11'), true);  // Due Dec 2025
         assert.equal(isCostDueInMonth(annual, '2026-0'), false); // Not due Jan 2026
         assert.equal(isCostDueInMonth(annual, '2026-11'), true); // Due Dec 2026 (by year comparison)
+    });
+});
+
+describe('keyToHtmlMonth / htmlMonthToKey', () => {
+    test('keyToHtmlMonth converts 0-indexed to 1-indexed with zero padding', () => {
+        assert.equal(keyToHtmlMonth('2026-0'),  '2026-01'); // January
+        assert.equal(keyToHtmlMonth('2026-3'),  '2026-04'); // April
+        assert.equal(keyToHtmlMonth('2026-9'),  '2026-10'); // October
+        assert.equal(keyToHtmlMonth('2026-11'), '2026-12'); // December
+    });
+
+    test('htmlMonthToKey converts 1-indexed to 0-indexed', () => {
+        assert.equal(htmlMonthToKey('2026-01'), '2026-0');  // January
+        assert.equal(htmlMonthToKey('2026-04'), '2026-3');  // April
+        assert.equal(htmlMonthToKey('2026-10'), '2026-9');  // October
+        assert.equal(htmlMonthToKey('2026-12'), '2026-11'); // December
+    });
+
+    test('round-trip is identity', () => {
+        const keys = ['2024-0', '2025-5', '2026-11', '2023-9'];
+        for (const key of keys) {
+            assert.equal(htmlMonthToKey(keyToHtmlMonth(key)), key);
+        }
+    });
+
+    test('round-trip reverse is identity', () => {
+        const htmlMonths = ['2024-01', '2025-06', '2026-12', '2023-10'];
+        for (const htmlMonth of htmlMonths) {
+            assert.equal(keyToHtmlMonth(htmlMonthToKey(htmlMonth)), htmlMonth);
+        }
     });
 });

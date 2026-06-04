@@ -47,18 +47,20 @@ export function addMonthsToKey(key, n) {
  * @param {string} [cost.addedMonth] - Month key when one-time cost was added
  * @param {number} [cost.intervalMonths] - Recurrence interval (1 = monthly, 3 = quarterly, etc.)
  * @param {string} [cost.nextDueMonth] - Next due month key for interval costs
- * @param {string} workingMonthKey - Current working month key
+ * @param {string} monthKey - Month key to check (defaults to current month)
  * @returns {boolean} True if cost is due this month
  */
-export function isCostDueThisMonth(cost, workingMonthKey) {
-    const key = workingMonthKey || currentMonthKey();
+export function isCostDueThisMonth(cost, monthKey) {
+    const key = monthKey || currentMonthKey();
     if ((cost.category || 'other') === 'one-time') {
         // One-time costs are only due in the month they were added (or legacy ones with no addedMonth)
         return !cost.addedMonth || cost.addedMonth === key;
     }
     if ((cost.intervalMonths || 1) <= 1) return true;
     const next = cost.nextDueMonth || key;
-    return monthKeyToIndex(next) <= monthKeyToIndex(key);
+    const targetIdx = monthKeyToIndex(key);
+    const nextIdx = monthKeyToIndex(next);
+    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
 }
 
 /**
@@ -73,7 +75,9 @@ export function isCostDueInMonth(cost, monthKey) {
     }
     if ((cost.intervalMonths || 1) <= 1) return true;
     const next = cost.nextDueMonth || monthKey;
-    return monthKeyToIndex(next) <= monthKeyToIndex(monthKey);
+    const targetIdx = monthKeyToIndex(monthKey);
+    const nextIdx = monthKeyToIndex(next);
+    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
 }
 
 /**
@@ -165,4 +169,24 @@ export function intervalLabel(n) {
     if (n === 6) return '📆 Semi-Annual';
     if (n === 12) return '📆 Annual';
     return `📆 Every ${n} mo.`;
+}
+
+/**
+ * Convert app month key (YYYY-M, 0-indexed) → HTML month input value (YYYY-MM, 1-indexed)
+ * @param {string} key - Month key like "2026-3"
+ * @returns {string} HTML month value like "2026-04"
+ */
+export function keyToHtmlMonth(key) {
+    const [year, month] = key.split('-').map(Number);
+    return `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Convert HTML month input value (YYYY-MM, 1-indexed) → app month key (YYYY-M, 0-indexed)
+ * @param {string} htmlMonth - HTML month value like "2026-04"
+ * @returns {string} Month key like "2026-3"
+ */
+export function htmlMonthToKey(htmlMonth) {
+    const [year, month] = htmlMonth.split('-').map(Number);
+    return `${year}-${month - 1}`;
 }
