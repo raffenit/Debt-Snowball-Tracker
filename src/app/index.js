@@ -1,3 +1,8 @@
+import { runSimulation, runSimulationWithWindfall, getStrategyOrder } from '../simulation.js';
+import { formatMoney, formatOrdinal, escHtml, calcAutoMin } from '../pure-utils.js';
+import { currentMonthKey, formatMonthLabel, monthKeyToIndex, addMonthsToKey, isCostDueThisMonth, isCostDueInMonth, generateBiweeklyForMonth, generateRecurringIncomeForMonth, intervalLabel, keyToHtmlMonth, htmlMonthToKey } from '../date-utils.js';
+import { MAX_SIMULATION_MONTHS } from '../constants.js';
+
 // ─── 00-header.js ─────────────────────────────────────────────────────────────────
 /**
  * Debt Snowball Tracker — Home Assistant Lovelace Card
@@ -4683,12 +4688,6 @@ async function saveData() {
         },
     });
 }
-
-function currentMonthKey() {
-    const d = new Date();
-    return `${d.getFullYear()}-${d.getMonth()}`;
-}
-
 // ─── Manual Month Advance ─────────────────────────────────────────────────────
 
 
@@ -4741,175 +4740,12 @@ async function advanceToNextMonth() {
 
 
 // ─── 50-pure.js ─────────────────────────────────────────────────────────────────
-
-function formatMonthLabel(key) {
-    const [year, month] = key.split('-').map(Number);
-    return new Date(year, month).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-}
-
-function monthKeyToIndex(key) {
-    const [y, m] = key.split('-').map(Number);
-    return y * 12 + m;
-}
-
-function addMonthsToKey(key, n) {
-    const total = monthKeyToIndex(key) + n;
-    return `${Math.floor(total / 12)}-${total % 12}`;
-}
-
 // Generate all biweekly occurrences of a paycheck within a given month.
 // anchorDateStr is any past reference date on the correct two-week cycle (YYYY-MM-DD).
-function generateBiweeklyForMonth(label, amount, anchorDateStr, monthKey) {
-    const anchor = new Date(anchorDateStr + 'T00:00:00');
-    const [y, m] = monthKey.split('-').map(Number);
-    const monthStart = new Date(y, m, 1);
-    const monthEnd   = new Date(y, m + 1, 0);
-    const msPerDay   = 86400000;
-    const entries    = [];
-
-    // Step forward from anchor in 14-day increments until we enter the month
-    let d = new Date(anchor);
-    const daysToStart = Math.floor((monthStart - anchor) / msPerDay);
-    if (daysToStart > 0) {
-        d = new Date(anchor.getTime() + Math.floor(daysToStart / 14) * 14 * msPerDay);
-    }
-
-    while (d <= monthEnd) {
-        if (d >= monthStart) {
-            const mm = String(m + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            entries.push({
-                id: `${Date.now()}${Math.random().toString(36).slice(2, 7)}`,
-                label, amount,
-                date: `${y}-${mm}-${dd}`,
-                scheduleType: 'biweekly',
-                scheduleAnchorDate: anchorDateStr,
-            });
-        }
-        d = new Date(d.getTime() + 14 * msPerDay);
-    }
-    return entries;
-}
-
 // Carry recurring income entries forward into monthKey.
 // Monthly entries (and legacy entries with no scheduleType) get their date updated;
 // biweekly entries are regenerated; explicit one-time entries are dropped.
-function generateRecurringIncomeForMonth(entries, monthKey) {
-    const [y, m] = monthKey.split('-').map(Number);
-    const newEntries = [];
-
-    // Monthly recurring: update date to same day in new month.
-    // Legacy entries with no scheduleType are treated as monthly.
-    entries.filter(e => !e.scheduleType || e.scheduleType === 'monthly').forEach(e => {
-        const day     = e.scheduleDay || parseInt(e.date.split('-')[2]);
-        const lastDay = new Date(y, m + 1, 0).getDate();
-        const actual  = Math.min(day, lastDay);
-        const mm = String(m + 1).padStart(2, '0');
-        const dd = String(actual).padStart(2, '0');
-        newEntries.push({ ...e, scheduleDay: day, date: `${y}-${mm}-${dd}` });
-    });
-
-    // Biweekly: deduplicate templates by (label|amount|anchorDate) then regenerate
-    const seen = new Set();
-    entries.filter(e => e.scheduleType === 'biweekly' && e.scheduleAnchorDate).forEach(e => {
-        const key = `${e.label}|${e.amount}|${e.scheduleAnchorDate}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            newEntries.push(...generateBiweeklyForMonth(e.label, e.amount, e.scheduleAnchorDate, monthKey));
-        }
-    });
-
-    return newEntries;
-}
-
 // Convert app month key (YYYY-M, 0-indexed month) ↔ HTML month input value (YYYY-MM, 1-indexed)
-function keyToHtmlMonth(key) {
-    const [year, month] = key.split('-').map(Number);
-    return `${year}-${String(month + 1).padStart(2, '0')}`;
-}
-function htmlMonthToKey(htmlMonth) {
-    const [year, month] = htmlMonth.split('-').map(Number);
-    return `${year}-${month - 1}`;
-}
-
-function isCostDueThisMonth(cost, monthKey) {
-    const key = monthKey || workingMonthKey || currentMonthKey();
-    if ((cost.category || 'other') === 'one-time') {
-        // One-time costs are only due in the month they were added (or legacy ones with no addedMonth)
-        return !cost.addedMonth || cost.addedMonth === key;
-    }
-    if ((cost.intervalMonths || 1) <= 1) return true;
-    const next = cost.nextDueMonth || key;
-    const targetIdx = monthKeyToIndex(key);
-    const nextIdx = monthKeyToIndex(next);
-    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
-}
-
-function isCostDueInMonth(cost, monthKey) {
-    if ((cost.category || 'other') === 'one-time') {
-        return !cost.addedMonth || cost.addedMonth === monthKey;
-    }
-    if ((cost.intervalMonths || 1) <= 1) return true;
-    const next = cost.nextDueMonth || monthKey;
-    const targetIdx = monthKeyToIndex(monthKey);
-    const nextIdx = monthKeyToIndex(next);
-    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
-}
-
-function intervalLabel(n) {
-    if (!n || n <= 1) return null;
-    if (n === 3)  return '📆 Quarterly';
-    if (n === 6)  return '📆 Semi-Annual';
-    if (n === 12) return '📆 Annual';
-    return `📆 Every ${n} mo.`;
-}
-
-function formatOrdinal(day) {
-    const s = ['th','st','nd','rd'], v = day % 100;
-    return day + (s[(v-20)%10] || s[v] || s[0]);
-}
-
-function formatMoney(n) {
-    const currency = (typeof _root !== 'undefined' && _root._currency) ? _root._currency : 'USD';
-    const language = (typeof _root !== 'undefined' && _root._language) ? _root._language : undefined;
-
-    try {
-        return new Intl.NumberFormat(language, {
-            style: 'currency',
-            currency: currency,
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }).format(n);
-    } catch (e) {
-        return Number(n).toLocaleString(language, { style: 'currency', currency: 'USD' });
-    }
-}
-
-function escHtml(str) {
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function calcAutoMin(balance, aprPct) {
-    if (!balance || balance <= 0) return null;
-    const monthlyInterest = balance * (aprPct / 100 / 12);
-    const onePercent      = balance * 0.01;
-    return Math.max(25, parseFloat((onePercent + monthlyInterest).toFixed(2)));
-}
-
-function getStrategyOrder(debtList, strat) {
-    const copy = [...debtList];
-    if (strat === 'avalanche') {
-        copy.sort((a,b) => {
-            const ra = a.promoZeroInterest ? (a.originalRate || 0) : a.rate;
-            const rb = b.promoZeroInterest ? (b.originalRate || 0) : b.rate;
-            return rb - ra || a.balance - b.balance;
-        });
-    } else {
-        copy.sort((a,b) => a.balance - b.balance);
-    }
-    return copy;
-}
-
 function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
     const {
         debts,
@@ -7045,138 +6881,6 @@ function buildPaidOverlay(autoPay) {
 // Date-aware: income arrives on its specific day-of-month, payments are only
 // made after sufficient cash has arrived. Returns a rich result object used
 // for both the chart and the debt cards.
-function runSimulation(strat) {
-    const totalIncome         = incomeEntries.reduce((s,e) => s + e.amount, 0);
-    const activeCosts          = recurringCosts.filter(c => isCostDueThisMonth(c));
-    // Timeline projection uses recurring costs only; one-time costs are separate.
-    const totalRecurringDirect = activeCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurringCard   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurring       = activeCosts.reduce((s,c) => s + c.amount, 0);
-    // Only direct-payment costs reduce the immediate cash available for debt payoff;
-    // card-charged costs are already folded into the card's minimum payment.
-    const effectiveBudget = totalIncome - totalRecurringDirect;
-
-    if (debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
-        return { valid: false, totalIncome, totalRecurring, effectiveBudget };
-    }
-
-    const totalMinPayments = debts.reduce((s,d) => s + d.minPayment, 0);
-    if (effectiveBudget < totalMinPayments) {
-        return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
-    }
-
-    // Build income day schedule (sorted)
-    const incomeDays = [...incomeEntries
-        .map(e => ({ day: parseInt(e.date.split('-')[2]), amount: e.amount }))
-        .sort((a,b) => a.day - b.day)];
-
-    let simDebts = debts.map(d => ({ ...d, interestPaid: 0 }));
-    const MAX_MONTHS = 1200;
-    let monthsElapsed     = 0;
-    let totalInterestPaid = 0;
-    let payoffLog         = [];
-
-    // Per-debt monthly balance snapshots
-    const perDebtMonthly = {};
-    simDebts.forEach(d => { perDebtMonthly[d.id] = [d.balance]; });
-
-    // Get day 1 checkpoint amount for initial cash
-    const day1Checkpoint = checkpoints.find(cp => cp.day === 1);
-    const day1Balance = day1Checkpoint ? day1Checkpoint.amount : 0;
-
-    while (simDebts.some(d => d.balance > 0) && monthsElapsed < MAX_MONTHS) {
-        monthsElapsed++;
-        // Add starting cash in first month to the monthly available amount
-        let availableCash = effectiveBudget + (monthsElapsed === 1 ? day1Balance : 0); // eslint-disable-line no-unused-vars
-
-        // 1. Accrue interest
-        simDebts.forEach(d => {
-            if (d.balance <= 0) return;
-            let effectiveRate = d.rate;
-            if (d.promoZeroInterest && d.promoExpiryDate) {
-                const today   = new Date();
-                const simDate = new Date(today.getFullYear(), today.getMonth() + monthsElapsed, 1);
-                if (simDate <= new Date(d.promoExpiryDate+'T00:00:00')) effectiveRate = 0;
-                else effectiveRate = d.originalRate || d.rate;
-            }
-            const interest     = d.balance * (effectiveRate / 100 / 12);
-            d.balance         += interest;
-            totalInterestPaid += interest;
-            d.interestPaid    += interest;
-        });
-
-        // 2. Date-aware payment scheduling
-        const alive    = simDebts.filter(d => d.balance > 0);
-        const ordered  = getStrategyOrder(alive, strat);
-        const targetId = ordered[0]?.id;
-        const aliveMinSum   = alive.reduce((s,d) => s + d.minPayment, 0);
-        const extraAvail    = Math.max(0, effectiveBudget - aliveMinSum);
-
-        // Build payment queue sorted by due day
-        const paymentQueue = alive.map(d => ({
-            id:     d.id,
-            dueDay: d.dueDay || 1,
-            needed: Math.min(
-                d.balance,
-                d.minPayment + (d.id === targetId ? Math.min(extraAvail, Math.max(0, d.balance - d.minPayment)) : 0)
-            )
-        })).sort((a,b) => a.dueDay - b.dueDay);
-
-        let cashPool   = 0;
-        let incomeIdx  = 0;
-
-        for (const payment of paymentQueue) {
-            // Advance income whose day <= payment due day
-            while (incomeIdx < incomeDays.length && incomeDays[incomeIdx].day <= payment.dueDay) {
-                cashPool += incomeDays[incomeIdx++].amount;
-            }
-            // If still short, pull remaining income (payment deferred until next check)
-            while (cashPool < payment.needed && incomeIdx < incomeDays.length) {
-                cashPool += incomeDays[incomeIdx++].amount;
-            }
-
-            const debt   = simDebts.find(d => d.id === payment.id);
-            if (!debt || debt.balance <= 0) continue;
-            const actual = Math.min(payment.needed, cashPool, debt.balance);
-            cashPool    -= actual;
-            debt.balance = Math.max(0, debt.balance - actual);
-
-            if (debt.balance <= 0.01) {
-                debt.balance = 0;
-                if (!payoffLog.find(l => l.id === debt.id)) {
-                    payoffLog.push({ ...debt, payoffMonth: monthsElapsed });
-                }
-            }
-        }
-
-        // Snapshot balances this month
-        simDebts.forEach(d => {
-            perDebtMonthly[d.id].push(Math.max(0, d.balance));
-        });
-    }
-
-    const debtPayoffMonths = {};
-    payoffLog.forEach(l => { debtPayoffMonths[l.id] = l.payoffMonth; });
-
-    const maxLen = Math.max(...Object.values(perDebtMonthly).map(a => a.length));
-    const monthlyTotals = Array.from({ length: maxLen }, (_,i) =>
-        Object.values(perDebtMonthly).reduce((sum, arr) => sum + (arr[i] ?? 0), 0)
-    );
-
-    return {
-        valid: true,
-        monthsElapsed,
-        totalInterestPaid,
-        payoffLog,
-        monthlyTotals,
-        perDebtMonthly,
-        debtPayoffMonths,
-        totalIncome,
-        totalRecurring,
-        effectiveBudget
-    };
-}
-
 // ─── Visualization ───────────────────────────────────────────────────────────
 function renderVisualization(simResults) {
     const statTotalDebt     = _root.getElementById('stat-total-debt');
@@ -8140,34 +7844,6 @@ function calcWindfall() {
 
     _root.getElementById('windfall-results').style.display = 'block';
 }
-
-function runSimulationWithWindfall(windfall, strat) {
-    // Clone debts and apply windfall in strategy order before simulating
-    let simDebts = debts.map(d => ({ ...d }));
-    const ordered = getStrategyOrder(simDebts, strat);
-    let remaining = windfall;
-    const allocation = [];
-
-    for (const debt of ordered) {
-        if (remaining <= 0) break;
-        const apply = Math.min(remaining, debt.balance);
-        const live  = simDebts.find(d => d.id === debt.id);
-        if (live) { live.balance = Math.max(0, live.balance - apply); }
-        allocation.push({ name: debt.name, applied: apply });
-        remaining -= apply;
-    }
-
-    // Now run the full simulation on the reduced balances
-    // Temporarily swap debts, run simulation, restore
-    const originalDebts = debts;
-    debts = simDebts.filter(d => d.balance > 0.01);
-    const result = runSimulation(strat);
-    debts = originalDebts;
-
-    result.allocation = allocation;
-    return result;
-}
-
 // ─── Monthly Check-In Prompt ──────────────────────────────────────────────────
 function maybeShowCheckin() {
     if (debts.length === 0) return;

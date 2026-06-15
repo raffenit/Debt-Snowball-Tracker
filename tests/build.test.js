@@ -17,7 +17,7 @@ import { execSync } from 'child_process';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const APP_DIR = path.join(ROOT, 'src', 'app');
 const DIST_FILE = path.join(ROOT, 'dist', 'debt-snowball-card.js');
-const BUILD_SCRIPT = path.join(ROOT, 'scripts', 'build.js');
+const BUILD_SCRIPT = path.join(ROOT, 'scripts', 'build-esbuild.js');
 
 // ─── Expected module order (must match scripts/build.js) ─────────────────────
 const EXPECTED_MODULES = [
@@ -30,8 +30,11 @@ const EXPECTED_MODULES = [
     '60-modals.js',
     '70-events.js',
     '80-render-modals.js',
+    '80a-checkpoints.js',
+    '80b-export-import.js',
     '81-render-lists.js',
     '82-render-payment.js',
+    '82a-render-charts.js',
     '83-render-support.js',
 ];
 
@@ -51,8 +54,8 @@ describe('Build System', () => {
         }
     });
 
-    test('build script runs without error', () => {
-        // Run the build and capture any thrown errors
+    test('esbuild build script runs without error', () => {
+        // Run the esbuild-based build and capture any thrown errors
         execSync(`node "${BUILD_SCRIPT}"`, { cwd: ROOT, stdio: 'pipe' });
     });
 
@@ -67,24 +70,6 @@ describe('Dist Output Validation', () => {
         distContent = fs.readFileSync(DIST_FILE, 'utf-8');
     });
 
-    test('dist file contains module markers in correct order', () => {
-        // Each module should have a marker comment in the output
-        const positions = EXPECTED_MODULES.map(mod => {
-            const marker = `// ─── ${mod}`;
-            const pos = distContent.indexOf(marker);
-            assert.ok(pos >= 0, `Missing marker for ${mod}`);
-            return { mod, pos };
-        });
-
-        // Verify order: each subsequent marker must appear after the previous one
-        for (let i = 1; i < positions.length; i++) {
-            assert.ok(
-                positions[i].pos > positions[i - 1].pos,
-                `Module ${positions[i].mod} appears before ${positions[i - 1].mod} (wrong order)`
-            );
-        }
-    });
-
     test('dist file is syntactically valid JavaScript', () => {
         // Use the Function constructor to parse the entire file as a function body.
         // This catches syntax errors (missing braces, unterminated strings, etc.)
@@ -97,10 +82,10 @@ describe('Dist Output Validation', () => {
         }
     });
 
-    test('dist file starts with header module', () => {
+    test('dist file starts with IIFE wrapper (esbuild output)', () => {
         assert.ok(
-            distContent.startsWith('// ─── 00-header.js') || distContent.startsWith('/**'),
-            'Dist file should start with header content'
+            distContent.includes('var DebtSnowballApp') || distContent.includes('(() => {'),
+            'Dist file should be wrapped in an IIFE by esbuild'
         );
     });
 
@@ -113,8 +98,8 @@ describe('Dist Output Validation', () => {
         assert.ok(distContent.includes('PANEL_HTML'), 'Should contain PANEL_HTML');
 
         // State
-        assert.ok(distContent.includes('let debts = []'), 'Should declare debts array');
-        assert.ok(distContent.includes('let workingMonthKey'), 'Should declare workingMonthKey');
+        assert.ok(distContent.includes('debts'), 'Should reference debts');
+        assert.ok(distContent.includes('workingMonthKey'), 'Should reference workingMonthKey');
 
         // Storage
         assert.ok(distContent.includes('ensureStoreDashboard'), 'Should contain ensureStoreDashboard');
@@ -125,7 +110,7 @@ describe('Dist Output Validation', () => {
         assert.ok(distContent.includes('advanceToNextMonth'), 'Should contain advanceToNextMonth');
         assert.ok(distContent.includes('calculateMonthRollover'), 'Should contain calculateMonthRollover');
 
-        // Pure
+        // Pure utilities (bundled from src/*.js, not duplicated)
         assert.ok(distContent.includes('formatMoney'), 'Should contain formatMoney');
         assert.ok(distContent.includes('monthKeyToIndex'), 'Should contain monthKeyToIndex');
 
@@ -224,6 +209,22 @@ describe('Module Contract Tests', () => {
         assert.ok(render.includes('renderUI'), 'Render-modals should contain renderUI');
     });
 
+    test('checkpoints module contains checkpoint rendering and CRUD', () => {
+        const renderPath = path.join(APP_DIR, '80a-checkpoints.js');
+        const render = fs.readFileSync(renderPath, 'utf-8');
+        assert.ok(render.includes('renderCheckpointsList'), 'Checkpoints should contain renderCheckpointsList');
+        assert.ok(render.includes('openCheckpointModal'), 'Checkpoints should contain openCheckpointModal');
+        assert.ok(render.includes('saveCheckpoint'), 'Checkpoints should contain saveCheckpoint');
+    });
+
+    test('export-import module contains backup/restore and notifications', () => {
+        const renderPath = path.join(APP_DIR, '80b-export-import.js');
+        const render = fs.readFileSync(renderPath, 'utf-8');
+        assert.ok(render.includes('exportData'), 'Export-import should contain exportData');
+        assert.ok(render.includes('importData'), 'Export-import should contain importData');
+        assert.ok(render.includes('showNotificationToast'), 'Export-import should contain showNotificationToast');
+    });
+
     test('render-lists module contains list renderers', () => {
         const renderPath = path.join(APP_DIR, '81-render-lists.js');
         const render = fs.readFileSync(renderPath, 'utf-8');
@@ -238,6 +239,14 @@ describe('Module Contract Tests', () => {
         assert.ok(render.includes('renderPaymentPlan'), 'Render-payment should contain renderPaymentPlan');
         assert.ok(render.includes('renderVisualization'), 'Render-payment should contain renderVisualization');
         assert.ok(render.includes('runSimulation'), 'Render-payment should contain runSimulation');
+    });
+
+    test('render-charts module contains chart functions', () => {
+        const renderPath = path.join(APP_DIR, '82a-render-charts.js');
+        const render = fs.readFileSync(renderPath, 'utf-8');
+        assert.ok(render.includes('renderPaydownChart'), 'Render-charts should contain renderPaydownChart');
+        assert.ok(render.includes('renderTimelineChart'), 'Render-charts should contain renderTimelineChart');
+        assert.ok(render.includes('DEBT_COLORS'), 'Render-charts should contain DEBT_COLORS');
     });
 
     test('render-support module contains support functions', () => {

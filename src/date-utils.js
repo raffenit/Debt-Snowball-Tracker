@@ -110,6 +110,8 @@ export function generateBiweeklyForMonth(label, amount, anchorDateStr, monthKey)
                 amount,
                 day: current.getDate(),
                 date: current.toISOString().split('T')[0],
+                scheduleType: 'biweekly',
+                scheduleAnchorDate: anchorDateStr,
             });
         }
         current = new Date(current.getTime() + 14 * msPerDay);
@@ -128,30 +130,34 @@ export function generateRecurringIncomeForMonth(entries, monthKey) {
     const out = [];
 
     for (const e of entries) {
-        const schedule = e.schedule || 'monthly';
+        const schedule = e.scheduleType || e.schedule || 'monthly';
         if (schedule === 'one-time') continue; // Skip one-time entries
 
-        if (schedule === 'biweekly' && e.anchorDate) {
+        if (schedule === 'biweekly' && (e.scheduleAnchorDate || e.anchorDate)) {
             // Biweekly: generate all occurrences for this month
-            const biweekly = generateBiweeklyForMonth(e.label, e.amount, e.anchorDate, monthKey);
+            const anchorDate = e.scheduleAnchorDate || e.anchorDate;
+            const biweekly = generateBiweeklyForMonth(e.label, e.amount, anchorDate, monthKey);
             for (const b of biweekly) {
                 out.push({
                     id: e.id + '_' + b.date,
                     label: e.label,
                     amount: e.amount,
                     date: b.date,
-                    origId: e.id,
+                    scheduleType: 'biweekly',
+                    scheduleAnchorDate: anchorDate,
                 });
             }
         } else {
             // Monthly (default): just adjust date to this month
-            const day = parseInt(e.date.split('-')[2]);
+            const day = e.scheduleDay || parseInt(e.date.split('-')[2]);
             const date = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             out.push({
                 id: e.id,
                 label: e.label,
                 amount: e.amount,
                 date: date,
+                scheduleType: 'monthly',
+                scheduleDay: day,
             });
         }
     }

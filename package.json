@@ -9,8 +9,11 @@
     "test:extended": "node --test tests/app.extended.test.js",
     "test:dates": "node --test tests/date-utils.test.js",
     "test:build": "node --test tests/build.test.js",
-    "build": "node scripts/build.js",
+    "build": "node scripts/build-esbuild.js",
+    "build:legacy": "node scripts/build.js",
     "release": "./scripts/release.sh"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
 }

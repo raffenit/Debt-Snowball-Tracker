@@ -24,8 +24,9 @@ function build() {
     console.log('Building debt-snowball-card.js...');
 
     // Auto-discover modules from src/app/ — alphabetical order enforces dependency chain
+    // Exclude ES module files (index.js, state.js) used by the new esbuild build.
     const files = fs.readdirSync(SRC_DIR)
-        .filter(f => f.endsWith('.js'))
+        .filter(f => f.endsWith('.js') && f !== 'index.js' && f !== 'state.js')
         .sort();
 
     if (files.length === 0) {

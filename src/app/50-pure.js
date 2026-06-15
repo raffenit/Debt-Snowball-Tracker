@@ -97,7 +97,9 @@ function isCostDueThisMonth(cost, monthKey) {
     }
     if ((cost.intervalMonths || 1) <= 1) return true;
     const next = cost.nextDueMonth || key;
-    return monthKeyToIndex(next) <= monthKeyToIndex(key);
+    const targetIdx = monthKeyToIndex(key);
+    const nextIdx = monthKeyToIndex(next);
+    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
 }
 
 function isCostDueInMonth(cost, monthKey) {
@@ -106,7 +108,9 @@ function isCostDueInMonth(cost, monthKey) {
     }
     if ((cost.intervalMonths || 1) <= 1) return true;
     const next = cost.nextDueMonth || monthKey;
-    return monthKeyToIndex(next) <= monthKeyToIndex(monthKey);
+    const targetIdx = monthKeyToIndex(monthKey);
+    const nextIdx = monthKeyToIndex(next);
+    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
 }
 
 function intervalLabel(n) {

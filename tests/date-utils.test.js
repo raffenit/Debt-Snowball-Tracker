@@ -239,7 +239,7 @@ describe('generateBiweeklyForMonth', () => {
 describe('generateRecurringIncomeForMonth', () => {
     test('generates monthly income for target month', () => {
         const entries = [
-            { id: 'inc1', label: 'Salary', amount: 3000, date: '2026-03-15', schedule: 'monthly' },
+            { id: 'inc1', label: 'Salary', amount: 3000, date: '2026-03-15', scheduleType: 'monthly', scheduleDay: 15 },
         ];
         const result = generateRecurringIncomeForMonth(entries, '2026-5'); // June 2026
 
@@ -249,6 +249,8 @@ describe('generateRecurringIncomeForMonth', () => {
         assert.equal(result[0].amount, 3000);
         assert.equal(result[0].date, '2026-06-15'); // Moved to June
         assert.equal(result[0].id, 'inc1'); // Preserves ID
+        assert.equal(result[0].scheduleType, 'monthly');
+        assert.equal(result[0].scheduleDay, 15);
     });
 
     test('generates biweekly entries correctly', () => {
@@ -257,8 +259,8 @@ describe('generateRecurringIncomeForMonth', () => {
                 id: 'inc1',
                 label: 'Paycheck',
                 amount: 2000,
-                schedule: 'biweekly',
-                anchorDate: '2026-01-03',
+                scheduleType: 'biweekly',
+                scheduleAnchorDate: '2026-01-03',
                 date: '2026-01-03'
             },
         ];
@@ -272,14 +274,15 @@ describe('generateRecurringIncomeForMonth', () => {
             assert.equal(r.label, 'Paycheck');
             assert.equal(r.amount, 2000);
             assert.ok(r.id.startsWith('inc1_'), 'should have composite ID');
-            assert.equal(r.origId, 'inc1');
+            assert.equal(r.scheduleType, 'biweekly');
+            assert.equal(r.scheduleAnchorDate, '2026-01-03');
         });
     });
 
     test('skips one-time income entries', () => {
         const entries = [
-            { id: 'inc1', label: 'Salary', amount: 3000, date: '2026-03-15', schedule: 'monthly' },
-            { id: 'inc2', label: 'Bonus', amount: 1000, date: '2026-03-01', schedule: 'one-time' },
+            { id: 'inc1', label: 'Salary', amount: 3000, date: '2026-03-15', scheduleType: 'monthly', scheduleDay: 15 },
+            { id: 'inc2', label: 'Bonus', amount: 1000, date: '2026-03-01', scheduleType: 'one-time' },
         ];
         const result = generateRecurringIncomeForMonth(entries, '2026-5');
 
@@ -289,8 +292,8 @@ describe('generateRecurringIncomeForMonth', () => {
 
     test('handles multiple monthly income sources', () => {
         const entries = [
-            { id: 'inc1', label: 'Job 1', amount: 2000, date: '2026-03-01', schedule: 'monthly' },
-            { id: 'inc2', label: 'Job 2', amount: 1500, date: '2026-03-15', schedule: 'monthly' },
+            { id: 'inc1', label: 'Job 1', amount: 2000, date: '2026-03-01', scheduleType: 'monthly', scheduleDay: 1 },
+            { id: 'inc2', label: 'Job 2', amount: 1500, date: '2026-03-15', scheduleType: 'monthly', scheduleDay: 15 },
         ];
         const result = generateRecurringIncomeForMonth(entries, '2026-5');
 
@@ -301,12 +304,14 @@ describe('generateRecurringIncomeForMonth', () => {
 
     test('defaults to monthly when schedule is missing', () => {
         const entries = [
-            { id: 'inc1', label: 'Salary', amount: 3000, date: '2026-03-15' }, // no schedule
+            { id: 'inc1', label: 'Salary', amount: 3000, date: '2026-03-15' }, // no scheduleType
         ];
         const result = generateRecurringIncomeForMonth(entries, '2026-5');
 
         assert.equal(result.length, 1);
         assert.equal(result[0].date, '2026-06-15');
+        assert.equal(result[0].scheduleType, 'monthly');
+        assert.equal(result[0].scheduleDay, 15);
     });
 });
 

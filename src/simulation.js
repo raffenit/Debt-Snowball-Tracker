@@ -2,7 +2,7 @@
 // Used by both the main panel app and test suite
 
 import { MAX_SIMULATION_MONTHS } from './constants.js';
-import { currentMonthKey } from './date-utils.js';
+import { currentMonthKey, isCostDueThisMonth } from './date-utils.js';
 
 // ── State setters (mirrors app.js globals) ───────────────────────────────────
 let debts = [];
@@ -43,10 +43,11 @@ export function getStrategyOrder(debtList, strat) {
 // One-time costs are excluded because timeline projects multi-month future.
 export function runSimulation(strat) {
     const totalIncome          = incomeEntries.reduce((s,e) => s + e.amount, 0);
-    // Timeline projection uses recurring costs only; one-time costs are separate.
-    const totalRecurringDirect = recurringCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurringCard   = recurringCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurring       = recurringCosts.reduce((s,c) => s + c.amount, 0);
+    // Timeline projection uses recurring costs due this month only; one-time costs are separate.
+    const activeCosts          = recurringCosts.filter(c => isCostDueThisMonth(c));
+    const totalRecurringDirect = activeCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
+    const totalRecurringCard   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
+    const totalRecurring       = activeCosts.reduce((s,c) => s + c.amount, 0);
     // Only direct-payment costs reduce the immediate cash available for debt payoff;
     // card-charged costs are already folded into the card's minimum payment.
     const effectiveBudget      = totalIncome - totalRecurringDirect;
