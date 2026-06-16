@@ -2151,7 +2151,7 @@ var DebtSnowballApp = (() => {
     const totalInc = _income.reduce((s, e) => s + e.amount, 0);
     const totalRec = [
       ..._costs.filter((c) => isCostDueInMonth(c, _monthKey)),
-      ..._appState.oneTimeCosts
+      ...appState.oneTimeCosts
     ].reduce((s, c) => s + c.amount, 0);
     const extra = Math.max(0, totalInc - totalRec - totalMinPay);
     const targetId = sortedDebts[0]?.id;
