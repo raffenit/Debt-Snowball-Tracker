@@ -1,3 +1,5 @@
+import { PANEL_BUILD_DATE, PANEL_VERSION } from './header.js';
+
 const PANEL_CSS = `
 :host {
     display: block;

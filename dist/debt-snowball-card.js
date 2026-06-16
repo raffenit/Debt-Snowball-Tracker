@@ -3356,6 +3356,15 @@ One-time costs will be removed, income will be cleared, and interval costs will 
     });
   }
 
+  // src/app/header.js
+  var PANEL_VERSION = "2.2.0";
+  var PANEL_BUILD_DATE = "2025-06-16";
+  var currentScript = document.currentScript;
+  var scriptSrc = currentScript?.src || "unknown";
+  var installType = scriptSrc.includes("hacsfiles") ? "HACS" : scriptSrc.includes("local") ? "Manual (/local/)" : scriptSrc.includes("community") ? "HACS (community)" : "Unknown";
+  console.info(`\u{1F4CA} Debt Snowball Tracker v${PANEL_VERSION} (${PANEL_BUILD_DATE})`);
+  console.info(`   Loaded from: ${installType} (${scriptSrc})`);
+
   // src/app/template.js
   var PANEL_CSS = `
 :host {
