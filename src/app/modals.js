@@ -1,16 +1,18 @@
+import { appState } from './state.js';
+import { escHtml, formatMoney } from '../core/pure-utils.js';
 
 function updateCostModalIntervalVisibility() {
-    const cat      = _root.getElementById('cost-category').value;
-    const intGrp   = _root.getElementById('cost-interval-group');
-    const custGrp  = _root.getElementById('cost-interval-custom-group');
-    const startGrp = _root.getElementById('cost-start-month-group');
+    const cat      = appState._root.getElementById('cost-category').value;
+    const intGrp   = appState._root.getElementById('cost-interval-group');
+    const custGrp  = appState._root.getElementById('cost-interval-custom-group');
+    const startGrp = appState._root.getElementById('cost-start-month-group');
     const isOneTime = cat === 'one-time';
     intGrp.style.display  = isOneTime ? 'none' : '';
     if (isOneTime) {
         custGrp.style.display = 'none';
         startGrp.style.display = 'none';
     } else {
-        const val = _root.getElementById('cost-interval').value;
+        const val = appState._root.getElementById('cost-interval').value;
         const isMultiMonth = val === 'custom' || parseInt(val) > 1;
         custGrp.style.display  = val === 'custom' ? '' : 'none';
         startGrp.style.display = isMultiMonth ? '' : 'none';
@@ -19,19 +21,19 @@ function updateCostModalIntervalVisibility() {
 
 // ─── Archive Viewer ───────────────────────────────────────────────────────────
 function openArchiveModal() {
-    const body = _root.getElementById('archive-body');
+    const body = appState._root.getElementById('archive-body');
     body.innerHTML = '';
 
-    if (monthlyArchives.length === 0) {
+    if (appState.monthlyArchives.length === 0) {
         body.innerHTML = '<div class="archive-empty">No archived months yet.<br>History is saved automatically when each month rolls over.</div>';
-        showModal(_root.getElementById('archive-modal'));
+        showModal(appState._root.getElementById('archive-modal'));
         return;
     }
 
     // Dropdown
     const select = document.createElement('select');
     select.className = 'input-group archive-select';
-    monthlyArchives.forEach((a, i) => {
+    appState.monthlyArchives.forEach((a, i) => {
         const opt = document.createElement('option');
         opt.value = i;
         opt.textContent = a.label;
@@ -43,7 +45,7 @@ function openArchiveModal() {
     body.appendChild(detailWrap);
 
     function renderArchiveDetail(idx) {
-        const a = monthlyArchives[idx];
+        const a = appState.monthlyArchives[idx];
         detailWrap.innerHTML = '';
 
         const summary = document.createElement('div');
@@ -140,11 +142,11 @@ function openArchiveModal() {
     renderArchiveDetail(0);
     select.addEventListener('change', () => renderArchiveDetail(Number(select.value)));
 
-    showModal(_root.getElementById('archive-modal'));
+    showModal(appState._root.getElementById('archive-modal'));
 }
 
 function closeArchiveModal() {
-    const modal = _root.getElementById('archive-modal');
+    const modal = appState._root.getElementById('archive-modal');
     modal.classList.remove('active');
     setTimeout(() => { modal.style.display = 'none'; }, 300);
 }
@@ -154,3 +156,5 @@ function showModal(modal) {
     void modal.offsetWidth;
     modal.classList.add('active');
 }
+
+export { closeArchiveModal, openArchiveModal, showModal, updateCostModalIntervalVisibility };

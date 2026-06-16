@@ -8,7 +8,7 @@ export {
     formatMoneySimple,
     escHtml,
     calcAutoMin,
-} from '../src/pure-utils.js';
+} from '../src/core/pure-utils.js';
 
 // Date utilities
 export {
@@ -23,7 +23,7 @@ export {
     intervalLabel,
     keyToHtmlMonth,
     htmlMonthToKey,
-} from '../src/date-utils.js';
+} from '../src/core/date-utils.js';
 
 // Simulation engine
 export {
@@ -35,12 +35,12 @@ export {
     setOneTimeCosts,
     setIncomeEntries,
     setStartingBalance,
-} from '../src/simulation.js';
+} from '../src/core/simulation.js';
 
 // Rollover logic
 export {
     calculateMonthRollover,
-} from '../src/rollover.js';
+} from '../src/core/rollover.js';
 
 // Constants
 export {
@@ -48,5 +48,5 @@ export {
     MAX_SIMULATION_MONTHS,
     DEFAULT_STRATEGY,
     DEBT_CHART_COLORS,
-} from '../src/constants.js';
+} from '../src/core/constants.js';
 

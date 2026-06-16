@@ -79,8 +79,8 @@ debt-snowball-tracker/
 ├── dist/
 │   └── debt-snowball-card.js      # Built browser bundle (from src/app/*.js)
 ├── src/
-│   ├── app/                       # Browser bundle source modules
-│   │   ├── 00-header.js … 83-render-support.js
+│   ├── app/                       # Browser bundle source modules (ES modules)
+│   │   ├── card.js, index.js, state.js, template.js, storage.js, …
 │   ├── constants.js               # App constants
 │   ├── date-utils.js              # Month key utilities & date math
 │   ├── pure-utils.js              # Formatting, calcAutoMin, escHtml
@@ -93,7 +93,7 @@ debt-snowball-tracker/
 │   ├── date-utils.test.js         # Date utility tests
 │   └── helpers.js                 # Test helper re-exports
 ├── scripts/
-│   └── build.js                   # Concatenates src/app/*.js → dist/
+│   └── build-esbuild.js           # Bundles src/app/*.js → dist/ with esbuild
 ├── docs/
 │   └── MODULAR_ARCHITECTURE.md    # Architecture documentation
 ├── package.json                   # Node test scripts & build command
@@ -119,7 +119,7 @@ The tracker uses a dedicated hidden Lovelace dashboard (`snowball-store`) as a J
 
 ### Simulation Engine
 
-The core engine (`src/simulation.js`) runs a month-by-month cash-flow simulation:
+The core engine (`src/core/simulation.js`) runs a month-by-month cash-flow simulation:
 
 1. **Income Scheduling** — Paychecks arrive on specific days; bills are paid only after sufficient cash has arrived
 2. **Strategy Sorting** — Snowball (smallest balance first) or Avalanche (highest rate first)
@@ -159,7 +159,7 @@ npm run test:dates      # Date utility tests
 
 ### Keeping `dist/` in Sync
 
-The `dist/debt-snowball-card.js` is currently a self-contained bundled file. Changes to `src/` must be manually copied into `dist/` (or a build step can be created with Rollup/esbuild).
+The `dist/debt-snowball-card.js` is built automatically by esbuild from the ES modules in `src/app/`. Run `npm run build` to regenerate it after any source change.
 
 Key functions to keep in sync:
 1. `runSimulation()` — Core simulation logic

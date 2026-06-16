@@ -1,36 +1,3363 @@
-// ─── 00-header.js ─────────────────────────────────────────────────────────────────
-/**
- * Debt Snowball Tracker — Home Assistant Lovelace Card
- * 
- * Installation via HACS (recommended):
- *   1. Add custom repository: https://github.com/raffenit/debt-snowball-tracker
- *   2. Install "Debt Snowball Tracker" in HACS → Frontend
- *   3. Add card to your dashboard: Edit Dashboard → Add Card → Debt Snowball Tracker
- *   4. For best experience: Set view type to "Panel" in the view settings
- * 
- * Manual installation:
- *   1. Copy debt-snowball-card.js to /config/www/
- *   2. Add as resource: Settings → Dashboards → Resources → Add Resource
- *      URL: /local/debt-snowball-card.js  Type: JavaScript Module
- *   3. Add card to dashboard
- */
+var DebtSnowballApp = (() => {
+  // src/app/state.js
+  var appState = {
+    // ─── Data Models ──────────────────────────────────────────────────────────
+    debts: [],
+    recurringCosts: [],
+    // Monthly, quarterly, annual costs (NOT one-time)
+    oneTimeCosts: [],
+    // One-time expenses for the current month only
+    incomeEntries: [],
+    checkpoints: [],
+    startingBalance: 0,
+    strategy: "snowball",
+    // 'snowball' | 'avalanche'
+    showMortgage: true,
+    // toggle mortgage visibility
+    paidStatus: {},
+    // { [id]: 'paid' | 'autopay' } — resets each calendar month
+    monthlyArchives: [],
+    // [{ month, label, incomeEntries, recurringCosts, checkpoints, startingBalance, totalIncome, totalCosts }]
+    spendingBudgets: [],
+    // [{ id, name, amount, exception, expenses: [] }]
+    expandedBudgets: /* @__PURE__ */ new Set(),
+    // UI state: which budget IDs are expanded
+    expandedCostSections: /* @__PURE__ */ new Set(["utility", "subscription", "other", "one-time"]),
+    // UI state
+    inlineExpenseBudget: null,
+    // UI state: which budget ID has inline add-expense form open
+    paydownChart: null,
+    lastSimPayoffDate: null,
+    // used for countdown ticker
+    countdownInterval: null,
+    viewingArchiveIndex: null,
+    // null = current month, number = index into monthlyArchives
+    workingMonthKey: null,
+    // the month the data is for
+    minPayOverrides: {},
+    // { [debtId]: amount } — this-month-only overrides
+    // ─── Root Element (set during init) ───────────────────────────────────────
+    _root: null,
+    // ─── DOM Elements (populated during init) ───────────────────────────────
+    debtsListContainer: null,
+    costsListContainer: null,
+    incomeListContainer: null,
+    addDebtBtn: null,
+    addCostBtn: null,
+    addIncomeBtn: null,
+    debtModal: null,
+    costModal: null,
+    incomeModal: null,
+    debtForm: null,
+    costForm: null,
+    incomeForm: null,
+    exportBtn: null,
+    importFileInput: null,
+    windfallModal: null,
+    checkinModal: null,
+    budgetModal: null,
+    budgetForm: null,
+    expenseModal: null,
+    expenseForm: null,
+    checkpointModal: null,
+    checkpointForm: null
+  };
+  function initDomRefs(root) {
+    appState._root = root;
+    root.getElementById = (id) => root.querySelector(`#${id}`);
+    appState.debtsListContainer = root.getElementById("debts-list");
+    appState.costsListContainer = root.getElementById("costs-list");
+    appState.incomeListContainer = root.getElementById("income-list");
+    appState.addDebtBtn = root.getElementById("add-debt-btn");
+    appState.addCostBtn = root.getElementById("add-cost-btn");
+    appState.addIncomeBtn = root.getElementById("add-income-btn");
+    appState.debtModal = root.getElementById("debt-modal");
+    appState.costModal = root.getElementById("cost-modal");
+    appState.incomeModal = root.getElementById("income-modal");
+    appState.debtForm = root.getElementById("debt-form");
+    appState.costForm = root.getElementById("cost-form");
+    appState.incomeForm = root.getElementById("income-form");
+    appState.exportBtn = root.getElementById("export-btn");
+    appState.importFileInput = root.getElementById("import-file");
+    appState.windfallModal = root.getElementById("windfall-modal");
+    appState.checkinModal = root.getElementById("checkin-modal");
+    appState.budgetModal = root.getElementById("budget-modal");
+    appState.budgetForm = root.getElementById("budget-form");
+    appState.expenseModal = root.getElementById("expense-modal");
+    appState.expenseForm = root.getElementById("expense-form");
+    appState.checkpointModal = root.getElementById("checkpoint-modal");
+    appState.checkpointForm = root.getElementById("checkpoint-form");
+  }
 
-// Version marker - check console to verify which file is loaded
-const PANEL_VERSION = '2.1.0-checkpoint-edit';
-const PANEL_BUILD_DATE = '2025-04-18';
+  // src/core/date-utils.js
+  function currentMonthKey() {
+    const d = /* @__PURE__ */ new Date();
+    return `${d.getFullYear()}-${d.getMonth()}`;
+  }
+  function formatMonthLabel(key) {
+    const [year, month] = key.split("-").map(Number);
+    return new Date(year, month).toLocaleDateString(void 0, { month: "long", year: "numeric" });
+  }
+  function monthKeyToIndex(key) {
+    const [y, m] = key.split("-").map(Number);
+    return y * 12 + m;
+  }
+  function addMonthsToKey(key, n) {
+    const total = monthKeyToIndex(key) + n;
+    return `${Math.floor(total / 12)}-${total % 12}`;
+  }
+  function isCostDueThisMonth(cost, monthKey) {
+    const key = monthKey || currentMonthKey();
+    if ((cost.category || "other") === "one-time") {
+      return !cost.addedMonth || cost.addedMonth === key;
+    }
+    if ((cost.intervalMonths || 1) <= 1) return true;
+    const next = cost.nextDueMonth || key;
+    const targetIdx = monthKeyToIndex(key);
+    const nextIdx = monthKeyToIndex(next);
+    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
+  }
+  function isCostDueInMonth(cost, monthKey) {
+    if ((cost.category || "other") === "one-time") {
+      return !cost.addedMonth || cost.addedMonth === monthKey;
+    }
+    if ((cost.intervalMonths || 1) <= 1) return true;
+    const next = cost.nextDueMonth || monthKey;
+    const targetIdx = monthKeyToIndex(monthKey);
+    const nextIdx = monthKeyToIndex(next);
+    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
+  }
+  function generateBiweeklyForMonth(label, amount, anchorDateStr, monthKey) {
+    const anchor = /* @__PURE__ */ new Date(anchorDateStr + "T00:00:00");
+    const [y, m] = monthKey.split("-").map(Number);
+    const monthStart = new Date(y, m, 1);
+    const monthEnd = new Date(y, m + 1, 0);
+    const msPerDay = 864e5;
+    const entries = [];
+    const daysDiff = Math.floor((monthStart - anchor) / msPerDay);
+    const offset = (daysDiff % 14 + 14) % 14;
+    let current = new Date(monthStart);
+    current.setDate(current.getDate() - offset);
+    while (current <= monthEnd) {
+      if (current >= monthStart) {
+        entries.push({
+          label,
+          amount,
+          day: current.getDate(),
+          date: current.toISOString().split("T")[0],
+          scheduleType: "biweekly",
+          scheduleAnchorDate: anchorDateStr
+        });
+      }
+      current = new Date(current.getTime() + 14 * msPerDay);
+    }
+    return entries;
+  }
+  function generateRecurringIncomeForMonth(entries, monthKey) {
+    const [y, m] = monthKey.split("-").map(Number);
+    const out = [];
+    for (const e of entries) {
+      const schedule = e.scheduleType || e.schedule || "monthly";
+      if (schedule === "one-time") continue;
+      if (schedule === "biweekly" && (e.scheduleAnchorDate || e.anchorDate)) {
+        const anchorDate = e.scheduleAnchorDate || e.anchorDate;
+        const biweekly = generateBiweeklyForMonth(e.label, e.amount, anchorDate, monthKey);
+        for (const b of biweekly) {
+          out.push({
+            id: e.id + "_" + b.date,
+            label: e.label,
+            amount: e.amount,
+            date: b.date,
+            scheduleType: "biweekly",
+            scheduleAnchorDate: anchorDate
+          });
+        }
+      } else {
+        const day = e.scheduleDay || parseInt(e.date.split("-")[2]);
+        const date = `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        out.push({
+          id: e.id,
+          label: e.label,
+          amount: e.amount,
+          date,
+          scheduleType: "monthly",
+          scheduleDay: day
+        });
+      }
+    }
+    return out;
+  }
+  function intervalLabel(n) {
+    if (!n || n <= 1) return null;
+    if (n === 3) return "\u{1F4C6} Quarterly";
+    if (n === 6) return "\u{1F4C6} Semi-Annual";
+    if (n === 12) return "\u{1F4C6} Annual";
+    return `\u{1F4C6} Every ${n} mo.`;
+  }
+  function keyToHtmlMonth(key) {
+    const [year, month] = key.split("-").map(Number);
+    return `${year}-${String(month + 1).padStart(2, "0")}`;
+  }
+  function htmlMonthToKey(htmlMonth) {
+    const [year, month] = htmlMonth.split("-").map(Number);
+    return `${year}-${month - 1}`;
+  }
 
-// Detect installation path for debugging
-const currentScript = document.currentScript;
-const scriptSrc = currentScript?.src || 'unknown';
-const installType = scriptSrc.includes('hacsfiles') ? 'HACS' :
-                    scriptSrc.includes('local') ? 'Manual (/local/)' :
-                    scriptSrc.includes('community') ? 'HACS (community)' : 'Unknown';
-console.info(`📊 Debt Snowball Tracker v${PANEL_VERSION} (${PANEL_BUILD_DATE})`);
-console.info(`   Loaded from: ${installType} (${scriptSrc})`);
+  // src/core/rollover.js
+  function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
+    const {
+      debts: debts2,
+      recurringCosts: recurringCosts2,
+      oneTimeCosts = [],
+      incomeEntries: incomeEntries2,
+      checkpoints,
+      startingBalance: startingBalance2,
+      paidStatus,
+      spendingBudgets
+    } = state;
+    const archive = {
+      month: closingMonthKey,
+      label: formatMonthLabel(closingMonthKey),
+      incomeEntries: [...incomeEntries2],
+      recurringCosts: [...recurringCosts2],
+      oneTimeCosts: [...oneTimeCosts],
+      checkpoints: [...checkpoints],
+      debts: debts2.map((d) => ({ ...d })),
+      startingBalance: startingBalance2,
+      paidStatus: { ...paidStatus },
+      totalIncome: incomeEntries2.reduce((s, e) => s + e.amount, 0),
+      totalCosts: [
+        ...recurringCosts2.filter((c) => isCostDueInMonth(c, closingMonthKey)),
+        ...oneTimeCosts
+      ].reduce((s, c) => s + c.amount, 0)
+    };
+    const day1Cp = checkpoints.find((cp) => cp.day === 1);
+    let cashPool = day1Cp ? day1Cp.amount : 0;
+    const totalIncome = incomeEntries2.reduce((s, e) => s + e.amount, 0);
+    const totalCosts = [
+      ...recurringCosts2.filter((c) => isCostDueInMonth(c, closingMonthKey)),
+      ...oneTimeCosts
+    ].reduce((s, c) => s + c.amount, 0);
+    const finalBalance = cashPool + totalIncome - totalCosts;
+    archive.finalBalance = finalBalance;
+    const nextIncome = generateRecurringIncomeForMonth(incomeEntries2, nextMonthKey);
+    const nextCheckpoints = finalBalance > 0 ? [{ id: "cp_" + Date.now(), day: 1, amount: finalBalance }] : [];
+    const cleanRecurring = recurringCosts2.filter((c) => (c.category || "other") !== "one-time");
+    const nextCosts = cleanRecurring.map((c) => {
+      if ((c.intervalMonths || 1) <= 1) return c;
+      let next = c.nextDueMonth || closingMonthKey;
+      while (monthKeyToIndex(next) <= monthKeyToIndex(closingMonthKey)) {
+        next = addMonthsToKey(next, c.intervalMonths);
+      }
+      return { ...c, nextDueMonth: next };
+    });
+    const nextBudgets = spendingBudgets.map((b) => ({
+      ...b,
+      expenses: [],
+      exception: b.exception?.month === closingMonthKey ? null : b.exception
+    }));
+    return {
+      archive,
+      nextState: {
+        incomeEntries: nextIncome,
+        checkpoints: nextCheckpoints,
+        recurringCosts: nextCosts,
+        oneTimeCosts: [],
+        paidStatus: {},
+        minPayOverrides: {},
+        spendingBudgets: nextBudgets
+      }
+    };
+  }
 
+  // src/core/constants.js
+  var MAX_SIMULATION_MONTHS = 1200;
 
-// ─── 10-template.js ─────────────────────────────────────────────────────────────────
-const PANEL_CSS = `
+  // src/core/simulation.js
+  var debts = [];
+  var recurringCosts = [];
+  var incomeEntries = [];
+  var startingBalance = 0;
+  function getStrategyOrder(debtList, strat) {
+    const copy = [...debtList];
+    if (strat === "avalanche") {
+      copy.sort((a, b) => {
+        const ra = a.promoZeroInterest ? a.originalRate || 0 : a.rate;
+        const rb = b.promoZeroInterest ? b.originalRate || 0 : b.rate;
+        return rb - ra || a.balance - b.balance;
+      });
+    } else {
+      copy.sort((a, b) => a.balance - b.balance);
+    }
+    return copy;
+  }
+  function runSimulation(strat) {
+    const totalIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const activeCosts = recurringCosts.filter((c) => isCostDueThisMonth(c));
+    const totalRecurringDirect = activeCosts.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
+    const totalRecurringCard = activeCosts.filter((c) => c.paymentMethod === "card").reduce((s, c) => s + c.amount, 0);
+    const totalRecurring = activeCosts.reduce((s, c) => s + c.amount, 0);
+    const effectiveBudget = totalIncome - totalRecurringDirect;
+    if (debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
+      return { valid: false, totalIncome, totalRecurring, effectiveBudget };
+    }
+    const totalMinPayments = debts.reduce((s, d) => s + d.minPayment, 0);
+    if (effectiveBudget < totalMinPayments) {
+      return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
+    }
+    const incomeDays = [...incomeEntries].map((e) => ({ day: parseInt(e.date.split("-")[2]), amount: e.amount })).sort((a, b) => a.day - b.day);
+    let simDebts = debts.map((d) => ({ ...d, interestPaid: 0 }));
+    let monthsElapsed = 0, totalInterestPaid = 0, payoffLog = [];
+    const perDebtMonthly = {};
+    simDebts.forEach((d) => {
+      perDebtMonthly[d.id] = [d.balance];
+    });
+    while (simDebts.some((d) => d.balance > 0) && monthsElapsed < MAX_SIMULATION_MONTHS) {
+      monthsElapsed++;
+      let availableCash = effectiveBudget + (monthsElapsed === 1 ? startingBalance : 0);
+      simDebts.forEach((d) => {
+        if (d.balance <= 0) return;
+        let effectiveRate = d.rate;
+        if (d.promoZeroInterest && d.promoExpiryDate) {
+          const today = /* @__PURE__ */ new Date();
+          const simDate = new Date(today.getFullYear(), today.getMonth() + monthsElapsed, 1);
+          if (simDate <= /* @__PURE__ */ new Date(d.promoExpiryDate + "T00:00:00")) effectiveRate = 0;
+          else effectiveRate = d.originalRate || d.rate;
+        }
+        const interest = d.balance * (effectiveRate / 100 / 12);
+        d.balance += interest;
+        totalInterestPaid += interest;
+        d.interestPaid += interest;
+      });
+      const alive = simDebts.filter((d) => d.balance > 0);
+      const ordered = getStrategyOrder(alive, strat);
+      const targetId = ordered[0]?.id;
+      const aliveMinSum = alive.reduce((s, d) => s + d.minPayment, 0);
+      const extraAvail = Math.max(0, effectiveBudget - aliveMinSum);
+      const paymentQueue = alive.map((d) => ({
+        id: d.id,
+        dueDay: d.dueDay || 1,
+        needed: Math.min(
+          d.balance,
+          d.minPayment + (d.id === targetId ? Math.min(extraAvail, Math.max(0, d.balance - d.minPayment)) : 0)
+        )
+      })).sort((a, b) => a.dueDay - b.dueDay);
+      let cashPool = 0, incomeIdx = 0;
+      for (const payment of paymentQueue) {
+        while (incomeIdx < incomeDays.length && incomeDays[incomeIdx].day <= payment.dueDay)
+          cashPool += incomeDays[incomeIdx++].amount;
+        while (cashPool < payment.needed && incomeIdx < incomeDays.length)
+          cashPool += incomeDays[incomeIdx++].amount;
+        const debt = simDebts.find((d) => d.id === payment.id);
+        if (!debt || debt.balance <= 0) continue;
+        const actual = Math.min(payment.needed, cashPool, debt.balance);
+        cashPool -= actual;
+        debt.balance = Math.max(0, debt.balance - actual);
+        if (debt.balance <= 0.01) {
+          debt.balance = 0;
+          if (!payoffLog.find((l) => l.id === debt.id))
+            payoffLog.push({ ...debt, payoffMonth: monthsElapsed });
+        }
+      }
+      simDebts.forEach((d) => {
+        perDebtMonthly[d.id].push(Math.max(0, d.balance));
+      });
+    }
+    const debtPayoffMonths = {};
+    payoffLog.forEach((l) => {
+      debtPayoffMonths[l.id] = l.payoffMonth;
+    });
+    const maxLen = Math.max(...Object.values(perDebtMonthly).map((a) => a.length));
+    const monthlyTotals = Array.from(
+      { length: maxLen },
+      (_, i) => Object.values(perDebtMonthly).reduce((sum, arr) => sum + (arr[i] ?? 0), 0)
+    );
+    return {
+      valid: true,
+      monthsElapsed,
+      totalInterestPaid,
+      payoffLog,
+      monthlyTotals,
+      perDebtMonthly,
+      debtPayoffMonths,
+      totalIncome,
+      totalRecurring,
+      effectiveBudget
+    };
+  }
+
+  // src/core/pure-utils.js
+  function formatMoney(n, currency = "USD", locale = "en-US") {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(n);
+  }
+  function formatOrdinal(day) {
+    const s = ["th", "st", "nd", "rd"];
+    const v = day % 100;
+    return day + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+  function escHtml(str) {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function calcAutoMin(balance, aprPct) {
+    if (!balance || balance <= 0) return null;
+    const monthlyInterest = balance * (aprPct / 100 / 12);
+    const onePercent = balance * 0.01;
+    return Math.max(25, parseFloat((onePercent + monthlyInterest).toFixed(2)));
+  }
+
+  // src/app/modals.js
+  function updateCostModalIntervalVisibility() {
+    const cat = appState._root.getElementById("cost-category").value;
+    const intGrp = appState._root.getElementById("cost-interval-group");
+    const custGrp = appState._root.getElementById("cost-interval-custom-group");
+    const startGrp = appState._root.getElementById("cost-start-month-group");
+    const isOneTime = cat === "one-time";
+    intGrp.style.display = isOneTime ? "none" : "";
+    if (isOneTime) {
+      custGrp.style.display = "none";
+      startGrp.style.display = "none";
+    } else {
+      const val = appState._root.getElementById("cost-interval").value;
+      const isMultiMonth = val === "custom" || parseInt(val) > 1;
+      custGrp.style.display = val === "custom" ? "" : "none";
+      startGrp.style.display = isMultiMonth ? "" : "none";
+    }
+  }
+  function openArchiveModal() {
+    const body = appState._root.getElementById("archive-body");
+    body.innerHTML = "";
+    if (appState.monthlyArchives.length === 0) {
+      body.innerHTML = '<div class="archive-empty">No archived months yet.<br>History is saved automatically when each month rolls over.</div>';
+      showModal(appState._root.getElementById("archive-modal"));
+      return;
+    }
+    const select = document.createElement("select");
+    select.className = "input-group archive-select";
+    appState.monthlyArchives.forEach((a, i) => {
+      const opt = document.createElement("option");
+      opt.value = i;
+      opt.textContent = a.label;
+      select.appendChild(opt);
+    });
+    body.appendChild(select);
+    const detailWrap = document.createElement("div");
+    body.appendChild(detailWrap);
+    function renderArchiveDetail(idx) {
+      const a = appState.monthlyArchives[idx];
+      detailWrap.innerHTML = "";
+      const summary = document.createElement("div");
+      summary.className = "archive-summary";
+      const fmt = (n) => typeof n === "number" ? formatMoney(n) : "$0.00";
+      summary.innerHTML = `
+            <div class="archive-summary-row">
+                <span class="archive-summary-label">Starting Balance</span>
+                <span class="archive-summary-value">${fmt(a.startingBalance)}</span>
+            </div>
+            <div class="archive-summary-row">
+                <span class="archive-summary-label">Total Income</span>
+                <span class="archive-summary-value income">${fmt(a.totalIncome)}</span>
+            </div>
+            <div class="archive-summary-row">
+                <span class="archive-summary-label">Total Costs</span>
+                <span class="archive-summary-value expense">${fmt(a.totalCosts)}</span>
+            </div>`;
+      if (a.incomeEntries && a.incomeEntries.length > 0) {
+        const incBtn = document.createElement("button");
+        incBtn.className = "archive-detail-toggle";
+        incBtn.textContent = `\u25B6 Income entries (${a.incomeEntries.length})`;
+        const incDetail = document.createElement("div");
+        incDetail.className = "archive-detail-section";
+        a.incomeEntries.forEach((e) => {
+          const row = document.createElement("div");
+          row.className = "archive-detail-item";
+          row.innerHTML = `<span>${escHtml(e.label)}</span><span>${fmt(e.amount)}</span>`;
+          incDetail.appendChild(row);
+        });
+        incBtn.addEventListener("click", () => {
+          incDetail.classList.toggle("open");
+          incBtn.textContent = incDetail.classList.contains("open") ? `\u25BC Income entries (${a.incomeEntries.length})` : `\u25B6 Income entries (${a.incomeEntries.length})`;
+        });
+        summary.appendChild(incBtn);
+        summary.appendChild(incDetail);
+      }
+      if (a.recurringCosts && a.recurringCosts.length > 0) {
+        const costBtn = document.createElement("button");
+        costBtn.className = "archive-detail-toggle";
+        costBtn.textContent = `\u25B6 Recurring costs (${a.recurringCosts.length})`;
+        const costDetail = document.createElement("div");
+        costDetail.className = "archive-detail-section";
+        a.recurringCosts.forEach((c) => {
+          const row = document.createElement("div");
+          row.className = "archive-detail-item";
+          row.innerHTML = `<span>${escHtml(c.name)} <span style="opacity:0.6;font-size:0.75em;">${c.category || "other"}</span></span><span>${fmt(c.amount)}</span>`;
+          costDetail.appendChild(row);
+        });
+        costBtn.addEventListener("click", () => {
+          costDetail.classList.toggle("open");
+          costBtn.textContent = costDetail.classList.contains("open") ? `\u25BC Recurring costs (${a.recurringCosts.length})` : `\u25B6 Recurring costs (${a.recurringCosts.length})`;
+        });
+        summary.appendChild(costBtn);
+        summary.appendChild(costDetail);
+      }
+      if (a.oneTimeCosts && a.oneTimeCosts.length > 0) {
+        const otBtn = document.createElement("button");
+        otBtn.className = "archive-detail-toggle";
+        otBtn.textContent = `\u25B6 One-time costs (${a.oneTimeCosts.length})`;
+        const otDetail = document.createElement("div");
+        otDetail.className = "archive-detail-section";
+        a.oneTimeCosts.forEach((c) => {
+          const row = document.createElement("div");
+          row.className = "archive-detail-item";
+          row.innerHTML = `<span>${escHtml(c.name)} <span style="opacity:0.6;font-size:0.75em;">one-time</span></span><span>${fmt(c.amount)}</span>`;
+          otDetail.appendChild(row);
+        });
+        otBtn.addEventListener("click", () => {
+          otDetail.classList.toggle("open");
+          otBtn.textContent = otDetail.classList.contains("open") ? `\u25BC One-time costs (${a.oneTimeCosts.length})` : `\u25B6 One-time costs (${a.oneTimeCosts.length})`;
+        });
+        summary.appendChild(otBtn);
+        summary.appendChild(otDetail);
+      }
+      detailWrap.appendChild(summary);
+    }
+    renderArchiveDetail(0);
+    select.addEventListener("change", () => renderArchiveDetail(Number(select.value)));
+    showModal(appState._root.getElementById("archive-modal"));
+  }
+  function closeArchiveModal() {
+    const modal = appState._root.getElementById("archive-modal");
+    modal.classList.remove("active");
+    setTimeout(() => {
+      modal.style.display = "none";
+    }, 300);
+  }
+  function showModal(modal) {
+    modal.style.display = "flex";
+    void modal.offsetWidth;
+    modal.classList.add("active");
+  }
+
+  // src/app/render-export.js
+  function exportData() {
+    const dataStr = JSON.stringify({
+      debts: appState.debts,
+      incomeEntries: appState.incomeEntries,
+      recurringCosts: appState.recurringCosts,
+      oneTimeCosts: appState.oneTimeCosts,
+      checkpoints: appState.checkpoints,
+      strategy: appState.strategy
+    }, null, 2);
+    const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
+    const link = document.createElement("a");
+    link.setAttribute("href", dataUri);
+    link.setAttribute("download", `debt-snowball-backup-${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}.json`);
+    link.click();
+  }
+  function importData(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const hasData = appState.debts.length > 0 || appState.recurringCosts.length > 0 || appState.incomeEntries.length > 0;
+    const doImport = () => {
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        let data;
+        try {
+          data = JSON.parse(ev.target.result);
+        } catch {
+          showNotificationToast("Error: Invalid backup file \u2014 could not parse JSON.", "error");
+          return;
+        }
+        try {
+          if (data.debts) appState.debts = data.debts;
+          if (data.recurringCosts) appState.recurringCosts = data.recurringCosts;
+          if (data.oneTimeCosts) appState.oneTimeCosts = data.oneTimeCosts;
+          if (data.incomeEntries) appState.incomeEntries = data.incomeEntries;
+          if (data.checkpoints) appState.checkpoints = data.checkpoints;
+          if (data.strategy) appState.strategy = data.strategy;
+          if (data.monthlyBudget !== void 0 && !data.incomeEntries) {
+            const now = /* @__PURE__ */ new Date();
+            appState.incomeEntries = [{
+              id: Date.now().toString(),
+              label: "Monthly Budget (migrated)",
+              date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`,
+              amount: data.monthlyBudget
+            }];
+          }
+          await saveData();
+          location.reload();
+        } catch (err) {
+          console.error("Debt Snowball: import save failed \u2014", err);
+          showNotificationToast("Error: Data parsed but could not be saved to server.", "error");
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    };
+    hasData ? showImportConfirmModal(doImport, () => {
+      e.target.value = "";
+    }) : doImport();
+  }
+  function showImportConfirmModal(onConfirm, onCancel) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal active";
+    overlay.style.zIndex = "200";
+    overlay.innerHTML = `
+        <div class="modal-content" style="max-width:400px;">
+            <div class="modal-header"><h3>\u26A0\uFE0F Replace Existing Data?</h3></div>
+            <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:1.5rem;line-height:1.6;">
+                Importing will <strong style="color:var(--text-primary);">replace all your current data</strong>. Export a backup first if needed.
+            </p>
+            <div style="display:flex;gap:0.75rem;justify-content:flex-end;flex-wrap:wrap;">
+                <button class="btn btn-secondary" id="import-cancel-btn">Cancel</button>
+                <button class="btn btn-secondary" id="import-export-first-btn">Export First, then Import</button>
+                <button class="btn btn-danger"    id="import-confirm-btn">Replace Anyway</button>
+            </div>
+        </div>`;
+    appState._root.appendChild(overlay);
+    overlay.querySelector("#import-cancel-btn").addEventListener("click", () => {
+      overlay.remove();
+      onCancel();
+    });
+    overlay.querySelector("#import-export-first-btn").addEventListener("click", () => {
+      exportData();
+      overlay.remove();
+      onConfirm();
+    });
+    overlay.querySelector("#import-confirm-btn").addEventListener("click", () => {
+      overlay.remove();
+      onConfirm();
+    });
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        overlay.remove();
+        onCancel();
+      }
+    });
+  }
+  function showNotificationToast(message, type = "info") {
+    const existing = appState._root.getElementById("notif-toast");
+    if (existing) existing.remove();
+    const toast = document.createElement("div");
+    toast.id = "notif-toast";
+    toast.className = `undo-toast undo-toast-${type}`;
+    toast.innerHTML = `<span class="undo-toast-msg">${message}</span>`;
+    appState._root.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add("undo-toast-visible"));
+    setTimeout(() => dismissToast(toast), 4e3);
+  }
+
+  // src/app/render-support.js
+  function startCountdown(payoffDate) {
+    stopCountdown();
+    updateCountdownDisplay(payoffDate);
+    appState.countdownInterval = setInterval(() => updateCountdownDisplay(payoffDate), 6e4);
+  }
+  function stopCountdown() {
+    if (appState.countdownInterval) {
+      clearInterval(appState.countdownInterval);
+      appState.countdownInterval = null;
+    }
+  }
+  function updateCountdownDisplay(payoffDate) {
+    const el = appState._root.getElementById("stat-countdown");
+    if (!el) return;
+    const now = /* @__PURE__ */ new Date();
+    const diff = payoffDate - now;
+    if (diff <= 0) {
+      el.textContent = "\u{1F389} Debt Free!";
+      return;
+    }
+    const days = Math.ceil(diff / (1e3 * 60 * 60 * 24));
+    el.textContent = days.toLocaleString();
+  }
+  function autoCalcMinPaymentCC() {
+    const balance = parseFloat(appState._root.getElementById("debt-balance").value) || 0;
+    const rate = parseFloat(appState._root.getElementById("debt-rate").value) || 0;
+    const min = calcAutoMin(balance, rate);
+    if (min !== null) {
+      appState._root.getElementById("debt-min-payment").value = min.toFixed(2);
+      showAutoMinHint(min, balance, rate);
+    }
+  }
+  function updateAutoMinHint() {
+    const balance = parseFloat(appState._root.getElementById("debt-balance").value) || 0;
+    const rate = parseFloat(appState._root.getElementById("debt-rate").value) || 0;
+    if (balance > 0 && rate >= 0) {
+      const min = calcAutoMin(balance, rate);
+      if (min !== null) showAutoMinHint(min, balance, rate);
+    } else {
+      const hint = appState._root.getElementById("auto-min-hint");
+      hint.style.display = "none";
+    }
+  }
+  function showAutoMinHint(min, balance, rate) {
+    const hint = appState._root.getElementById("auto-min-hint");
+    hint.textContent = `Suggested minimum: ${formatMoney(min)} (1% of balance + monthly interest, min $25)`;
+    hint.style.display = "block";
+  }
+  function autoCalcMinPayment() {
+    if (!appState._root.getElementById("debt-promo-toggle").checked) return;
+    const balance = parseFloat(appState._root.getElementById("debt-balance").value) || 0;
+    const expiryDate = appState._root.getElementById("debt-promo-expiry").value;
+    if (!expiryDate || balance <= 0) return;
+    const now = /* @__PURE__ */ new Date();
+    const expiry = /* @__PURE__ */ new Date(expiryDate + "T00:00:00");
+    const diff = (expiry.getFullYear() - now.getFullYear()) * 12 + (expiry.getMonth() - now.getMonth());
+    if (diff > 0) {
+      appState._root.getElementById("debt-min-payment").value = (Math.ceil(balance / diff * 100) / 100).toFixed(2);
+    }
+    appState._root.getElementById("auto-min-hint").style.display = "none";
+  }
+  function openWindfallModal() {
+    appState._root.getElementById("windfall-amount").value = "";
+    appState._root.getElementById("windfall-results").style.display = "none";
+    appState.windfallModal.style.display = "flex";
+    void appState.windfallModal.offsetWidth;
+    appState.windfallModal.classList.add("active");
+    setTimeout(() => appState._root.getElementById("windfall-amount").focus(), 50);
+  }
+  function closeWindfallModal() {
+    appState.windfallModal.classList.remove("active");
+    setTimeout(() => {
+      appState.windfallModal.style.display = "none";
+    }, 300);
+  }
+  function calcWindfall() {
+    const amount = parseFloat(appState._root.getElementById("windfall-amount").value);
+    if (!amount || amount <= 0) {
+      showNotificationToast("Enter a windfall amount first.", "error");
+      return;
+    }
+    const baseResult = runSimulation(appState.strategy);
+    if (!baseResult.valid) {
+      showNotificationToast("Fix your budget setup first.", "error");
+      return;
+    }
+    const windfallResult = runSimulationWithWindfall(amount, appState.strategy);
+    const today = /* @__PURE__ */ new Date();
+    const baseDateStr = new Date(today.getFullYear(), today.getMonth() + baseResult.monthsElapsed, 1).toLocaleDateString(void 0, { month: "short", year: "numeric" });
+    const afterDateStr = new Date(today.getFullYear(), today.getMonth() + windfallResult.monthsElapsed, 1).toLocaleDateString(void 0, { month: "short", year: "numeric" });
+    appState._root.getElementById("wf-before-date").textContent = baseDateStr;
+    appState._root.getElementById("wf-before-interest").textContent = formatMoney(baseResult.totalInterestPaid);
+    appState._root.getElementById("wf-before-months").textContent = baseResult.monthsElapsed;
+    appState._root.getElementById("wf-after-date").textContent = afterDateStr;
+    appState._root.getElementById("wf-after-interest").textContent = formatMoney(windfallResult.totalInterestPaid);
+    appState._root.getElementById("wf-after-months").textContent = windfallResult.monthsElapsed;
+    const monthsSaved = baseResult.monthsElapsed - windfallResult.monthsElapsed;
+    const interestSaved = baseResult.totalInterestPaid - windfallResult.totalInterestPaid;
+    const banner = appState._root.getElementById("windfall-savings-banner");
+    if (monthsSaved > 0 || interestSaved > 0.01) {
+      banner.className = "windfall-savings-banner windfall-savings-positive";
+      banner.innerHTML = `\u{1F389} You'd be debt-free <strong>${monthsSaved} month${monthsSaved !== 1 ? "s" : ""} sooner</strong> and save <strong>${formatMoney(interestSaved)}</strong> in interest!`;
+    } else {
+      banner.className = "windfall-savings-banner";
+      banner.innerHTML = `This windfall would fully eliminate your debt \u2014 congratulations!`;
+    }
+    const alloc = appState._root.getElementById("windfall-allocation");
+    alloc.innerHTML = '<div class="windfall-alloc-title">Optimal allocation:</div>';
+    windfallResult.allocation.forEach((a) => {
+      const pct = Math.min(100, a.applied / amount * 100);
+      alloc.innerHTML += `
+            <div class="windfall-alloc-row">
+                <span class="windfall-alloc-name">${escHtml(a.name)}</span>
+                <span class="windfall-alloc-amount">${formatMoney(a.applied)}</span>
+                <div class="windfall-alloc-bar"><div class="windfall-alloc-fill" style="width:${pct}%"></div></div>
+            </div>`;
+    });
+    appState._root.getElementById("windfall-results").style.display = "block";
+  }
+  function runSimulationWithWindfall(windfall, strat) {
+    let simDebts = appState.debts.map((d) => ({ ...d }));
+    const ordered = getStrategyOrder(simDebts, strat);
+    let remaining = windfall;
+    const allocation = [];
+    for (const debt of ordered) {
+      if (remaining <= 0) break;
+      const apply = Math.min(remaining, debt.balance);
+      const live = simDebts.find((d) => d.id === debt.id);
+      if (live) {
+        live.balance = Math.max(0, live.balance - apply);
+      }
+      allocation.push({ name: debt.name, applied: apply });
+      remaining -= apply;
+    }
+    const originalDebts = appState.debts;
+    appState.debts = simDebts.filter((d) => d.balance > 0.01);
+    const result = runSimulation(strat);
+    appState.debts = originalDebts;
+    result.allocation = allocation;
+    return result;
+  }
+  function launchConfetti() {
+    const canvas = appState._root.getElementById("confetti-canvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.display = "block";
+    const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#a855f7", "#ec4899", "#14b8a6", "#f97316"];
+    const PIECES = 140;
+    const particles = [];
+    for (let i = 0; i < PIECES; i++) {
+      particles.push({
+        x: canvas.width * Math.random(),
+        y: -20 - Math.random() * canvas.height * 0.3,
+        w: 6 + Math.random() * 8,
+        h: 10 + Math.random() * 8,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        rotation: Math.random() * Math.PI * 2,
+        vx: (Math.random() - 0.5) * 4,
+        vy: 2.5 + Math.random() * 4,
+        vr: (Math.random() - 0.5) * 0.25,
+        opacity: 1
+      });
+    }
+    let frame = 0;
+    const MAX_FRAMES = 160;
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      frame++;
+      const fadeStart = MAX_FRAMES * 0.6;
+      particles.forEach((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.12;
+        p.rotation += p.vr;
+        if (frame > fadeStart) p.opacity = Math.max(0, 1 - (frame - fadeStart) / (MAX_FRAMES - fadeStart));
+        ctx.save();
+        ctx.globalAlpha = p.opacity;
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rotation);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        if (p.w > 11) {
+          ctx.arc(0, 0, p.w / 2, 0, Math.PI * 2);
+        } else {
+          ctx.rect(-p.w / 2, -p.h / 2, p.w, p.h);
+        }
+        ctx.fill();
+        ctx.restore();
+      });
+      if (frame < MAX_FRAMES) {
+        requestAnimationFrame(draw);
+      } else {
+        canvas.style.display = "none";
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  function initTabs() {
+    const tabBtns = appState._root.querySelectorAll(".tab-btn");
+    const tabPanels = appState._root.querySelectorAll(".tab-panel");
+    tabBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.tab;
+        tabBtns.forEach((b) => b.classList.remove("active"));
+        tabPanels.forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        const panel = appState._root.getElementById("tab-" + target);
+        if (panel) panel.classList.add("active");
+        localStorage.setItem("snowball_active_tab", target);
+      });
+    });
+    const savedTab = localStorage.getItem("snowball_active_tab");
+    if (savedTab) {
+      const savedBtn = appState._root.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
+      if (savedBtn) savedBtn.click();
+    }
+  }
+
+  // src/app/storage.js
+  var STORE_URL_PATH2 = "snowball-store";
+  async function ensureStoreDashboard2() {
+    const conn = appState._root._hass.connection;
+    try {
+      const dashboards = await conn.sendMessagePromise({ type: "lovelace/dashboards/list" });
+      if (dashboards.some((d) => d.url_path === STORE_URL_PATH2)) return;
+    } catch (err) {
+    }
+    try {
+      await conn.sendMessagePromise({
+        type: "lovelace/dashboards/create",
+        url_path: STORE_URL_PATH2,
+        title: "Snowball Store",
+        icon: "mdi:database",
+        show_in_sidebar: false,
+        require_admin: false
+      });
+    } catch (err) {
+      const msg = String(err?.message ?? err).toLowerCase();
+      if (!msg.includes("already") && !msg.includes("duplicate") && !msg.includes("exists")) {
+        throw err;
+      }
+    }
+  }
+  async function loadBackendData() {
+    try {
+      const result = await appState._root._hass.connection.sendMessagePromise({
+        type: "lovelace/config",
+        url_path: STORE_URL_PATH2,
+        force: true
+      });
+      if (result) {
+        appState.debts = result.debts || [];
+        appState.recurringCosts = result.recurringCosts || [];
+        appState.incomeEntries = result.incomeEntries || [];
+        appState.checkpoints = result.checkpoints || [];
+        appState.strategy = result.strategy || "snowball";
+        appState.showMortgage = result.showMortgage !== false;
+        appState.startingBalance = result.startingBalance || 0;
+        appState.monthlyArchives = result.monthlyArchives || [];
+        appState.spendingBudgets = result.spendingBudgets || [];
+        appState.minPayOverrides = result.minPayOverrides || {};
+        if (result.oneTimeCosts) {
+          appState.oneTimeCosts = result.oneTimeCosts;
+        } else {
+          appState.oneTimeCosts = appState.recurringCosts.filter((c) => (c.category || "other") === "one-time");
+          appState.recurringCosts = appState.recurringCosts.filter((c) => (c.category || "other") !== "one-time");
+        }
+        const prevMonth = result.paidMonth;
+        const thisMonth = currentMonthKey2();
+        appState.workingMonthKey = prevMonth && monthKeyToIndex(prevMonth) > monthKeyToIndex(thisMonth) ? prevMonth : thisMonth;
+        if (prevMonth && monthKeyToIndex(thisMonth) > monthKeyToIndex(prevMonth)) {
+          const rollover = calculateMonthRollover({
+            debts: appState.debts,
+            recurringCosts: appState.recurringCosts,
+            oneTimeCosts: appState.oneTimeCosts,
+            incomeEntries: appState.incomeEntries,
+            checkpoints: appState.checkpoints,
+            startingBalance: appState.startingBalance,
+            paidStatus: appState.paidStatus,
+            spendingBudgets: appState.spendingBudgets
+          }, prevMonth, thisMonth);
+          appState.monthlyArchives.unshift(rollover.archive);
+          if (appState.monthlyArchives.length > 24) appState.monthlyArchives.pop();
+          appState.incomeEntries = rollover.nextState.incomeEntries;
+          appState.checkpoints = rollover.nextState.checkpoints;
+          appState.recurringCosts = rollover.nextState.recurringCosts;
+          appState.oneTimeCosts = rollover.nextState.oneTimeCosts;
+          appState.paidStatus = rollover.nextState.paidStatus;
+          appState.minPayOverrides = rollover.nextState.minPayOverrides;
+          appState.spendingBudgets = rollover.nextState.spendingBudgets;
+          saveData().catch((err) => console.error("Debt Snowball: rollover save failed \u2014", err));
+        } else if (result.paidStatus) {
+          appState.paidStatus = result.paidStatus;
+        } else {
+          appState.paidStatus = {};
+        }
+      }
+    } catch (err) {
+      const msg = String(err?.message ?? err).toLowerCase();
+      if (!msg.includes("not_found") && !msg.includes("not found") && !msg.includes("config_not_found")) {
+        console.error("Debt Snowball: error loading data \u2014", err);
+      }
+    }
+    const savedTab = localStorage.getItem("snowball_active_tab");
+    if (savedTab) {
+      const savedBtn = appState._root.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
+      if (savedBtn) savedBtn.click();
+    }
+    initTabs();
+    renderUI();
+  }
+  async function saveData() {
+    if (!appState._root._hass) return;
+    const activeTabEl = appState._root.querySelector(".tab-btn.active");
+    if (activeTabEl) localStorage.setItem("snowball_active_tab", activeTabEl.dataset.tab);
+    await ensureStoreDashboard2();
+    await appState._root._hass.connection.sendMessagePromise({
+      type: "lovelace/config/save",
+      url_path: STORE_URL_PATH2,
+      config: {
+        debts: appState.debts,
+        recurringCosts: appState.recurringCosts,
+        oneTimeCosts: appState.oneTimeCosts,
+        incomeEntries: appState.incomeEntries,
+        checkpoints: appState.checkpoints,
+        strategy: appState.strategy,
+        startingBalance: appState.startingBalance,
+        showMortgage: appState.showMortgage,
+        paidStatus: appState.paidStatus,
+        paidMonth: appState.workingMonthKey || currentMonthKey2(),
+        monthlyArchives: appState.monthlyArchives,
+        spendingBudgets: appState.spendingBudgets,
+        minPayOverrides: appState.minPayOverrides
+      }
+    });
+  }
+  function currentMonthKey2() {
+    const d = /* @__PURE__ */ new Date();
+    return `${d.getFullYear()}-${d.getMonth()}`;
+  }
+
+  // src/app/render-checkpoints.js
+  function renderCheckpointsList() {
+    const container = appState._root.getElementById("checkpoints-list");
+    if (!container) return;
+    if (appState.checkpoints.length === 0) {
+      container.innerHTML = "";
+      return;
+    }
+    const sorted = [...appState.checkpoints].sort((a, b) => a.day - b.day);
+    const formatMoneyLocal = (n) => {
+      const currency = appState._root._currency || "USD";
+      const locale = appState._root._locale || "en-US";
+      return new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(n);
+    };
+    const listHtml = sorted.map((cp) => `
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: rgba(168,85,247,0.06); border-radius: 6px; border: 1px solid rgba(168,85,247,0.2);">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(168,85,247,0.15); padding: 0.2rem 0.4rem; border-radius: 4px;">Day ${cp.day}</span>
+                <span style="font-weight: 500; color: var(--text-primary);">${formatMoneyLocal(cp.amount)}</span>
+            </div>
+            <button class="btn btn-icon delete-checkpoint-btn" data-id="${cp.id}" title="Remove checkpoint" style="padding: 0.25rem; font-size: 0.75rem; background: transparent; color: var(--danger-color); border: none; cursor: pointer;">
+                \u2715
+            </button>
+        </div>
+    `).join("");
+    container.innerHTML = `
+        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Mid-month checkpoints:</div>
+        ${listHtml}
+    `;
+  }
+  function openCheckpointModal(cpId = null) {
+    appState.checkpointForm.reset();
+    appState._root.getElementById("checkpoint-id").value = "";
+    if (cpId) {
+      appState._root.getElementById("checkpoint-modal-title").textContent = "Edit Checkpoint";
+      const cp = appState.checkpoints.find((c) => c.id === cpId);
+      if (cp) {
+        appState._root.getElementById("checkpoint-id").value = cp.id;
+        appState._root.getElementById("checkpoint-day").value = cp.day;
+        appState._root.getElementById("checkpoint-amount").value = cp.amount.toFixed(2);
+      }
+    } else {
+      appState._root.getElementById("checkpoint-modal-title").textContent = "Add Checkpoint";
+    }
+    appState.checkpointModal.style.display = "flex";
+    setTimeout(() => appState.checkpointModal.classList.add("active"), 10);
+    setTimeout(() => appState._root.getElementById("checkpoint-amount").focus(), 50);
+  }
+  function closeCheckpointModal() {
+    appState.checkpointModal.classList.remove("active");
+    setTimeout(() => {
+      appState.checkpointModal.style.display = "none";
+    }, 300);
+  }
+  function saveCheckpoint() {
+    try {
+      const id = appState._root.getElementById("checkpoint-id").value;
+      const day = parseInt(appState._root.getElementById("checkpoint-day").value);
+      const amount = parseFloat(appState._root.getElementById("checkpoint-amount").value);
+      if (!day || day < 1 || day > 31) throw new Error("Please select a valid day (1-31).");
+      if (!Number.isFinite(amount) || amount < 0) throw new Error("Please enter a valid amount.");
+      const existingSameDay = appState.checkpoints.find((cp) => cp.day === day && cp.id !== id);
+      if (existingSameDay) throw new Error(`A checkpoint for day ${day} already exists.`);
+      if (id) {
+        const idx = appState.checkpoints.findIndex((cp) => cp.id === id);
+        if (idx !== -1) {
+          appState.checkpoints[idx] = { id, day, amount };
+        }
+      } else {
+        const newCp = {
+          id: "cp_" + Date.now(),
+          day,
+          amount
+        };
+        appState.checkpoints.push(newCp);
+      }
+      appState.checkpoints.sort((a, b) => a.day - b.day);
+      saveData().then(() => {
+        renderCheckpointsList();
+        renderUI();
+        closeCheckpointModal();
+        showSavedToast(id ? "Checkpoint updated \u2713" : "Checkpoint added \u2713");
+      }).catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    } catch (err) {
+      showErrorToast(err.message || "Failed to save checkpoint.");
+    }
+  }
+
+  // src/app/render-budgets.js
+  function getBudgetAmount(budget) {
+    const exc = budget.exception;
+    if (exc && exc.month === (appState.workingMonthKey || currentMonthKey())) return exc.amount;
+    return budget.amount;
+  }
+  function renderSpendingBudgets() {
+    const container = appState._root.getElementById("budgets-list");
+    if (!container) return;
+    if (appState.spendingBudgets.length === 0) {
+      container.innerHTML = `
+            <div class="empty-state">
+                No spending budgets yet.<br>Track discretionary spending by setting a spending limit for each category.
+                <br><button class="empty-cta-btn" id="empty-add-budget-btn">+ Add Your First Budget</button>
+            </div>`;
+      const emptyBtn = container.querySelector("#empty-add-budget-btn");
+      if (emptyBtn) emptyBtn.addEventListener("click", () => openBudgetModal());
+      return;
+    }
+    const now = /* @__PURE__ */ new Date();
+    const monthName = now.toLocaleDateString(void 0, { month: "long", year: "numeric" });
+    const totalBudgeted = appState.spendingBudgets.reduce((s, b) => s + getBudgetAmount(b), 0);
+    const totalSpent = appState.spendingBudgets.reduce((s, b) => s + (b.expenses || []).reduce((x, e) => x + e.amount, 0), 0);
+    const totalOver = totalSpent - totalBudgeted;
+    const metaSpentClass = totalOver > 0 ? "budget-meta-over" : "budget-meta-ok";
+    const metaBar = `
+        <div class="budget-meta-bar">
+            <span class="budget-meta-month">\u{1F4C5} ${monthName}</span>
+            <div class="budget-meta-divider"></div>
+            <span class="budget-meta-budgeted">${appState.spendingBudgets.length} budget${appState.spendingBudgets.length !== 1 ? "s" : ""} \xB7 ${formatMoney(totalBudgeted)} total limit</span>
+            <span class="budget-meta-total">
+                <span class="budget-meta-budgeted">Spent:</span>
+                <span class="${metaSpentClass}">${formatMoney(totalSpent)}</span>
+                ${totalOver > 0 ? `<span class="budget-meta-over" style="font-size:0.75rem;">\u26A0 ${formatMoney(totalOver)} over</span>` : `<span class="budget-meta-ok" style="font-size:0.75rem;">${formatMoney(totalBudgeted - totalSpent)} left</span>`}
+            </span>
+        </div>`;
+    const cards = appState.spendingBudgets.map((budget, cardIdx) => {
+      const budgetAmt = getBudgetAmount(budget);
+      const expenses = budget.expenses || [];
+      const spent = expenses.reduce((s, e) => s + e.amount, 0);
+      const over = spent - budgetAmt;
+      const isOver = over > 0;
+      const rawPct = budgetAmt > 0 ? spent / budgetAmt * 100 : spent > 0 ? 100 : 0;
+      const barPct = Math.min(rawPct, 100);
+      const isExpanded = appState.expandedBudgets.has(budget.id);
+      const showInline = appState.inlineExpenseBudget === budget.id;
+      const hasExc = budget.exception?.month === (appState.workingMonthKey || currentMonthKey());
+      let fillGradient;
+      if (isOver) {
+        fillGradient = "linear-gradient(90deg, var(--danger-color), #f87171)";
+      } else if (rawPct < 70) {
+        fillGradient = "linear-gradient(90deg, var(--success-color), #34d399)";
+      } else if (rawPct < 90) {
+        fillGradient = "linear-gradient(90deg, var(--warning-color), #fbbf24)";
+      } else {
+        fillGradient = "linear-gradient(90deg, #f87171, var(--danger-color))";
+      }
+      const expenseRows = expenses.length === 0 ? `<p class="budget-empty-text">No expenses logged yet.</p>` : [...expenses].sort((a, b) => (b.date || "") > (a.date || "") ? 1 : -1).map((exp) => `
+                <div class="budget-expense-row" data-expense-id="${exp.id}">
+                    <span class="expense-description">${escHtml(exp.description)}</span>
+                    <span class="expense-date">${exp.date ? (/* @__PURE__ */ new Date(exp.date + "T00:00:00")).toLocaleDateString(void 0, { month: "short", day: "numeric" }) : ""}</span>
+                    <span class="expense-amount" style="color:var(--expense-color);">\u2212${formatMoney(exp.amount)}</span>
+                    <div class="expense-actions">
+                        <button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">\u270E</button>
+                        <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">\u2715</button>
+                    </div>
+                </div>`).join("");
+      const totalRow = expenses.length > 0 ? `
+            <div class="budget-total-row ${isOver ? "budget-total-over" : "budget-total-ok"}">
+                <span>${formatMoney(spent)} / ${formatMoney(budgetAmt)}</span>
+                ${isOver ? `<span style="color:var(--danger-color); font-weight:700;">\u26A0 Over by ${formatMoney(over)}</span>` : `<span style="color:var(--success-color);">${formatMoney(budgetAmt - spent)} remaining</span>`}
+            </div>` : "";
+      const inlineForm = showInline ? `
+            <div class="inline-expense-form">
+                <div class="inline-expense-form-row">
+                    <div class="inline-field field-desc">
+                        <label>Description</label>
+                        <input type="text" class="inline-desc" placeholder="e.g. Walmart run" autocomplete="off">
+                    </div>
+                    <div class="inline-field">
+                        <label>Amount ($)</label>
+                        <input type="number" class="inline-amount" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="inline-field">
+                        <label>Date</label>
+                        <input type="date" class="inline-date" value="${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}">
+                    </div>
+                    <div class="inline-expense-form-actions">
+                        <button class="btn-inline-save" data-budget-id="${budget.id}">Save</button>
+                        <button class="btn-inline-cancel" data-budget-id="${budget.id}">\u2715</button>
+                    </div>
+                </div>
+            </div>` : "";
+      const addExpBtn = showInline ? `<button class="btn btn-secondary btn-sm btn-toggle-inline-expense" data-budget-id="${budget.id}" style="border-color:rgba(91,127,255,0.4);color:var(--accent-color);">\u2715 Cancel</button>` : `<button class="btn btn-secondary btn-sm btn-toggle-inline-expense" data-budget-id="${budget.id}">+ Add Expense</button>`;
+      return `
+        <div class="budget-card ${isOver ? "budget-over" : ""}" data-budget-id="${budget.id}" data-expanded="${isExpanded}" style="animation-delay:${cardIdx * 0.06}s;">
+            <div class="budget-card-header" data-toggle-budget="${budget.id}">
+                <div class="budget-header-left">
+                    <span class="budget-toggle-icon">\u25B6</span>
+                    <span class="budget-name">${escHtml(budget.name)}</span>
+                    ${hasExc ? `<span class="budget-exception-badge">Override: ${formatMoney(budgetAmt)}</span>` : ""}
+                </div>
+                <div class="budget-header-right">
+                    ${isOver ? `<span class="budget-over-label">\u26A0 Over ${formatMoney(over)}</span>` : `<span class="budget-remaining">${formatMoney(budgetAmt - spent)} left</span>`}
+                    <span class="budget-spent-of">${formatMoney(spent)} / ${formatMoney(budgetAmt)}</span>
+                </div>
+            </div>
+            <div class="budget-progress-track">
+                <div class="budget-progress-fill" style="width:${barPct}%; background:${fillGradient};"></div>
+            </div>
+            ${isExpanded ? `
+            <div class="budget-expenses-panel">
+                ${expenseRows}
+                ${totalRow}
+                ${inlineForm}
+                <div class="budget-card-actions">
+                    ${addExpBtn}
+                    <button class="btn btn-sm btn-override btn-override-budget" data-budget-id="${budget.id}">${hasExc ? "\u270E Edit" : "\u26A1 Override"}</button>
+                    <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}">\u270E Edit</button>
+                    <button class="btn btn-secondary btn-sm btn-delete-budget" data-budget-id="${budget.id}" style="margin-left:auto; border-color:var(--danger-color); color:var(--danger-color);">\u{1F5D1} Delete</button>
+                </div>
+            </div>` : ""}
+        </div>`;
+    }).join("");
+    container.innerHTML = metaBar + cards;
+    if (appState.inlineExpenseBudget) {
+      const descInput = container.querySelector(".inline-expense-form .inline-desc");
+      if (descInput) setTimeout(() => descInput.focus(), 50);
+    }
+  }
+  function openBudgetModal(budgetId = null, focusException = false) {
+    appState.budgetForm.reset();
+    appState._root.getElementById("budget-id").value = "";
+    appState._root.getElementById("budget-exception-amount-group").style.display = "none";
+    appState._root.getElementById("budget-exception-toggle").checked = false;
+    if (budgetId) {
+      appState._root.getElementById("budget-modal-title").textContent = "Edit Budget";
+      const budget = appState.spendingBudgets.find((b) => b.id === budgetId);
+      if (budget) {
+        appState._root.getElementById("budget-id").value = budget.id;
+        appState._root.getElementById("budget-name").value = budget.name;
+        appState._root.getElementById("budget-amount").value = budget.amount;
+        const hasExc = budget.exception?.month === currentMonthKey();
+        if (hasExc || focusException) {
+          appState._root.getElementById("budget-exception-toggle").checked = true;
+          appState._root.getElementById("budget-exception-amount-group").style.display = "";
+          if (hasExc) appState._root.getElementById("budget-exception-amount").value = budget.exception.amount;
+        }
+      }
+    } else {
+      appState._root.getElementById("budget-modal-title").textContent = "Add Budget";
+    }
+    appState.budgetModal.style.display = "flex";
+    void appState.budgetModal.offsetWidth;
+    appState.budgetModal.classList.add("active");
+    setTimeout(() => appState.budgetModal.querySelector("input:not([type=hidden])").focus(), 50);
+  }
+  function closeBudgetModal() {
+    appState.budgetModal.classList.remove("active");
+    setTimeout(() => {
+      appState.budgetModal.style.display = "none";
+    }, 300);
+  }
+  function saveBudget() {
+    try {
+      const id = appState._root.getElementById("budget-id").value;
+      const name = appState._root.getElementById("budget-name").value.trim();
+      const amount = parseFloat(appState._root.getElementById("budget-amount").value);
+      const useExc = appState._root.getElementById("budget-exception-toggle").checked;
+      const excAmt = parseFloat(appState._root.getElementById("budget-exception-amount").value);
+      if (!name) throw new Error("Please enter a category name.");
+      if (isNaN(amount) || amount < 0) throw new Error("Please enter a valid budget amount.");
+      if (useExc && (isNaN(excAmt) || excAmt < 0)) throw new Error("Please enter a valid override amount.");
+      const _wk = appState.workingMonthKey || currentMonthKey();
+      const exception = useExc ? { month: _wk, amount: excAmt } : null;
+      if (id) {
+        const idx = appState.spendingBudgets.findIndex((b) => b.id === id);
+        if (idx !== -1) {
+          const existing = appState.spendingBudgets[idx];
+          const newException = useExc ? { month: _wk, amount: excAmt } : existing.exception?.month === _wk ? null : existing.exception;
+          appState.spendingBudgets[idx] = { ...existing, name, amount, exception: newException };
+        }
+      } else {
+        appState.spendingBudgets.push({ id: Date.now().toString(), name, amount, exception, expenses: [] });
+      }
+      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      closeBudgetModal();
+      renderSpendingBudgets();
+      showSavedToast(id ? "Budget updated \u2713" : "Budget added \u2713");
+    } catch (err) {
+      showErrorToast(err.message || "Failed to save budget.");
+    }
+  }
+  function deleteBudget(id) {
+    const budget = appState.spendingBudgets.find((b) => b.id === id);
+    if (!budget) return;
+    if (!confirm(`Delete the "${budget.name}" budget and all its expenses for this month?`)) return;
+    appState.spendingBudgets = appState.spendingBudgets.filter((b) => b.id !== id);
+    appState.expandedBudgets.delete(id);
+    saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    renderSpendingBudgets();
+    showSavedToast("Budget deleted \u2713");
+  }
+  function openExpenseModal(budgetId, expenseId = null) {
+    appState.expenseForm.reset();
+    appState._root.getElementById("expense-budget-id").value = budgetId;
+    appState._root.getElementById("expense-id").value = "";
+    const budget = appState.spendingBudgets.find((b) => b.id === budgetId);
+    const budgetLabel = budget ? ` \u2014 ${budget.name}` : "";
+    if (expenseId) {
+      appState._root.getElementById("expense-modal-title").textContent = `Edit Expense${budgetLabel}`;
+      const exp = budget?.expenses?.find((e) => e.id === expenseId);
+      if (exp) {
+        appState._root.getElementById("expense-id").value = exp.id;
+        appState._root.getElementById("expense-description").value = exp.description;
+        appState._root.getElementById("expense-amount").value = exp.amount;
+        appState._root.getElementById("expense-date").value = exp.date || "";
+      }
+    } else {
+      appState._root.getElementById("expense-modal-title").textContent = `Add Expense${budgetLabel}`;
+      appState._root.getElementById("expense-date").value = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    }
+    appState.expenseModal.style.display = "flex";
+    void appState.expenseModal.offsetWidth;
+    appState.expenseModal.classList.add("active");
+    setTimeout(() => appState.expenseModal.querySelector("input:not([type=hidden])").focus(), 50);
+  }
+  function closeExpenseModal() {
+    appState.expenseModal.classList.remove("active");
+    setTimeout(() => {
+      appState.expenseModal.style.display = "none";
+    }, 300);
+  }
+  function saveExpense() {
+    try {
+      const budgetId = appState._root.getElementById("expense-budget-id").value;
+      const expenseId = appState._root.getElementById("expense-id").value;
+      const description = appState._root.getElementById("expense-description").value.trim();
+      const amount = parseFloat(appState._root.getElementById("expense-amount").value);
+      const date = appState._root.getElementById("expense-date").value;
+      if (!description) throw new Error("Please enter a description.");
+      if (isNaN(amount) || amount < 0) throw new Error("Please enter a valid amount.");
+      const budget = appState.spendingBudgets.find((b) => b.id === budgetId);
+      if (!budget) throw new Error("Budget not found.");
+      if (!budget.expenses) budget.expenses = [];
+      if (expenseId) {
+        const idx = budget.expenses.findIndex((e) => e.id === expenseId);
+        if (idx !== -1) budget.expenses[idx] = { id: expenseId, description, amount, date };
+      } else {
+        budget.expenses.push({ id: Date.now().toString(), description, amount, date });
+      }
+      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      closeExpenseModal();
+      appState.expandedBudgets.add(budgetId);
+      renderSpendingBudgets();
+      showSavedToast(expenseId ? "Expense updated \u2713" : "Expense added \u2713");
+    } catch (err) {
+      showErrorToast(err.message || "Failed to save expense.");
+    }
+  }
+  function deleteExpense(budgetId, expenseId) {
+    const budget = appState.spendingBudgets.find((b) => b.id === budgetId);
+    if (!budget) return;
+    const deleted = budget.expenses.find((e) => e.id === expenseId);
+    if (!deleted) return;
+    budget.expenses = budget.expenses.filter((e) => e.id !== expenseId);
+    saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    renderSpendingBudgets();
+    showUndoToast("Expense deleted", () => {
+      budget.expenses.push(deleted);
+      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      renderSpendingBudgets();
+    });
+  }
+
+  // src/app/render-lists.js
+  function renderIncomeList() {
+    appState.incomeListContainer.innerHTML = "";
+    const summaryEl = appState._root.getElementById("income-summary");
+    if (appState.incomeEntries.length === 0) {
+      appState.incomeListContainer.innerHTML = `
+            <div class="empty-state">
+                No income entries yet.<br>Add your paychecks and other income for this month.
+                <br><button class="empty-cta-btn" id="empty-add-income-btn">+ Add Income</button>
+            </div>`;
+      appState.incomeListContainer.style.display = "block";
+      summaryEl.style.display = "none";
+      const emptyBtn = appState.incomeListContainer.querySelector("#empty-add-income-btn");
+      if (emptyBtn) emptyBtn.addEventListener("click", () => openIncomeModal());
+      return;
+    }
+    appState.incomeListContainer.style.display = "grid";
+    const sorted = [...appState.incomeEntries.sort((a, b) => a.date.localeCompare(b.date))];
+    sorted.forEach((entry, idx) => {
+      const dateStr = (/* @__PURE__ */ new Date(entry.date + "T00:00:00")).toLocaleDateString(void 0, { month: "short", day: "numeric" });
+      const el = document.createElement("div");
+      el.className = "debt-card income-card";
+      el.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${idx * 0.08}s`;
+      el.innerHTML = `
+            <div class="income-compact-inner">
+                <div class="income-compact-info">
+                    <span class="income-compact-name">${escHtml(entry.label)}</span>
+                    <span class="income-compact-date">${dateStr}</span>
+                </div>
+                <div class="income-compact-right">
+                    <span class="income-compact-amount">${formatMoney(entry.amount)}</span>
+                    <button class="btn btn-xs btn-secondary btn-edit-income" data-id="${entry.id}">Edit</button>
+                    <button class="btn btn-xs btn-danger btn-delete-income" data-id="${entry.id}">Delete</button>
+                </div>
+            </div>`;
+      appState.incomeListContainer.appendChild(el);
+    });
+    appState.incomeListContainer.querySelectorAll(".btn-edit-income").forEach((b) => b.addEventListener("click", (e) => openIncomeModal(e.target.dataset.id)));
+    appState.incomeListContainer.querySelectorAll(".btn-delete-income").forEach((b) => b.addEventListener("click", (e) => deleteIncome(e.target.dataset.id)));
+    const total = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
+    summaryEl.style.display = "block";
+    summaryEl.innerHTML = `<span class="income-summary-label">Total Monthly Income:</span><span class="income-summary-value">${formatMoney(total)}</span>`;
+  }
+  function renderRecurringCostsList() {
+    appState.costsListContainer.innerHTML = "";
+    const recurringSummaryEl = appState._root.getElementById("recurring-summary");
+    const visibleRecurring = appState.recurringCosts.filter((c) => isCostDueThisMonth(c));
+    const totalRecurring = visibleRecurring.reduce((sum, c) => sum + c.amount, 0);
+    const directRecurring = visibleRecurring.filter((c) => c.paymentMethod === "direct").reduce((sum, c) => sum + c.amount, 0);
+    const cardRecurring = visibleRecurring.filter((c) => c.paymentMethod === "card").reduce((sum, c) => sum + c.amount, 0);
+    const totalOneTime = appState.oneTimeCosts.reduce((sum, c) => sum + c.amount, 0);
+    const grandTotal = totalRecurring + totalOneTime;
+    if (recurringSummaryEl) {
+      const otLabel = totalOneTime > 0 ? ` + ${formatMoney(totalOneTime)} one-time` : "";
+      recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${grandTotal.toLocaleString(void 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><span class="recurring-due-breakdown">\u{1F3E6} Direct ${formatMoney(directRecurring)} &nbsp;\xB7&nbsp; \u{1F4B3} Card ${formatMoney(cardRecurring)}${otLabel}</span>`;
+    }
+    const hasAnyCosts = visibleRecurring.length > 0 || appState.oneTimeCosts.length > 0;
+    if (!hasAnyCosts) {
+      appState.costsListContainer.innerHTML = `
+            <div class="empty-state">
+                No costs yet.<br>Add your bills, subscriptions, and one-time expenses.
+                <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Cost</button>
+            </div>`;
+      appState.costsListContainer.style.display = "block";
+      const emptyBtn = appState.costsListContainer.querySelector("#empty-add-cost-btn");
+      if (emptyBtn) emptyBtn.addEventListener("click", () => openCostModal());
+      return;
+    }
+    appState.costsListContainer.style.display = "block";
+    const currentDay = (/* @__PURE__ */ new Date()).getDate();
+    let cardIndex = 0;
+    const recurringSorted = [...visibleRecurring].sort((a, b) => (a.dueDay || 1) - (b.dueDay || 1));
+    const categories = [
+      { key: "utility", label: "\u26A1 Utilities (Monthly Bills)", cls: "cost-subsection-utility" },
+      { key: "subscription", label: "\u{1F4F1} Subscriptions (Recurring Services)", cls: "cost-subsection-subscription" },
+      { key: "other", label: "\u{1F4E6} Other Recurring Bills", cls: "cost-subsection-other" }
+    ];
+    categories.forEach(({ key, label, cls }) => {
+      const group = recurringSorted.filter((c) => (c.category || "other") === key);
+      if (group.length === 0) return;
+      const section = document.createElement("div");
+      section.className = `cost-subsection ${cls}`;
+      const isCompact = key === "utility" || key === "subscription";
+      const isCollapsible = isCompact;
+      const isExpanded = appState.expandedCostSections.has(key);
+      const groupTotal = group.reduce((s, c) => s + c.amount, 0);
+      const header = document.createElement("div");
+      header.className = "cost-subsection-header" + (isCollapsible ? " cost-section-collapsible" : "");
+      if (isCollapsible) header.dataset.toggleSection = key;
+      const toggleIcon = isCollapsible ? `<span class="cost-section-toggle-icon${isExpanded ? "" : " collapsed"}">\u25BC</span>` : "";
+      header.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">${toggleIcon}${label}</span><span class="cost-subsection-total">${formatMoney(groupTotal)}/mo</span>`;
+      section.appendChild(header);
+      if (!isCollapsible || isExpanded) {
+        const grid = document.createElement("div");
+        grid.className = "debts-list";
+        grid.style.display = "grid";
+        if (isCompact) {
+          grid.style.gridTemplateColumns = "1fr";
+          grid.style.gap = "0.4rem";
+        }
+        group.forEach((cost) => renderCostCard(cost, grid, false, currentDay));
+        section.appendChild(grid);
+      }
+      appState.costsListContainer.appendChild(section);
+    });
+    if (appState.oneTimeCosts.length > 0) {
+      const otSection = document.createElement("div");
+      otSection.className = "cost-subsection cost-subsection-onetime";
+      const otTotal = appState.oneTimeCosts.reduce((s, c) => s + c.amount, 0);
+      const otHeader = document.createElement("div");
+      otHeader.className = "cost-subsection-header";
+      otHeader.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">\u{1F534} ONE-TIME EXPENSES (This Month Only)</span><span class="cost-subsection-total">${formatMoney(otTotal)}</span>`;
+      otSection.appendChild(otHeader);
+      const otGrid = document.createElement("div");
+      otGrid.className = "debts-list";
+      otGrid.style.display = "grid";
+      appState.oneTimeCosts.forEach((cost) => renderCostCard(cost, otGrid, true, currentDay));
+      otSection.appendChild(otGrid);
+      appState.costsListContainer.appendChild(otSection);
+    }
+    appState.costsListContainer.querySelectorAll(".btn-edit-cost").forEach((b) => b.addEventListener("click", (e) => openCostModal(e.target.dataset.id)));
+    appState.costsListContainer.querySelectorAll(".btn-delete-cost").forEach((b) => b.addEventListener("click", (e) => deleteCost(e.target.dataset.id)));
+    appState.costsListContainer.querySelectorAll(".btn-mark-paid").forEach((b) => b.addEventListener("click", (e) => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === "true")));
+  }
+  function renderCostCard(cost, grid, isOneTime, currentDay) {
+    const isPastDue = (cost.dueDay || 1) <= currentDay;
+    const isCard = cost.paymentMethod === "card";
+    const isDue = isOneTime || isCostDueThisMonth(cost);
+    const intN = cost.intervalMonths || 1;
+    const paidState = appState.paidStatus[cost.id];
+    const paymentMethodBadge = isCard ? '<span class="debt-type-badge card-badge">\u{1F4B3} Card</span>' : '<span class="debt-type-badge direct-badge">\u{1F3E6} Direct</span>';
+    const amountTypeBadge = (cost.amountType || "fixed") === "flexible" ? '<span class="amount-type-badge flexible-badge">\u301C Flexible</span>' : "";
+    let freqBadge;
+    if (isOneTime) {
+      freqBadge = '<span class="interval-badge" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);">\u{1F534} ONE-TIME</span>';
+    } else if (intN > 1) {
+      freqBadge = `<span class="interval-badge">${intervalLabel(intN)}</span>`;
+    } else {
+      freqBadge = '<span class="interval-badge" style="background:rgba(99,102,241,0.1);color:var(--primary-light);border:1px solid rgba(99,102,241,0.25);">\u{1F4C5} Monthly</span>';
+    }
+    const notDueBadge = !isDue && intN > 1 ? `<span class="not-due-badge">Next: ${formatMonthLabel(cost.nextDueMonth)}</span>` : "";
+    const autoBadge = !isOneTime && cost.autoPay ? '<span class="autopay-badge">\u26A1 Auto-Pay</span>' : "";
+    const paidOverlay = paidState ? buildPaidOverlay(cost.autoPay) : "";
+    let dueFreq;
+    if (isOneTime) {
+      dueFreq = "One-Time Only";
+    } else if (intN > 1) {
+      dueFreq = intervalLabel(intN).replace("\u{1F4C6} ", "");
+    } else {
+      dueFreq = "Monthly";
+    }
+    const el = document.createElement("div");
+    const isCompact = !isOneTime && (cost.category === "utility" || cost.category === "subscription");
+    if (isCompact) {
+      el.className = "debt-card cost-card cost-card-compact" + (isCard ? " cost-card-credit" : " cost-card-direct") + (paidState ? " card-paid" : "") + (isDue ? "" : " not-due-month");
+      const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join("");
+      const metaParts = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
+      el.innerHTML = `
+            ${paidOverlay}
+            <div class="cost-compact-body">
+                <div class="cost-compact-info">
+                    <div class="cost-compact-name-row">
+                        <span class="cost-compact-name">${escHtml(cost.name)}</span>
+                        <span class="cost-amount cost-compact-amount">${formatMoney(cost.amount)}</span>
+                    </div>
+                    ${badgesHtml ? `<div class="cost-compact-badges">${badgesHtml}</div>` : ""}
+                    <div class="cost-compact-meta">${metaParts.map((p, i) => i < metaParts.length - 1 ? `<span>${p}</span><span class="cost-meta-dot">\xB7</span>` : `<span>${p}</span>`).join("")}</div>
+                </div>
+                <div class="cost-compact-actions">
+                    ${isDue ? `<div class="cost-compact-paid">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue)}</div>` : ""}
+                    <div class="cost-mini-actions">
+                        <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">\u270E</button>
+                        <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">\u2715</button>
+                    </div>
+                </div>
+            </div>`;
+    } else {
+      el.className = "debt-card cost-card" + (isCard ? " cost-card-credit" : " cost-card-direct") + (paidState ? " card-paid" : "") + (isDue ? "" : " not-due-month") + (isOneTime ? " cost-card-onetime" : "");
+      const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join("");
+      const amountLabel = isOneTime ? "One-Time Amount" : intN > 1 ? "Amount" : "Monthly Amount";
+      const paymentMethodLabel = isCard ? "Credit / Debit Card" : "Direct Pay (Bank / Cash)";
+      const dueValue = `${formatOrdinal(cost.dueDay || 1)} (${dueFreq})`;
+      el.innerHTML = `
+            ${paidOverlay}
+            <div class="debt-name">${escHtml(cost.name)}</div>
+            ${badgesHtml ? `<div class="cost-badges-line">${badgesHtml}</div>` : ""}
+            <div class="debt-detail"><span class="debt-detail-label">${amountLabel}</span><span class="debt-detail-value cost-amount">${formatMoney(cost.amount)}</span></div>
+            <div class="debt-detail"><span class="debt-detail-label">Due</span><span class="debt-detail-value">${dueValue}</span></div>
+            <div class="debt-detail"><span class="debt-detail-label">Payment</span><span class="debt-detail-value">${paymentMethodLabel}</span></div>
+            <div class="paid-action-row">${isDue ? buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue) : ""}</div>
+            <div class="cost-icon-actions">
+                <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">\u270E</button>
+                <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">\u2715</button>
+            </div>`;
+    }
+    grid.appendChild(el);
+  }
+  function renderDebtsList(simResults) {
+    appState.debtsListContainer.innerHTML = "";
+    const debtsSummaryEl = appState._root.getElementById("debts-summary");
+    const mortgageToggleBtn = appState._root.getElementById("mortgage-toggle-btn");
+    const isArchiveView = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
+    const archiveData = isArchiveView ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
+    const _debts = archiveData ? archiveData.debts || appState.debts : appState.debts;
+    const _paidStatus = archiveData ? archiveData.paidStatus || {} : appState.paidStatus;
+    const hasMortgage = _debts.some((d) => d.type === "mortgage");
+    if (mortgageToggleBtn) {
+      mortgageToggleBtn.style.display = hasMortgage ? "" : "none";
+      mortgageToggleBtn.textContent = appState.showMortgage ? "Hide Mortgage" : "Show Mortgage";
+    }
+    if (_debts.length === 0) {
+      if (debtsSummaryEl) debtsSummaryEl.textContent = "Total Debt: $0.00";
+      appState.debtsListContainer.innerHTML = `
+            <div class="empty-state">
+                No debts added yet.<br>Add your credit cards, loans, and other debts to start your payoff plan.
+                <br><button class="empty-cta-btn" id="empty-add-debt-btn">+ Add Debt</button>
+            </div>`;
+      appState.debtsListContainer.style.display = "block";
+      const emptyBtn = appState.debtsListContainer.querySelector("#empty-add-debt-btn");
+      if (emptyBtn) emptyBtn.addEventListener("click", () => openDebtModal());
+      return;
+    }
+    const totalDebt = _debts.reduce((sum, d) => sum + d.balance, 0);
+    if (debtsSummaryEl) {
+      debtsSummaryEl.textContent = `Total Debt: $${totalDebt.toLocaleString(void 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    appState.debtsListContainer.style.display = "block";
+    const ordered = getStrategyOrder(_debts, appState.strategy);
+    const currentDay = (/* @__PURE__ */ new Date()).getDate();
+    const visible = appState.showMortgage ? ordered : ordered.filter((d) => d.type !== "mortgage");
+    const promoDebts = visible.filter((d) => d.promoZeroInterest);
+    const regularDebts = visible.filter((d) => !d.promoZeroInterest);
+    const targetId = visible[0]?.id;
+    function buildDebtCard(debt, globalIdx) {
+      const isPastDue = (debt.dueDay || 1) <= currentDay;
+      const payoffMonths = simResults?.debtPayoffMonths?.[debt.id];
+      const isTarget = debt.id === targetId;
+      const paidState = _paidStatus[debt.id];
+      const debtElt = document.createElement("div");
+      debtElt.className = "debt-card" + (debt.promoZeroInterest ? " promo-card" : "") + (paidState ? " card-paid" : "") + (isTarget ? " snowball-target-card" : "");
+      debtElt.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${globalIdx * 0.09}s`;
+      const promoBadge = debt.promoZeroInterest ? '<span class="promo-badge">\u{1F389} 0% Promo</span>' : "";
+      const autoBadge = debt.autoPay ? '<span class="autopay-badge">\u26A1 Auto-Pay</span>' : "";
+      const typeLabel = debt.type ? debt.type.replace("-", " ").replace(/\b\w/g, (l) => l.toUpperCase()) : "";
+      const typeIcon = debt.type === "credit-card" ? "\u{1F4B3}" : debt.type === "personal-loan" ? "\u{1F91D}" : debt.type === "student-loan" ? "\u{1F393}" : debt.type === "auto-loan" ? "\u{1F697}" : debt.type === "mortgage" ? "\u{1F3E0}" : "\u{1F4CC}";
+      const typeBadge = debt.type ? `<span class="debt-type-badge ${debt.type === "credit-card" ? "card-badge" : ""}">${typeIcon} ${typeLabel}</span>` : "";
+      let promoExpiryRow = "";
+      if (debt.promoZeroInterest && debt.promoExpiryDate) {
+        const expStr = (/* @__PURE__ */ new Date(debt.promoExpiryDate + "T00:00:00")).toLocaleDateString(void 0, { month: "short", day: "numeric", year: "numeric" });
+        promoExpiryRow = `<div class="debt-detail"><span class="debt-detail-label">Promo Expires</span><span class="debt-detail-value promo-expiry-value">${expStr}</span></div>`;
+      }
+      const rateDisplay = debt.promoZeroInterest ? '0% APR <span class="promo-auto-note">(promo)</span>' : `${debt.rate}% APR`;
+      const minPayNote = debt.promoZeroInterest ? '<span class="promo-auto-note">(auto: payoff by promo end)</span>' : "";
+      const payoffLine = payoffMonths != null ? `<div class="debt-detail payoff-months-row">
+                <span class="debt-detail-label">Paid off in</span>
+                <span class="debt-detail-value payoff-months-value">${payoffMonths} month${payoffMonths !== 1 ? "s" : ""}</span>
+               </div>` : "";
+      const targetBadge = isTarget ? `<div class="snowball-target-banner">${appState.strategy === "snowball" ? "\u2744\uFE0F" : "\u{1F30A}"} ${appState.strategy === "snowball" ? "Snowball" : "Avalanche"} Target \u2014 extra payments go here</div>` : "";
+      const payUrlRow = debt.paymentUrl ? `<div class="debt-detail debt-pay-url-row">
+                <a href="${escHtml(debt.paymentUrl)}" target="_blank" rel="noopener noreferrer" class="btn-pay-now">Pay Now \u2192</a>
+               </div>` : "";
+      const paidOverlay = paidState ? buildPaidOverlay(debt.autoPay) : "";
+      debtElt.innerHTML = `
+            ${paidOverlay}
+            <div class="debt-order-badge" title="${appState.strategy === "snowball" ? "Payoff order: smallest balance first" : "Payoff order: highest interest first"}">${globalIdx + 1}</div>
+            <div class="debt-name">${escHtml(debt.name)}</div>
+            <div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.35rem;">${typeBadge}${promoBadge}${autoBadge}</div>
+            ${targetBadge}
+            <div class="debt-detail debt-balance-row"><span class="debt-detail-label">Balance</span><span class="debt-detail-value debt-balance-value">${formatMoney(debt.balance)}</span></div>
+            <div class="debt-detail"><span class="debt-detail-label">Interest Rate</span><span class="debt-detail-value">${rateDisplay}</span></div>
+            <div class="debt-detail"><span class="debt-detail-label">Min Payment</span><span class="debt-detail-value">${formatMoney(debt.minPayment)} ${minPayNote}</span></div>
+            <div class="debt-detail"><span class="debt-detail-label">Due Day</span><span class="debt-detail-value">${formatOrdinal(debt.dueDay || 1)} of each month</span></div>
+            ${promoExpiryRow}
+            ${payoffLine}
+            ${payUrlRow}
+            <div class="paid-action-row">${buildPaidButton(debt.id, debt.autoPay, paidState, isPastDue)}</div>
+            <div class="debt-actions">
+                <button class="btn btn-secondary btn-edit" data-id="${debt.id}">Edit</button>
+                <button class="btn btn-danger btn-delete" data-id="${debt.id}">Delete</button>
+            </div>`;
+      return debtElt;
+    }
+    function appendSection(debtsSubset, globalOffset, headerEl) {
+      const wrapper = document.createElement("div");
+      if (headerEl) wrapper.appendChild(headerEl);
+      const grid = document.createElement("div");
+      grid.className = "debts-list";
+      grid.style.display = "grid";
+      debtsSubset.forEach((debt, i) => grid.appendChild(buildDebtCard(debt, globalOffset + i)));
+      wrapper.appendChild(grid);
+      appState.debtsListContainer.appendChild(wrapper);
+    }
+    if (promoDebts.length > 0) {
+      const header = document.createElement("div");
+      header.className = "promo-section-header";
+      const promoTotal = promoDebts.reduce((s, d) => s + d.balance, 0);
+      header.innerHTML = `<span>\u{1F389} 0% Promo \u2014 Pay Off Before Rate Jumps!</span><span>${formatMoney(promoTotal)}</span>`;
+      appendSection(promoDebts, 0, header);
+    }
+    if (regularDebts.length > 0) {
+      let header = null;
+      if (promoDebts.length > 0) {
+        header = document.createElement("div");
+        header.className = "regular-section-header";
+        header.textContent = "\u{1F4CB} Standard Debts";
+      }
+      appendSection(regularDebts, promoDebts.length, header);
+    }
+    appState.debtsListContainer.querySelectorAll(".btn-edit").forEach((b) => b.addEventListener("click", (e) => openDebtModal(e.target.dataset.id)));
+    appState.debtsListContainer.querySelectorAll(".btn-delete").forEach((b) => b.addEventListener("click", (e) => deleteDebt(e.target.dataset.id)));
+    appState.debtsListContainer.querySelectorAll(".btn-mark-paid").forEach((b) => b.addEventListener("click", (e) => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === "true")));
+  }
+  function buildPaidButton(id, autoPay, paidState, isPastDue) {
+    if (paidState) {
+      return `<button class="btn btn-paid-undo btn-mark-paid" data-id="${id}" data-autopay="${!!autoPay}">\u2713 Paid this month \u2014 tap to undo</button>`;
+    }
+    if (autoPay) {
+      if (isPastDue) {
+        return `<button class="btn btn-mark-paid" style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24; font-weight: 600; width: 100%; font-size: 0.8rem; padding: 0.5rem 1rem;" data-id="${id}" data-autopay="true">\u26A1 Auto-Paid</button>`;
+      } else {
+        return `<button class="btn" disabled style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); width: 100%; font-size: 0.8rem; padding: 0.5rem 1rem; cursor: not-allowed;">\u26A1 Scheduled for Auto-Pay</button>`;
+      }
+    }
+    return `<button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false">Mark as Paid This Month</button>`;
+  }
+  function buildPaidOverlay(autoPay) {
+    return `
+        <div class="paid-overlay">
+            <span class="paid-overlay-icon">\u2713</span>
+            <span class="paid-overlay-text">Paid This Month</span>
+        </div>`;
+  }
+
+  // src/app/render-charts.js
+  var DEBT_COLORS = [
+    { border: "rgba(59,130,246,1)", bg: "rgba(59,130,246,0.08)" },
+    { border: "rgba(16,185,129,1)", bg: "rgba(16,185,129,0.08)" },
+    { border: "rgba(245,158,11,1)", bg: "rgba(245,158,11,0.08)" },
+    { border: "rgba(239,68,68,1)", bg: "rgba(239,68,68,0.08)" },
+    { border: "rgba(168,85,247,1)", bg: "rgba(168,85,247,0.08)" },
+    { border: "rgba(236,72,153,1)", bg: "rgba(236,72,153,0.08)" },
+    { border: "rgba(20,184,166,1)", bg: "rgba(20,184,166,0.08)" },
+    { border: "rgba(249,115,22,1)", bg: "rgba(249,115,22,0.08)" }
+  ];
+  function renderPaydownChart(monthlyTotals, perDebtMonthly) {
+    const canvas = appState._root.getElementById("paydown-chart");
+    if (!canvas) return;
+    if (appState.paydownChart) {
+      try {
+        appState.paydownChart.destroy();
+      } catch (e) {
+      }
+      appState.paydownChart = null;
+    }
+    const maxLen = monthlyTotals.length;
+    if (maxLen === 0) {
+      canvas.style.height = "0";
+      return;
+    }
+    canvas.style.height = "300px";
+    const labels = monthlyTotals.map((_, i) => {
+      const d = /* @__PURE__ */ new Date();
+      d.setMonth(d.getMonth() + i + 1);
+      return d.toLocaleDateString(void 0, { month: "short", year: "numeric" });
+    });
+    const datasets = [];
+    const orderedDebts = getStrategyOrder(appState.debts, appState.strategy);
+    orderedDebts.forEach((debt, idx) => {
+      const color = DEBT_COLORS[idx % DEBT_COLORS.length];
+      const series = perDebtMonthly[debt.id] || [];
+      const data = Array.from({ length: maxLen }, (_, i) => Number((series[i] ?? 0).toFixed(2)));
+      datasets.push({
+        label: debt.name,
+        data,
+        borderColor: color.border,
+        backgroundColor: color.bg,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0,
+        borderWidth: 2
+      });
+    });
+    datasets.push({
+      label: "Total Remaining",
+      data: monthlyTotals.map((v) => Number(v.toFixed(2))),
+      borderColor: "rgba(248,250,252,0.4)",
+      backgroundColor: "transparent",
+      fill: false,
+      tension: 0.3,
+      pointRadius: 0,
+      borderWidth: 1.5,
+      borderDash: [5, 4]
+    });
+    appState.paydownChart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: "bottom",
+            labels: { color: "#94a3b8", font: { size: 11 }, boxWidth: 12, padding: 16 }
+          },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatMoney(ctx.raw)}` } }
+        },
+        scales: {
+          x: { display: true, ticks: { color: "#64748b", maxTicksLimit: 10 }, grid: { color: "rgba(51,65,85,0.4)" } },
+          y: { display: true, ticks: { color: "#64748b", callback: (v) => "$" + Number(v).toLocaleString() }, grid: { color: "rgba(51,65,85,0.4)" } }
+        }
+      }
+    });
+  }
+  function renderTimelineChart(payoffLog, totalMonths) {
+    const timelineChart = appState._root.getElementById("timeline-chart");
+    timelineChart.innerHTML = "";
+    const today = /* @__PURE__ */ new Date();
+    payoffLog.sort((a, b) => a.payoffMonth - b.payoffMonth);
+    payoffLog.forEach((log, idx) => {
+      const d = new Date(today.getFullYear(), today.getMonth() + log.payoffMonth, 1);
+      const dateString = d.toLocaleDateString(void 0, { month: "short", year: "numeric" });
+      const pct = Math.min(100, Math.max(0, log.payoffMonth / totalMonths * 100));
+      const color = DEBT_COLORS[idx % DEBT_COLORS.length];
+      const item = document.createElement("div");
+      item.className = "timeline-item";
+      item.style.animation = `fadeIn 0.5s ease backwards ${idx * 0.1}s`;
+      item.innerHTML = `
+            <div class="timeline-header">
+                <span class="timeline-name">${escHtml(log.name)}</span>
+                <span class="timeline-date">Paid off ${dateString} \xB7 ${log.payoffMonth} mo</span>
+            </div>
+            <div class="timeline-interest">Interest paid: ${formatMoney(log.interestPaid)}</div>
+            <div class="progress-track">
+                <div class="progress-fill" style="width:0%;background:${color.border};transition:width 1s cubic-bezier(0.4,0,0.2,1) ${0.2 + idx * 0.1}s;"></div>
+            </div>`;
+      timelineChart.appendChild(item);
+      setTimeout(() => {
+        const f = item.querySelector(".progress-fill");
+        if (f) f.style.width = `${pct}%`;
+      }, 50);
+    });
+  }
+
+  // src/app/render-payment.js
+  function runSimulation2(strat) {
+    const totalIncome = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const activeCosts = appState.recurringCosts.filter((c) => isCostDueThisMonth(c));
+    const totalRecurringDirect = activeCosts.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
+    const totalRecurringCard = activeCosts.filter((c) => c.paymentMethod === "card").reduce((s, c) => s + c.amount, 0);
+    const totalRecurring = activeCosts.reduce((s, c) => s + c.amount, 0);
+    const effectiveBudget = totalIncome - totalRecurringDirect;
+    if (appState.debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
+      return { valid: false, totalIncome, totalRecurring, effectiveBudget };
+    }
+    const totalMinPayments = appState.debts.reduce((s, d) => s + d.minPayment, 0);
+    if (effectiveBudget < totalMinPayments) {
+      return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
+    }
+    const incomeDays = [...appState.incomeEntries.map((e) => ({ day: parseInt(e.date.split("-")[2]), amount: e.amount })).sort((a, b) => a.day - b.day)];
+    let simDebts = appState.debts.map((d) => ({ ...d, interestPaid: 0 }));
+    const MAX_MONTHS = 1200;
+    let monthsElapsed = 0;
+    let totalInterestPaid = 0;
+    let payoffLog = [];
+    const perDebtMonthly = {};
+    simDebts.forEach((d) => {
+      perDebtMonthly[d.id] = [d.balance];
+    });
+    const day1Checkpoint = appState.checkpoints.find((cp) => cp.day === 1);
+    const day1Balance = day1Checkpoint ? day1Checkpoint.amount : 0;
+    while (simDebts.some((d) => d.balance > 0) && monthsElapsed < MAX_MONTHS) {
+      monthsElapsed++;
+      let availableCash = effectiveBudget + (monthsElapsed === 1 ? day1Balance : 0);
+      simDebts.forEach((d) => {
+        if (d.balance <= 0) return;
+        let effectiveRate = d.rate;
+        if (d.promoZeroInterest && d.promoExpiryDate) {
+          const today = /* @__PURE__ */ new Date();
+          const simDate = new Date(today.getFullYear(), today.getMonth() + monthsElapsed, 1);
+          if (simDate <= /* @__PURE__ */ new Date(d.promoExpiryDate + "T00:00:00")) effectiveRate = 0;
+          else effectiveRate = d.originalRate || d.rate;
+        }
+        const interest = d.balance * (effectiveRate / 100 / 12);
+        d.balance += interest;
+        totalInterestPaid += interest;
+        d.interestPaid += interest;
+      });
+      const alive = simDebts.filter((d) => d.balance > 0);
+      const ordered = getStrategyOrder(alive, strat);
+      const targetId = ordered[0]?.id;
+      const aliveMinSum = alive.reduce((s, d) => s + d.minPayment, 0);
+      const extraAvail = Math.max(0, effectiveBudget - aliveMinSum);
+      const paymentQueue = alive.map((d) => ({
+        id: d.id,
+        dueDay: d.dueDay || 1,
+        needed: Math.min(
+          d.balance,
+          d.minPayment + (d.id === targetId ? Math.min(extraAvail, Math.max(0, d.balance - d.minPayment)) : 0)
+        )
+      })).sort((a, b) => a.dueDay - b.dueDay);
+      let cashPool = 0;
+      let incomeIdx = 0;
+      for (const payment of paymentQueue) {
+        while (incomeIdx < incomeDays.length && incomeDays[incomeIdx].day <= payment.dueDay) {
+          cashPool += incomeDays[incomeIdx++].amount;
+        }
+        while (cashPool < payment.needed && incomeIdx < incomeDays.length) {
+          cashPool += incomeDays[incomeIdx++].amount;
+        }
+        const debt = simDebts.find((d) => d.id === payment.id);
+        if (!debt || debt.balance <= 0) continue;
+        const actual = Math.min(payment.needed, cashPool, debt.balance);
+        cashPool -= actual;
+        debt.balance = Math.max(0, debt.balance - actual);
+        if (debt.balance <= 0.01) {
+          debt.balance = 0;
+          if (!payoffLog.find((l) => l.id === debt.id)) {
+            payoffLog.push({ ...debt, payoffMonth: monthsElapsed });
+          }
+        }
+      }
+      simDebts.forEach((d) => {
+        perDebtMonthly[d.id].push(Math.max(0, d.balance));
+      });
+    }
+    const debtPayoffMonths = {};
+    payoffLog.forEach((l) => {
+      debtPayoffMonths[l.id] = l.payoffMonth;
+    });
+    const maxLen = Math.max(...Object.values(perDebtMonthly).map((a) => a.length));
+    const monthlyTotals = Array.from(
+      { length: maxLen },
+      (_, i) => Object.values(perDebtMonthly).reduce((sum, arr) => sum + (arr[i] ?? 0), 0)
+    );
+    return {
+      valid: true,
+      monthsElapsed,
+      totalInterestPaid,
+      payoffLog,
+      monthlyTotals,
+      perDebtMonthly,
+      debtPayoffMonths,
+      totalIncome,
+      totalRecurring,
+      effectiveBudget
+    };
+  }
+  function renderVisualization(simResults) {
+    const statTotalDebt = appState._root.getElementById("stat-total-debt");
+    const statTotalInterest = appState._root.getElementById("stat-total-interest");
+    const statSavingsBox = appState._root.getElementById("stat-savings-box");
+    const statSavings = appState._root.getElementById("stat-savings");
+    const statSavingsLabel = appState._root.getElementById("stat-savings-label");
+    const stratDesc = appState._root.getElementById("strategy-desc");
+    const timelineChart = appState._root.getElementById("timeline-chart");
+    const countdownBox = appState._root.getElementById("stat-countdown-box");
+    const payoffBoxAlt = appState._root.getElementById("stat-payoff-box");
+    const windfallBar = appState._root.getElementById("windfall-bar");
+    const isArchiveViewTimeline = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
+    const archiveDataForDebt = isArchiveViewTimeline ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
+    const debtsForCalc = archiveDataForDebt ? archiveDataForDebt.debts || appState.debts : appState.debts;
+    const initialTotalDebt = debtsForCalc.reduce((s, d) => s + d.balance, 0);
+    statTotalDebt.textContent = formatMoney(initialTotalDebt);
+    stratDesc.textContent = appState.strategy === "snowball" ? "Snowball: paying the smallest balance first. Quick wins build momentum and keep you motivated." : "Avalanche: paying the highest interest rate first. Mathematically optimal \u2014 minimises total interest paid.";
+    if (isArchiveViewTimeline) {
+      countdownBox.style.display = "none";
+      payoffBoxAlt.style.display = "block";
+      appState._root.getElementById("stat-payoff-date-alt").textContent = "Historical Data";
+      statTotalInterest.textContent = "-";
+      statSavingsBox.style.display = "none";
+      windfallBar.style.display = "none";
+      stopCountdown();
+      const totalDebtArchive = (archiveDataForDebt.debts || []).reduce((s, d) => s + d.balance, 0);
+      timelineChart.innerHTML = `
+            <div class="timeline-error-card" style="background: linear-gradient(145deg, rgba(91,127,255,0.08) 0%, rgba(168,85,247,0.05) 100%); border-color: rgba(91,127,255,0.2);">
+                <span class="timeline-error-icon">\u{1F4C5}</span>
+                <div class="timeline-error-title">${formatMonthLabel(archiveDataForDebt.month)}</div>
+                <div class="timeline-error-message">
+                    This is a historical view. The timeline projection shows future payoff estimates based on <strong>current</strong> data, not historical snapshots.<br><br>
+                    <strong>Total Debt this month:</strong> ${formatMoney(totalDebtArchive)}<br>
+                    <strong>Income:</strong> ${formatMoney(archiveDataForDebt.totalIncome || 0)}<br>
+                    <strong>Costs:</strong> ${formatMoney(archiveDataForDebt.totalCosts || 0)}
+                </div>
+                <div class="timeline-error-actions">
+                    <button class="btn btn-primary" onclick="document.getElementById('plan-next-month-btn').click()">\u{1F4C5} Return to Current Month</button>
+                </div>
+            </div>`;
+      renderPaydownChart([], {});
+      return;
+    }
+    if (appState.debts.length === 0) {
+      countdownBox.style.display = "none";
+      payoffBoxAlt.style.display = "block";
+      appState._root.getElementById("stat-payoff-date-alt").textContent = "-";
+      statTotalInterest.textContent = "$0.00";
+      statSavingsBox.style.display = "none";
+      windfallBar.style.display = "none";
+      timelineChart.innerHTML = `
+            <div class="timeline-error-card">
+                <span class="timeline-error-icon">\u{1F4CA}</span>
+                <div class="timeline-error-title">No Debts Added</div>
+                <div class="timeline-error-message">Add your credit cards, loans, and other debts to see your personalized payoff timeline and calculate your debt-free date.</div>
+                <div class="timeline-error-actions">
+                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab="debts"]').click()">\u{1F4B3} Add Your First Debt</button>
+                </div>
+            </div>`;
+      renderPaydownChart([], {});
+      stopCountdown();
+      return;
+    }
+    if (!simResults.valid) {
+      const { totalIncome, totalRecurring, effectiveBudget, totalMinPayments } = simResults;
+      countdownBox.style.display = "none";
+      payoffBoxAlt.style.display = "block";
+      appState._root.getElementById("stat-payoff-date-alt").textContent = "Budget Too Low!";
+      statTotalInterest.textContent = "N/A";
+      statSavingsBox.style.display = "none";
+      windfallBar.style.display = "none";
+      stopCountdown();
+      let icon = "\u26A0\uFE0F";
+      let title = "";
+      let message = "";
+      let primaryAction = "";
+      let secondaryAction = "";
+      if ((totalIncome || 0) <= 0) {
+        icon = "\u{1F4B0}";
+        title = "No Income Added";
+        message = "You need to add income entries before we can calculate your payoff timeline. Tell us about your paychecks, deposits, or any other monthly income.";
+        primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab="income"]').click(); setTimeout(() => document.getElementById('add-income-btn').click(), 100)">\u2795 Add Income</button>`;
+      } else if ((effectiveBudget || 0) <= 0) {
+        const _active = appState.recurringCosts.filter((c) => isCostDueThisMonth(c));
+        const totalRecurringDirect = _active.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
+        const totalRecurringCard = _active.filter((c) => c.paymentMethod === "card").reduce((s, c) => s + c.amount, 0);
+        icon = "\u{1F4C9}";
+        title = "Budget Over-Committed";
+        message = `Your income of ${formatMoney(totalIncome)} is entirely consumed by direct recurring costs of ${formatMoney(totalRecurringDirect)}.${totalRecurringCard > 0 ? ` (Card-charged costs of ${formatMoney(totalRecurringCard)} are already factored into card payments.)` : ""} You need to either increase income or reduce costs to free up money for debt payoff.`;
+        primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab="income"]').click()">\u{1F4B0} Add Income</button>`;
+        secondaryAction = `<button class="btn btn-warning" onclick="document.querySelector('[data-tab="income"]').click()">\u{1F4DD} Review Costs</button>`;
+      } else {
+        icon = "\u{1F4B3}";
+        title = "Can't Cover Minimum Payments";
+        message = `Your effective budget of ${formatMoney(effectiveBudget)} is less than your total minimum payments of ${formatMoney(totalMinPayments)}. You need more available cash to make progress on your debts.`;
+        primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab="income"]').click()">\u{1F4B0} Increase Income</button>`;
+        secondaryAction = `<button class="btn btn-secondary" onclick="document.querySelector('[data-tab="debts"]').click()">\u{1F4C9} Review Debts</button>`;
+      }
+      timelineChart.innerHTML = `
+            <div class="timeline-error-card">
+                <span class="timeline-error-icon">${icon}</span>
+                <div class="timeline-error-title">${title}</div>
+                <div class="timeline-error-message">${message}</div>
+                <div class="timeline-error-actions">
+                    ${primaryAction}
+                    ${secondaryAction}
+                </div>
+            </div>`;
+      renderPaydownChart([], {});
+      return;
+    }
+    if (simResults.monthsElapsed >= 1200) {
+      countdownBox.style.display = "none";
+      payoffBoxAlt.style.display = "block";
+      appState._root.getElementById("stat-payoff-date-alt").textContent = "> 100 Years";
+      statTotalInterest.textContent = "Too High";
+      statSavingsBox.style.display = "none";
+      windfallBar.style.display = "none";
+      stopCountdown();
+      timelineChart.innerHTML = `
+            <div class="timeline-error-card">
+                <span class="timeline-error-icon">\u23F0</span>
+                <div class="timeline-error-title">Payoff Exceeds 100 Years</div>
+                <div class="timeline-error-message">With your current budget, these debts would take over 100 years to pay off. This usually means either the balances are very high compared to your available payoff budget, or interest rates are preventing progress.</div>
+                <div class="timeline-error-actions">
+                    <button class="btn btn-success" onclick="document.querySelector('[data-tab="income"]').click()">\u{1F4B0} Increase Budget</button>
+                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab="debts"]').click()">\u{1F4C9} Review Debts</button>
+                </div>
+            </div>`;
+      return;
+    }
+    const today = /* @__PURE__ */ new Date();
+    const payoffDate = new Date(today.getFullYear(), today.getMonth() + simResults.monthsElapsed, 1);
+    appState.lastSimPayoffDate = payoffDate;
+    statTotalInterest.textContent = formatMoney(simResults.totalInterestPaid);
+    countdownBox.style.display = "block";
+    payoffBoxAlt.style.display = "none";
+    windfallBar.style.display = "flex";
+    appState._root.getElementById("stat-payoff-date").textContent = payoffDate.toLocaleDateString(void 0, { month: "long", day: "numeric", year: "numeric" });
+    startCountdown(payoffDate);
+    const otherStrat = appState.strategy === "snowball" ? "avalanche" : "snowball";
+    const otherLabel = otherStrat.charAt(0).toUpperCase() + otherStrat.slice(1);
+    const otherResult = runSimulation2(otherStrat);
+    if (otherResult.valid) {
+      const interestDiff = otherResult.totalInterestPaid - simResults.totalInterestPaid;
+      statSavingsBox.style.display = "block";
+      statSavingsLabel.textContent = `vs. ${otherLabel}`;
+      if (interestDiff > 0.01) {
+        statSavings.textContent = `Save ${formatMoney(interestDiff)}`;
+        statSavings.style.color = "var(--success-color)";
+      } else if (interestDiff < -0.01) {
+        statSavings.textContent = `${formatMoney(Math.abs(interestDiff))} more interest`;
+        statSavings.style.color = "var(--warning-color)";
+      } else {
+        statSavings.textContent = "Same cost";
+        statSavings.style.color = "var(--text-secondary)";
+      }
+    } else {
+      statSavingsBox.style.display = "none";
+    }
+    renderTimelineChart(simResults.payoffLog, simResults.monthsElapsed);
+    renderPaydownChart(simResults.monthlyTotals, simResults.perDebtMonthly);
+  }
+  function renderPaymentPlan() {
+    const section = appState._root.getElementById("payment-plan-section");
+    const list = appState._root.getElementById("payment-plan-list");
+    const isArchiveView = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
+    const archiveData = isArchiveView ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
+    const _income = archiveData ? archiveData.incomeEntries || [] : appState.incomeEntries;
+    const _costs = archiveData ? archiveData.recurringCosts || [] : appState.recurringCosts;
+    const _oneTimeCosts = archiveData ? archiveData.oneTimeCosts || [] : appState.oneTimeCosts;
+    const _checkpoints = archiveData ? archiveData.checkpoints || [] : appState.checkpoints;
+    const _debts = archiveData ? archiveData.debts || appState.debts : appState.debts;
+    const _startBal = archiveData ? archiveData.startingBalance || 0 : appState.startingBalance;
+    const _paidStatus = archiveData ? archiveData.paidStatus || {} : appState.paidStatus;
+    const _monthKey = archiveData ? archiveData.month : appState.workingMonthKey || currentMonthKey();
+    const monthTitleEl = appState._root.getElementById("global-month-title");
+    const prevBtn = appState._root.getElementById("plan-prev-month-btn");
+    const nextBtn = appState._root.getElementById("plan-next-month-btn");
+    const monthDisplay = formatMonthLabel(_monthKey);
+    if (monthTitleEl) monthTitleEl.textContent = monthDisplay;
+    if (prevBtn) {
+      const prevIdx = isArchiveView ? appState.viewingArchiveIndex + 1 : 0;
+      if (prevIdx < appState.monthlyArchives.length) {
+        prevBtn.style.visibility = "visible";
+        prevBtn.dataset.archiveIdx = prevIdx;
+      } else {
+        prevBtn.style.visibility = "hidden";
+      }
+    }
+    if (nextBtn) nextBtn.style.visibility = isArchiveView ? "visible" : "hidden";
+    list.innerHTML = "";
+    if (_income.length === 0 && _checkpoints.length === 0) {
+      section.style.display = "none";
+      return;
+    }
+    const events = [];
+    const today = /* @__PURE__ */ new Date();
+    const currentDay = today.getDate();
+    _income.forEach((entry) => {
+      const day = parseInt(entry.date.split("-")[2]);
+      events.push({ type: "income", id: entry.id, name: entry.label, day, date: /* @__PURE__ */ new Date(entry.date + "T00:00:00"), amount: entry.amount, sortKey: day * 1e3 });
+    });
+    _checkpoints.forEach((cp) => {
+      events.push({ type: "checkpoint", id: cp.id, name: "Bank Balance Sync", day: cp.day, amount: cp.amount, sortKey: cp.day * 1e3 + 0.5 });
+    });
+    _costs.filter((c) => isCostDueInMonth(c, _monthKey)).forEach((cost) => {
+      const day = cost.dueDay || 1;
+      events.push({
+        type: "recurring",
+        id: cost.id,
+        name: cost.name,
+        day,
+        amount: cost.amount,
+        paymentMethod: cost.paymentMethod || "direct",
+        amountType: cost.amountType || "fixed",
+        autoPay: !!cost.autoPay,
+        sortKey: day * 1e3 + 1
+      });
+    });
+    _oneTimeCosts.forEach((cost) => {
+      events.push({
+        type: "one-time",
+        id: cost.id,
+        name: cost.name,
+        day: cost.dueDay || 1,
+        amount: cost.amount,
+        paymentMethod: cost.paymentMethod || "direct",
+        amountType: cost.amountType || "fixed",
+        autoPay: !!cost.autoPay,
+        sortKey: (cost.dueDay || 1) * 1e3 + 1
+      });
+    });
+    const sortedDebts = getStrategyOrder(_debts.filter((d) => d.balance > 0), appState.strategy);
+    const _overrides = isArchiveView ? {} : appState.minPayOverrides;
+    const totalMinPay = sortedDebts.reduce((s, d) => s + (_overrides[d.id] ?? d.minPayment), 0);
+    const totalInc = _income.reduce((s, e) => s + e.amount, 0);
+    const totalRec = [
+      ..._costs.filter((c) => isCostDueInMonth(c, _monthKey)),
+      ..._appState.oneTimeCosts
+    ].reduce((s, c) => s + c.amount, 0);
+    const extra = Math.max(0, totalInc - totalRec - totalMinPay);
+    const targetId = sortedDebts[0]?.id;
+    sortedDebts.forEach((debt) => {
+      const day = debt.dueDay || 1;
+      const isTarget = debt.id === targetId;
+      const effMin = _overrides[debt.id] ?? debt.minPayment;
+      const amount = isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
+      const hasOverride = debt.id in _overrides;
+      events.push({ type: "debt", id: debt.id, name: debt.name, day, amount, minPayment: debt.minPayment, effMin, hasOverride, balance: debt.balance, isSnowballTarget: isTarget, autoPay: !!debt.autoPay, sortKey: day * 1e3 + 2 });
+    });
+    events.sort((a, b) => a.sortKey - b.sortKey);
+    const day1Checkpoint = _checkpoints.find((cp) => cp.day === 1);
+    let cashPool = day1Checkpoint ? day1Checkpoint.amount : 0;
+    let incomeReleased = 0;
+    const incomeSorted = events.filter((e) => e.type === "income").sort((a, b) => a.day - b.day);
+    const schedule = [];
+    const deferred = [];
+    let totalExpenses = 0;
+    const releaseIncomeThroughDay = (day) => {
+      while (incomeReleased < incomeSorted.length && incomeSorted[incomeReleased].day <= day) {
+        const ev = incomeSorted[incomeReleased++];
+        cashPool += ev.amount;
+        schedule.push({ ...ev, balance: cashPool });
+      }
+    };
+    for (const ev of events) {
+      if (ev.type === "income") continue;
+      releaseIncomeThroughDay(ev.day);
+      const retry = [...deferred];
+      deferred.length = 0;
+      for (const def of retry) {
+        if (cashPool >= def.amount) {
+          cashPool -= def.amount;
+          totalExpenses += def.amount;
+          schedule.push({ ...def, balance: cashPool, deferred: true });
+        } else deferred.push(def);
+      }
+      if (ev.type === "checkpoint") {
+        cashPool = ev.amount;
+        schedule.push({ ...ev, balance: cashPool });
+        continue;
+      }
+      if (ev.type === "recurring" && ev.paymentMethod === "card") {
+        schedule.push({ ...ev, balance: cashPool, isCard: true });
+        continue;
+      }
+      if (cashPool >= ev.amount) {
+        cashPool -= ev.amount;
+        totalExpenses += ev.amount;
+        schedule.push({ ...ev, balance: cashPool });
+      } else if (cashPool > 9e-3 && ev.type === "debt") {
+        const partial = parseFloat(cashPool.toFixed(2));
+        const remainder = parseFloat((ev.amount - partial).toFixed(2));
+        cashPool = 0;
+        totalExpenses += partial;
+        schedule.push({ ...ev, amount: partial, balance: 0, partial: true });
+        if (remainder > 0.01) deferred.push({ ...ev, amount: remainder });
+      } else {
+        deferred.push(ev);
+      }
+    }
+    releaseIncomeThroughDay(31);
+    for (const def of deferred) {
+      if (cashPool >= def.amount) {
+        cashPool -= def.amount;
+        totalExpenses += def.amount;
+        schedule.push({ ...def, balance: cashPool, deferred: true });
+      } else {
+        schedule.push({ ...def, balance: cashPool, deferred: true, unpaid: true });
+      }
+    }
+    if (schedule.length === 0) {
+      section.style.display = "none";
+      return;
+    }
+    const sortedFutureIncomes = _income.map((e) => ({ date: /* @__PURE__ */ new Date(e.date + "T00:00:00"), amount: e.amount, label: e.label })).filter((e) => e.date >= today).sort((a, b) => a.date - b.date);
+    const nextIncome = sortedFutureIncomes[0] || null;
+    const targetDay = nextIncome ? nextIncome.date.getDate() : 31;
+    let testBalance = _startBal;
+    let minProjected = testBalance;
+    schedule.forEach((item) => {
+      const itemDay = item.day || 1;
+      if (itemDay < currentDay) return;
+      if (nextIncome && itemDay >= targetDay && item.type !== "income") return;
+      if (item.type === "checkpoint") testBalance = item.amount;
+      else if (item.type === "income") testBalance += item.amount;
+      else if (item.type === "recurring" && item.isCard) {
+      } else if (item.type !== "starting-balance") testBalance -= item.amount;
+      if (testBalance < minProjected) {
+        minProjected = testBalance;
+      }
+    });
+    const summaryNext = appState._root.getElementById("runway-next-paycheck");
+    const summaryMin = appState._root.getElementById("runway-min-project");
+    const summaryStatus = appState._root.getElementById("runway-status");
+    if (summaryNext) summaryNext.textContent = nextIncome ? `${nextIncome.label} (${nextIncome.date.toLocaleDateString(void 0, { month: "short", day: "numeric" })})` : "None";
+    if (summaryMin) summaryMin.textContent = formatMoney(minProjected);
+    if (summaryStatus) {
+      if (minProjected < 0) {
+        summaryStatus.innerHTML = '<span style="color:var(--danger-color);">\u26A0 At Risk (Negative Balance)</span>';
+      } else if (minProjected < 100) {
+        summaryStatus.innerHTML = '<span style="color:var(--warning-color);">\u26A0 Low Buffer</span>';
+      } else {
+        summaryStatus.innerHTML = '<span style="color:var(--success-color);">\u2713 Safe</span>';
+      }
+    }
+    const totalIncomeVal = _income.reduce((s, e) => s + e.amount, 0);
+    const totalDirectCosts = _costs.filter((c) => isCostDueInMonth(c, _monthKey) && c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
+    const totalDebtPayments = sortedDebts.reduce((s, d) => s + (_overrides[d.id] ?? d.minPayment), 0);
+    const totalExpensesVal = totalDirectCosts + totalDebtPayments;
+    const lastCheckpoint = _checkpoints.length > 0 ? [..._checkpoints].sort((a, b) => b.day - a.day)[0] : null;
+    const finalBalance = schedule.length > 0 ? schedule[schedule.length - 1].balance : _startBal;
+    const nextMonthKey = addMonthsToKey(_monthKey, 1);
+    const nextMonthFirstDay = new Date(nextMonthKey.split("-")[0], parseInt(nextMonthKey.split("-")[1]), 1);
+    const nextMonthIncome = generateRecurringIncomeForMonth(_income, nextMonthKey);
+    const firstNextMonthIncome = nextMonthIncome.length > 0 ? [...nextMonthIncome].sort((a, b) => parseInt(a.date.split("-")[2]) - parseInt(b.date.split("-")[2]))[0] : null;
+    const bufferAmount = finalBalance;
+    const ovStart = appState._root.getElementById("month-overview-start");
+    const ovIncome = appState._root.getElementById("month-overview-income");
+    const ovExpenses = appState._root.getElementById("month-overview-expenses");
+    const ovNextStart = appState._root.getElementById("month-overview-next-start");
+    const ovBuffer = appState._root.getElementById("month-overview-buffer");
+    const day1Cp = _checkpoints.find((cp) => cp.day === 1);
+    const day1Amount = day1Cp ? day1Cp.amount : 0;
+    if (ovStart) ovStart.textContent = formatMoney(day1Amount);
+    if (ovIncome) ovIncome.textContent = formatMoney(totalIncomeVal);
+    if (ovExpenses) ovExpenses.textContent = formatMoney(totalExpensesVal);
+    if (ovNextStart) ovNextStart.textContent = formatMoney(finalBalance);
+    if (ovBuffer) {
+      let bufferColor = "var(--success-color)";
+      let bufferIcon = "\u{1F6E1}\uFE0F";
+      if (bufferAmount < 0) {
+        bufferColor = "var(--danger-color)";
+        bufferIcon = "\u26A0\uFE0F";
+      } else if (bufferAmount < 100) {
+        bufferColor = "var(--warning-color)";
+        bufferIcon = "\u26A1";
+      }
+      ovBuffer.innerHTML = `<span style="color:${bufferColor};">${bufferIcon} ${formatMoney(bufferAmount)}</span>`;
+    }
+    const ovBudgetsContainer = appState._root.getElementById("month-overview-budgets");
+    const ovBudgetsGrid = appState._root.getElementById("month-overview-budgets-grid");
+    if (ovBudgetsContainer && ovBudgetsGrid && appState.spendingBudgets.length > 0) {
+      ovBudgetsContainer.style.display = "block";
+      const budgetSummaries = appState.spendingBudgets.map((budget) => {
+        const budgeted = getBudgetAmount(budget);
+        const spent = (budget.expenses || []).reduce((s, e) => s + e.amount, 0);
+        const remaining = budgeted - spent;
+        const percentUsed = budgeted > 0 ? spent / budgeted * 100 : 0;
+        return { name: budget.name, budgeted, spent, remaining, percentUsed };
+      });
+      ovBudgetsGrid.innerHTML = budgetSummaries.map((b) => {
+        const colorClass = b.percentUsed > 100 ? "color: var(--danger-color);" : b.percentUsed > 80 ? "color: var(--warning-color);" : "color: var(--success-color);";
+        const statusIcon = b.percentUsed > 100 ? "\u{1F534}" : b.percentUsed > 80 ? "\u26A1" : "\u2713";
+        return `
+                <div style="background: rgba(7,6,26,0.4); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(99,102,241,0.2);">
+                    <div style="font-size: 0.65rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${b.name}</div>
+                    <div style="font-size: 0.9rem; font-weight: 600; ${colorClass}">${statusIcon} ${formatMoney(b.remaining)}</div>
+                    <div style="font-size: 0.6rem; color: var(--text-secondary);">of ${formatMoney(b.budgeted)}</div>
+                </div>
+            `;
+      }).join("");
+      const totalBudgeted = budgetSummaries.reduce((s, b) => s + b.budgeted, 0);
+      const totalSpent = budgetSummaries.reduce((s, b) => s + b.spent, 0);
+      const totalRemaining = totalBudgeted - totalSpent;
+      ovBudgetsGrid.innerHTML += `
+            <div style="background: rgba(168,85,247,0.1); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(168,85,247,0.3);">
+                <div style="font-size: 0.65rem; color: var(--text-secondary);">TOTAL BUDGETS</div>
+                <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">${formatMoney(totalRemaining)}</div>
+                <div style="font-size: 0.6rem; color: var(--text-secondary);">remaining</div>
+            </div>
+        `;
+    } else if (ovBudgetsContainer) {
+      ovBudgetsContainer.style.display = "none";
+    }
+    section.style.display = "block";
+    let todayMarkerInserted = isArchiveView;
+    schedule.forEach((item, index) => {
+      if (!todayMarkerInserted && (item.day || 1) >= currentDay) {
+        todayMarkerInserted = true;
+        const marker = document.createElement("div");
+        marker.className = "schedule-today-marker";
+        marker.innerHTML = `<span class="schedule-today-label">Today \u2014 ${today.toLocaleDateString(void 0, { month: "long", day: "numeric" })}</span>`;
+        list.appendChild(marker);
+      }
+      const itemPaid = _paidStatus[item.id];
+      const row = document.createElement("div");
+      let icon, typeBadge = "", amountClass, dayLabel, rowBgClass;
+      if (item.type === "checkpoint") {
+        const isDay1 = item.day === 1;
+        icon = isDay1 ? "\u{1F3C1}" : "\u2696\uFE0F";
+        typeBadge = isDay1 ? '<span class="schedule-badge schedule-badge-start" style="background:rgba(99,102,241,0.15);color:var(--accent-color);border-color:rgba(99,102,241,0.3);">Day 1 Balance</span>' : '<span class="schedule-badge schedule-badge-start" style="background:rgba(168,85,247,0.15);color:var(--promo-light);border-color:rgba(168,85,247,0.3);">Manual Sync</span>';
+        amountClass = "";
+        dayLabel = formatOrdinal(item.day);
+        rowBgClass = isDay1 ? "schedule-starting" : "schedule-checkpoint";
+      } else if (item.type === "income") {
+        icon = "\u{1F4B5}";
+        typeBadge = '<span class="schedule-badge schedule-badge-income">Deposit</span>';
+        amountClass = "schedule-amount-income";
+        dayLabel = item.date.toLocaleDateString(void 0, { month: "short", day: "numeric" });
+        rowBgClass = "schedule-income";
+      } else if (item.type === "recurring") {
+        const isCard = item.paymentMethod === "card" || item.isCard;
+        icon = isCard ? "\u{1F4B3}" : "\u{1F3E6}";
+        const methodBadge = isCard ? '<span class="schedule-badge card-badge" style="border: 1px solid rgba(99, 102, 241, 0.45);">\u{1F4B3} Card</span>' : '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">\u{1F3E6} Direct</span>';
+        const amtBadge = item.amountType === "flexible" ? '<span class="schedule-badge flexible-badge">\u301C Flexible</span>' : '<span class="schedule-badge fixed-badge">= Fixed</span>';
+        typeBadge = methodBadge + amtBadge;
+        if (item.autoPay && !itemPaid) {
+          typeBadge += '<span class="schedule-badge schedule-badge-autopay">\u26A1 Auto</span>';
+        }
+        amountClass = "schedule-amount-expense";
+        dayLabel = formatOrdinal(item.day);
+        rowBgClass = isCard ? "schedule-recurring-card" : "schedule-recurring-direct";
+      } else {
+        icon = "\u{1F9FE}";
+        const directBadge = '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">\u{1F3E6} Direct</span>';
+        const targetBadge = item.isSnowballTarget ? `<span class="snowball-badge">${appState.strategy === "snowball" ? "\u2744\uFE0F" : "\u{1F30A}"} ${appState.strategy === "snowball" ? "Snowball" : "Avalanche"} Target</span>` : "";
+        typeBadge = directBadge + targetBadge;
+        if (item.autoPay && !itemPaid) {
+          typeBadge += '<span class="schedule-badge schedule-badge-autopay">\u26A1 Auto</span>';
+        }
+        amountClass = "schedule-amount-expense";
+        dayLabel = formatOrdinal(item.day);
+        rowBgClass = "schedule-debt";
+      }
+      row.className = `schedule-row ${rowBgClass}${itemPaid ? " schedule-row-paid" : ""}`;
+      row.style.animation = `fadeIn 0.4s ease backwards ${index * 0.04}s`;
+      let statusBadges = "";
+      if (item.deferred) statusBadges += '<span class="schedule-badge schedule-badge-deferred">\u23F3 Deferred</span>';
+      if (item.partial) statusBadges += '<span class="schedule-badge schedule-badge-partial">\u26A0 Partial</span>';
+      if (item.unpaid) statusBadges += '<span class="schedule-badge schedule-badge-unpaid">\u274C Unpaid</span>';
+      let paidBadge = "";
+      if (item.type !== "income" && item.type !== "checkpoint") {
+        if (itemPaid) paidBadge = '<span class="schedule-badge schedule-badge-paid">\u2713 Paid</span>';
+      }
+      const sign = item.type === "income" ? "+" : item.type === "checkpoint" ? "" : "\u2212";
+      const balClass = item.balance <= 0 ? "balance-zero" : item.balance < 500 ? "balance-low" : "balance-healthy";
+      const amountLabel = item.type === "income" ? "Deposit" : item.type === "checkpoint" ? "Synced to" : "Payment";
+      const editBtnHtml = !isArchiveView ? `<button class="btn-edit-inline" data-id="${item.id}" data-type="${item.type}" title="Edit entry">Edit</button>` : "";
+      let paidBtnHtml = "";
+      if (!isArchiveView && item.type !== "income" && item.type !== "checkpoint") {
+        const isPastDue = (item.day || 1) <= currentDay;
+        if (itemPaid) {
+          paidBtnHtml = `<button class="btn-mark-paid btn-mark-paid-done" data-id="${item.id}" data-autopay="${item.autoPay ? "1" : "0"}" title="Mark as unpaid">\u2713 Paid</button>`;
+        } else if (item.autoPay) {
+          if (isPastDue) {
+            paidBtnHtml = `<button class="btn-mark-paid" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.35);" data-id="${item.id}" data-autopay="1" title="Confirm auto-payment">\u26A1 Auto-Paid</button>`;
+          } else {
+            paidBtnHtml = `<button disabled style="opacity: 0.5; cursor: not-allowed; background: transparent; border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); border-radius: 6px; padding: 0.25rem 0.6rem; font-size: 0.75rem; font-weight: 600;">\u26A1 Scheduled</button>`;
+          }
+        } else {
+          paidBtnHtml = `<button class="btn-mark-paid" data-id="${item.id}" data-autopay="0" title="Mark as paid">Mark Paid</button>`;
+        }
+      }
+      const overrideBadge = !isArchiveView && item.type === "debt" && item.hasOverride ? `<span class="schedule-badge schedule-badge-override" title="Min payment overridden this month">\u270F Override</span>` : "";
+      const overrideBtnHtml = !isArchiveView && item.type === "debt" ? `<button class="btn-override-min" data-id="${item.id}" data-min="${item.minPayment}" data-current="${item.effMin}" title="${item.hasOverride ? "Edit or clear override" : "Override minimum payment"}">${item.hasOverride ? "Override \u270F" : "Override"}</button>` : "";
+      const overrideFormHtml = !isArchiveView && item.type === "debt" ? `
+            <div class="override-form" id="override-form-${item.id}" style="display:none;">
+                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-top:0.5rem; padding:0.5rem 0.75rem; background:rgba(91,127,255,0.07); border:1px solid rgba(91,127,255,0.25); border-radius:6px;">
+                    <span style="font-size:0.78rem; color:var(--text-secondary); white-space:nowrap;">Min payment <span style="color:var(--text-primary);">($${item.minPayment.toFixed(2)})</span> \u2192</span>
+                    <input class="override-input" type="number" min="0" step="0.01" placeholder="${item.effMin.toFixed(2)}" value="${item.hasOverride ? item.effMin.toFixed(2) : ""}" style="width:90px; padding:0.2rem 0.4rem; border-radius:4px; border:1px solid rgba(91,127,255,0.4); background:rgba(7,6,26,0.6); color:var(--text-primary); font-size:0.85rem;">
+                    <button class="btn-override-save" data-id="${item.id}" style="padding:0.2rem 0.6rem; font-size:0.78rem; font-weight:600; border-radius:4px; border:1px solid rgba(91,127,255,0.5); background:rgba(91,127,255,0.15); color:#c4d0ff; cursor:pointer;">Save</button>
+                    ${item.hasOverride ? `<button class="btn-override-clear" data-id="${item.id}" style="padding:0.2rem 0.6rem; font-size:0.78rem; font-weight:600; border-radius:4px; border:1px solid rgba(239,68,68,0.4); background:rgba(239,68,68,0.1); color:#fca5a5; cursor:pointer;">Clear</button>` : ""}
+                    <button class="btn-override-cancel" data-id="${item.id}" style="padding:0.2rem 0.5rem; font-size:0.78rem; background:transparent; border:none; color:var(--text-secondary); cursor:pointer;">\u2715</button>
+                </div>
+            </div>` : "";
+      const detailText = item.type === "debt" && item.isSnowballTarget ? "Minimum + Snowball Extra" : item.type === "debt" ? "Minimum Payment" : item.type === "recurring" && (item.isCard || item.paymentMethod === "card") ? "Charged to credit card" : item.type === "recurring" ? "Paid from bank account" : item.type === "checkpoint" ? "Resets the running balance for calculations below" : "";
+      row.innerHTML = `
+            <div class="schedule-date-col"><span class="schedule-icon">${icon}</span><span class="schedule-day">${dayLabel}</span></div>
+            <div class="schedule-info-col">
+                <div class="schedule-name" style="margin-bottom:0.25rem;">${escHtml(item.name)}</div>
+                <div class="schedule-badges" style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.25rem;">
+                    ${typeBadge} ${statusBadges} ${paidBadge} ${overrideBadge}
+                </div>
+                <div class="schedule-detail">${detailText}</div>
+                ${overrideFormHtml}
+            </div>
+            <div class="schedule-right-col">
+                <div class="schedule-amount-col ${amountClass}"><span class="col-label">${amountLabel}</span>${sign}$${item.amount.toLocaleString(void 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div class="schedule-balance-col ${balClass}"><span class="col-label">Balance</span>$${item.balance.toLocaleString(void 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+
+            <div class="schedule-action-col" style="display:flex; flex-direction:column; gap:0.35rem; align-items:flex-end; justify-content:center;">
+                ${paidBtnHtml}
+                ${overrideBtnHtml}
+                ${editBtnHtml}
+            </div>`;
+      list.appendChild(row);
+    });
+    if (!todayMarkerInserted) {
+      const marker = document.createElement("div");
+      marker.className = "schedule-today-marker";
+      marker.innerHTML = `<span class="schedule-today-label">Today \u2014 ${today.toLocaleDateString(void 0, { month: "long", day: "numeric" })}</span>`;
+      list.appendChild(marker);
+    }
+    const totalIncEl = appState._root.getElementById("payment-plan-total-income");
+    const totalExpEl = appState._root.getElementById("payment-plan-total-expenses");
+    const nextMonthEl = appState._root.getElementById("payment-plan-next-month");
+    if (totalIncEl) totalIncEl.textContent = formatMoney(totalInc);
+    if (totalExpEl) totalExpEl.textContent = formatMoney(totalExpenses);
+    if (nextMonthEl) {
+      nextMonthEl.textContent = formatMoney(cashPool);
+      nextMonthEl.style.color = cashPool < 0 ? "var(--danger-color)" : "var(--text-primary)";
+    }
+    return isArchiveView ? null : schedule;
+  }
+
+  // src/app/render-modals.js
+  function openDebtModal(debtId = null) {
+    appState.debtForm.reset();
+    appState._root.getElementById("debt-id").value = "";
+    const promoToggle = appState._root.getElementById("debt-promo-toggle");
+    const promoExpiryGroup = appState._root.getElementById("promo-expiry-group");
+    const rateInput = appState._root.getElementById("debt-rate");
+    promoToggle.checked = false;
+    promoExpiryGroup.style.display = "none";
+    rateInput.closest(".input-group").classList.remove("input-disabled");
+    rateInput.disabled = false;
+    appState._root.getElementById("debt-promo-expiry").value = "";
+    appState._root.getElementById("debt-promo-expiry").required = false;
+    appState._root.getElementById("debt-autopay-toggle").checked = false;
+    appState._root.getElementById("debt-url").value = "";
+    if (debtId) {
+      appState._root.getElementById("modal-title").textContent = "Edit Debt";
+      const debt = appState.debts.find((d) => d.id === debtId);
+      if (debt) {
+        appState._root.getElementById("debt-id").value = debt.id;
+        appState._root.getElementById("debt-name").value = debt.name;
+        appState._root.getElementById("debt-type").value = debt.type || "credit-card";
+        appState._root.getElementById("debt-balance").value = debt.balance;
+        appState._root.getElementById("debt-rate").value = debt.rate;
+        appState._root.getElementById("debt-min-payment").value = debt.minPayment;
+        appState._root.getElementById("debt-due-day").value = debt.dueDay || "";
+        appState._root.getElementById("debt-autopay-toggle").checked = !!debt.autoPay;
+        appState._root.getElementById("debt-url").value = debt.paymentUrl || "";
+        if (debt.promoZeroInterest) {
+          promoToggle.checked = true;
+          promoExpiryGroup.style.display = "block";
+          rateInput.closest(".input-group").classList.add("input-disabled");
+          rateInput.disabled = true;
+          rateInput.value = "0";
+          appState._root.getElementById("debt-promo-expiry").value = debt.promoExpiryDate || "";
+          appState._root.getElementById("debt-promo-expiry").required = true;
+        }
+      }
+    } else {
+      appState._root.getElementById("modal-title").textContent = "Add New Debt";
+      appState._root.getElementById("debt-type").value = "credit-card";
+    }
+    appState.debtModal.style.display = "flex";
+    void appState.debtModal.offsetWidth;
+    appState.debtModal.classList.add("active");
+    setTimeout(() => appState.debtModal.querySelector("input:not([type=hidden])").focus(), 50);
+  }
+  function closeDebtModal() {
+    appState.debtModal.classList.remove("active");
+    setTimeout(() => {
+      appState.debtModal.style.display = "none";
+    }, 300);
+  }
+  function openCostModal(costId = null) {
+    appState.costForm.reset();
+    appState._root.getElementById("cost-id").value = "";
+    appState._root.getElementById("cost-autopay-toggle").checked = false;
+    if (costId) {
+      appState._root.getElementById("cost-modal-title").textContent = "Edit Cost";
+      const cost = appState.recurringCosts.find((c) => c.id === costId) || appState.oneTimeCosts.find((c) => c.id === costId);
+      if (cost) {
+        appState._root.getElementById("cost-id").value = cost.id;
+        appState._root.getElementById("cost-name").value = cost.name;
+        appState._root.getElementById("cost-amount").value = cost.amount;
+        appState._root.getElementById("cost-due-day").value = cost.dueDay || "";
+        appState._root.getElementById("cost-category").value = cost.category || "other";
+        appState._root.getElementById("cost-payment-method").value = cost.paymentMethod || "direct";
+        appState._root.getElementById("cost-amount-type").value = cost.amountType || "fixed";
+        appState._root.getElementById("cost-autopay-toggle").checked = !!cost.autoPay;
+        const n = cost.intervalMonths || 1;
+        const intervalEl = appState._root.getElementById("cost-interval");
+        if ([1, 2, 3, 6, 12].includes(n)) {
+          intervalEl.value = String(n);
+        } else {
+          intervalEl.value = "custom";
+          appState._root.getElementById("cost-interval-custom").value = n;
+        }
+        if (n > 1 && cost.nextDueMonth) {
+          appState._root.getElementById("cost-start-month").value = keyToHtmlMonth(cost.nextDueMonth);
+        } else {
+          appState._root.getElementById("cost-start-month").value = "";
+        }
+      }
+    } else {
+      appState._root.getElementById("cost-modal-title").textContent = "Add Cost";
+      appState._root.getElementById("cost-payment-method").value = "direct";
+      appState._root.getElementById("cost-amount-type").value = "fixed";
+      appState._root.getElementById("cost-interval").value = "1";
+    }
+    updateCostModalIntervalVisibility();
+    appState.costModal.style.display = "flex";
+    void appState.costModal.offsetWidth;
+    appState.costModal.classList.add("active");
+    setTimeout(() => appState.costModal.querySelector("input:not([type=hidden])").focus(), 50);
+  }
+  function closeCostModal() {
+    appState.costModal.classList.remove("active");
+    setTimeout(() => {
+      appState.costModal.style.display = "none";
+    }, 300);
+  }
+  function openIncomeModal(incomeId = null) {
+    appState.incomeForm.reset();
+    appState._root.getElementById("income-id").value = "";
+    appState._root.getElementById("income-schedule").value = "one-time";
+    appState._root.getElementById("income-schedule-hint").style.display = "none";
+    if (incomeId) {
+      appState._root.getElementById("income-modal-title").textContent = "Edit Income Entry";
+      const entry = appState.incomeEntries.find((e) => e.id === incomeId);
+      if (entry) {
+        appState._root.getElementById("income-id").value = entry.id;
+        appState._root.getElementById("income-label").value = entry.label;
+        appState._root.getElementById("income-date").value = entry.date;
+        appState._root.getElementById("income-amount").value = entry.amount;
+        appState._root.getElementById("income-schedule").value = entry.scheduleType || "one-time";
+        updateIncomeScheduleHint();
+      }
+    } else {
+      appState._root.getElementById("income-modal-title").textContent = "Add Income Entry";
+    }
+    appState.incomeModal.style.display = "flex";
+    void appState.incomeModal.offsetWidth;
+    appState.incomeModal.classList.add("active");
+    setTimeout(() => appState.incomeModal.querySelector("input:not([type=hidden])").focus(), 50);
+  }
+  function updateIncomeScheduleHint() {
+    const sel = appState._root.getElementById("income-schedule");
+    const hint = appState._root.getElementById("income-schedule-hint");
+    if (!sel || !hint) return;
+    if (sel.value === "monthly") {
+      hint.textContent = "This day of the month will be reused each month automatically.";
+      hint.style.display = "";
+    } else if (sel.value === "biweekly") {
+      hint.textContent = "All biweekly occurrences within the current month will be added as separate entries.";
+      hint.style.display = "";
+    } else {
+      hint.style.display = "none";
+    }
+  }
+  function closeIncomeModal() {
+    appState.incomeModal.classList.remove("active");
+    setTimeout(() => {
+      appState.incomeModal.style.display = "none";
+    }, 300);
+  }
+  function saveDebt() {
+    try {
+      const id = appState._root.getElementById("debt-id").value;
+      const name = appState._root.getElementById("debt-name").value;
+      const type = appState._root.getElementById("debt-type").value;
+      const balance = parseFloat(appState._root.getElementById("debt-balance").value);
+      const rate = parseFloat(appState._root.getElementById("debt-rate").value);
+      const minPayment = parseFloat(appState._root.getElementById("debt-min-payment").value);
+      const dueDay = parseInt(appState._root.getElementById("debt-due-day").value) || 1;
+      const autoPay = appState._root.getElementById("debt-autopay-toggle").checked;
+      const paymentUrl = appState._root.getElementById("debt-url").value.trim();
+      const promoZeroInterest = appState._root.getElementById("debt-promo-toggle").checked;
+      const promoExpiryDate = promoZeroInterest ? appState._root.getElementById("debt-promo-expiry").value : null;
+      if (!name.trim()) throw new Error("Please enter a name for this debt.");
+      if (isNaN(balance)) throw new Error("Please enter a valid balance.");
+      if (!promoZeroInterest && isNaN(rate)) throw new Error("Please enter a valid interest rate.");
+      if (isNaN(minPayment)) throw new Error("Please enter a valid minimum payment.");
+      const existingDebt = appState.debts.find((d) => d.id === id);
+      const originalRate = promoZeroInterest ? existingDebt?.originalRate != null ? existingDebt.originalRate : rate : rate;
+      const debtData = {
+        name,
+        type,
+        balance,
+        rate: promoZeroInterest ? 0 : rate,
+        originalRate: promoZeroInterest ? originalRate : rate,
+        minPayment,
+        dueDay,
+        autoPay,
+        paymentUrl,
+        promoZeroInterest,
+        promoExpiryDate
+      };
+      if (id) {
+        const idx = appState.debts.findIndex((d) => d.id === id);
+        if (idx !== -1) appState.debts[idx] = { id, ...debtData };
+      } else {
+        appState.debts.push({ id: Date.now().toString(), ...debtData });
+      }
+      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      closeDebtModal();
+      showSavedToast(id ? "Debt updated \u2713" : "Debt added \u2713");
+    } catch (err) {
+      showErrorToast(err.message || "Failed to save debt.");
+    }
+  }
+  function deleteDebt(id) {
+    showInlineConfirm(id, "debt", () => {
+      const deleted = appState.debts.find((d) => d.id === id);
+      appState.debts = appState.debts.filter((d) => d.id !== id);
+      delete appState.paidStatus[id];
+      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      showUndoToast("Debt deleted", () => {
+        appState.debts.push(deleted);
+        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      });
+    });
+  }
+  function saveCost() {
+    try {
+      const id = appState._root.getElementById("cost-id").value;
+      const name = appState._root.getElementById("cost-name").value;
+      const amount = parseFloat(appState._root.getElementById("cost-amount").value);
+      const dueDay = parseInt(appState._root.getElementById("cost-due-day").value) || 1;
+      const category = appState._root.getElementById("cost-category").value || "other";
+      const paymentMethod = appState._root.getElementById("cost-payment-method").value || "direct";
+      const amountType = appState._root.getElementById("cost-amount-type").value || "fixed";
+      const autoPay = appState._root.getElementById("cost-autopay-toggle").checked;
+      const intervalSel = appState._root.getElementById("cost-interval").value;
+      const intervalMonths = intervalSel === "custom" ? parseInt(appState._root.getElementById("cost-interval-custom").value) || 1 : parseInt(intervalSel) || 1;
+      if (!name.trim()) throw new Error("Please enter a name for this cost.");
+      if (isNaN(amount)) throw new Error("Please enter a valid amount.");
+      if (intervalMonths < 1) throw new Error("Interval must be at least 1 month.");
+      const startMonthInput = appState._root.getElementById("cost-start-month").value;
+      const startMonthKey = startMonthInput ? htmlMonthToKey(startMonthInput) : null;
+      const addedMonth = category === "one-time" ? appState.workingMonthKey || currentMonthKey() : void 0;
+      const targetArray = category === "one-time" ? appState.oneTimeCosts : appState.recurringCosts;
+      const sourceArray = category === "one-time" ? appState.recurringCosts : appState.oneTimeCosts;
+      if (id) {
+        const idx = targetArray.findIndex((c) => c.id === id);
+        const otherIdx = sourceArray.findIndex((c) => c.id === id);
+        if (idx !== -1) {
+          const existing = targetArray[idx];
+          const nextDueMonth = intervalMonths > 1 ? startMonthKey ?? (existing.intervalMonths === intervalMonths ? existing.nextDueMonth : currentMonthKey()) : void 0;
+          targetArray[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth };
+        } else if (otherIdx !== -1) {
+          const [moved] = sourceArray.splice(otherIdx, 1);
+          const nextDueMonth = intervalMonths > 1 ? startMonthKey ?? currentMonthKey() : void 0;
+          targetArray.push({ id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
+        }
+      } else {
+        const nextDueMonth = intervalMonths > 1 ? startMonthKey ?? currentMonthKey() : void 0;
+        targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
+      }
+      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      closeCostModal();
+      showSavedToast(id ? "Cost updated \u2713" : "Cost added \u2713");
+    } catch (err) {
+      showErrorToast(err.message || "Failed to save cost.");
+    }
+  }
+  function deleteCost(id) {
+    showInlineConfirm(id, "cost", () => {
+      let deleted = appState.recurringCosts.find((c) => c.id === id);
+      let array = appState.recurringCosts;
+      if (!deleted) {
+        deleted = appState.oneTimeCosts.find((c) => c.id === id);
+        array = appState.oneTimeCosts;
+      }
+      if (deleted) {
+        array = array.filter((c) => c.id !== id);
+        if (array === appState.recurringCosts) appState.recurringCosts = array;
+        else appState.oneTimeCosts = array;
+        delete appState.paidStatus[id];
+        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        showUndoToast("Cost deleted", () => {
+          array.push(deleted);
+          if (array === appState.recurringCosts) appState.recurringCosts = array;
+          else appState.oneTimeCosts = array;
+          saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        });
+      }
+    });
+  }
+  function saveIncome() {
+    try {
+      const id = appState._root.getElementById("income-id").value;
+      const label = appState._root.getElementById("income-label").value;
+      const date = appState._root.getElementById("income-date").value;
+      const amount = parseFloat(appState._root.getElementById("income-amount").value);
+      const scheduleType = appState._root.getElementById("income-schedule").value || "one-time";
+      if (!label.trim()) throw new Error("Please enter a label for this income entry.");
+      if (!date) throw new Error("Please select a date.");
+      if (isNaN(amount)) throw new Error("Please enter a valid amount.");
+      const entryBase = { label, date, amount, scheduleType };
+      if (scheduleType === "monthly") entryBase.scheduleDay = parseInt(date.split("-")[2]);
+      if (scheduleType === "biweekly") entryBase.scheduleAnchorDate = date;
+      if (id) {
+        const idx = appState.incomeEntries.findIndex((e) => e.id === id);
+        if (idx !== -1) appState.incomeEntries[idx] = { id, ...entryBase };
+      } else if (scheduleType === "biweekly") {
+        const generated = generateBiweeklyForMonth(label, amount, date, appState.workingMonthKey || currentMonthKey());
+        if (generated.length === 0) throw new Error("No occurrences of this schedule fall in the current month. Choose a date within the current month as the starting point.");
+        appState.incomeEntries.push(...generated);
+      } else {
+        appState.incomeEntries.push({ id: Date.now().toString(), ...entryBase });
+      }
+      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      closeIncomeModal();
+      showSavedToast(id ? "Income updated \u2713" : "Income added \u2713");
+    } catch (err) {
+      showErrorToast(err.message || "Failed to save income entry.");
+    }
+  }
+  function deleteIncome(id) {
+    showInlineConfirm(id, "income", () => {
+      const deleted = appState.incomeEntries.find((e) => e.id === id);
+      appState.incomeEntries = appState.incomeEntries.filter((e) => e.id !== id);
+      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      showUndoToast("Income entry deleted", () => {
+        appState.incomeEntries.push(deleted);
+        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      });
+    });
+  }
+  function togglePaid(id, autoPay) {
+    const wasUnpaid = !appState.paidStatus[id];
+    if (appState.paidStatus[id]) {
+      delete appState.paidStatus[id];
+    } else {
+      appState.paidStatus[id] = autoPay ? "autopay" : "paid";
+      if (wasUnpaid && appState.debts.find((d) => d.id === id)) {
+        launchConfetti();
+      }
+    }
+    const card = appState._root.querySelector(`.debt-card[data-cost-id="${id}"], .debt-card .btn-mark-paid-action[data-id="${id}"]`)?.closest(".debt-card");
+    if (card) {
+      card.style.transition = "transform 0.15s ease, opacity 0.15s ease";
+      card.style.transform = "scale(0.99)";
+      card.style.opacity = "0.8";
+      setTimeout(() => {
+        card.style.transform = "";
+        card.style.opacity = "";
+      }, 160);
+    }
+    saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    renderRecurringCostsList();
+    renderDebtsList(runSimulation(appState.strategy));
+  }
+  function showInlineConfirm(id, type, onConfirm) {
+    const selector = type === "debt" ? ".btn-delete" : type === "cost" ? ".btn-delete-cost" : ".btn-delete-income";
+    const btn = appState._root.querySelector(`${selector}[data-id="${id}"]`);
+    if (!btn) return;
+    const actions = btn.parentElement;
+    const originalHTML = actions.innerHTML;
+    actions.innerHTML = `
+        <span class="confirm-text">Are you sure?</span>
+        <button class="btn btn-danger btn-confirm-yes" data-id="${id}">Delete</button>
+        <button class="btn btn-secondary btn-confirm-no">Cancel</button>`;
+    actions.querySelector(".btn-confirm-yes").addEventListener("click", onConfirm);
+    actions.querySelector(".btn-confirm-no").addEventListener("click", () => {
+      actions.innerHTML = originalHTML;
+      const editBtn = actions.querySelector(".btn-edit, .btn-edit-cost, .btn-edit-income");
+      const deleteBtn = actions.querySelector(".btn-delete, .btn-delete-cost, .btn-delete-income");
+      if (editBtn) {
+        const fn = type === "debt" ? openDebtModal : type === "cost" ? openCostModal : openIncomeModal;
+        editBtn.addEventListener("click", (e) => fn(e.target.dataset.id));
+      }
+      if (deleteBtn) {
+        const fn = type === "debt" ? deleteDebt : type === "cost" ? deleteCost : deleteIncome;
+        deleteBtn.addEventListener("click", (e) => fn(e.target.dataset.id));
+      }
+    });
+  }
+  var undoToastTimer = null;
+  function showUndoToast(message, onUndo) {
+    const existing = appState._root.getElementById("undo-toast");
+    if (existing) existing.remove();
+    if (undoToastTimer) clearTimeout(undoToastTimer);
+    const toast = document.createElement("div");
+    toast.id = "undo-toast";
+    toast.className = "undo-toast";
+    toast.innerHTML = `<span class="undo-toast-msg">${message}</span><button class="undo-toast-btn">Undo</button>`;
+    appState._root.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add("undo-toast-visible"));
+    toast.querySelector(".undo-toast-btn").addEventListener("click", () => {
+      onUndo();
+      dismissToast(toast);
+    });
+    undoToastTimer = setTimeout(() => dismissToast(toast), 5e3);
+  }
+  function dismissToast(toast) {
+    toast.classList.remove("undo-toast-visible");
+    setTimeout(() => toast.remove(), 300);
+  }
+  function showSavedToast(message) {
+    const existing = appState._root.getElementById("saved-toast");
+    if (existing) existing.remove();
+    const toast = document.createElement("div");
+    toast.id = "saved-toast";
+    toast.className = "undo-toast undo-toast-success";
+    toast.innerHTML = `<span class="undo-toast-msg">${message}</span>`;
+    appState._root.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add("undo-toast-visible"));
+    setTimeout(() => dismissToast(toast), 2500);
+  }
+  function showErrorToast(message) {
+    const existing = appState._root.getElementById("error-toast");
+    if (existing) existing.remove();
+    const toast = document.createElement("div");
+    toast.id = "error-toast";
+    toast.className = "undo-toast undo-toast-error";
+    toast.innerHTML = `<span class="undo-toast-msg">${message}</span>`;
+    appState._root.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add("undo-toast-visible"));
+    setTimeout(() => dismissToast(toast), 4e3);
+  }
+  function updateHASensors(simResults, schedule) {
+    if (!appState._root._hass) return;
+    const totalDebt = appState.debts.reduce((s, d) => s + d.balance, 0);
+    appState._root._hass.callApi("POST", "states/sensor.snowball_total_debt", {
+      state: totalDebt.toFixed(2),
+      attributes: {
+        friendly_name: "Total Remaining Debt",
+        unit_of_measurement: appState._root._currency || "USD",
+        icon: "mdi:cash-multiple"
+      }
+    });
+    if (simResults && simResults.valid && simResults.monthsElapsed < 1200) {
+      const today = /* @__PURE__ */ new Date();
+      const payoffDate = new Date(today.getFullYear(), today.getMonth() + simResults.monthsElapsed, 1);
+      appState._root._hass.callApi("POST", "states/sensor.snowball_payoff_date", {
+        state: payoffDate.toISOString().split("T")[0],
+        attributes: {
+          friendly_name: "Debt Free Date",
+          device_class: "date",
+          icon: "mdi:calendar-star"
+        }
+      });
+    }
+    if (schedule && schedule.length > 0) {
+      const currentDay = (/* @__PURE__ */ new Date()).getDate();
+      const nextPayment = schedule.find(
+        (item) => item.type === "debt" && !appState.paidStatus[item.id] && item.day >= currentDay
+      );
+      if (nextPayment) {
+        appState._root._hass.callApi("POST", "states/sensor.snowball_next_payment", {
+          state: nextPayment.amount.toFixed(2),
+          attributes: {
+            friendly_name: "Next Debt Payment",
+            unit_of_measurement: appState._root._currency || "USD",
+            debt_name: nextPayment.name,
+            due_day: nextPayment.day,
+            icon: "mdi:calendar-clock"
+          }
+        });
+      } else {
+        appState._root._hass.callApi("POST", "states/sensor.snowball_next_payment", {
+          state: "0.00",
+          attributes: {
+            friendly_name: "Next Debt Payment",
+            debt_name: "All Caught Up!",
+            icon: "mdi:check-circle"
+          }
+        });
+      }
+    }
+  }
+  function renderUI() {
+    renderCheckpointsList();
+    appState._root.querySelectorAll(".strategy-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.strategy === appState.strategy);
+    });
+    renderIncomeList();
+    renderRecurringCostsList();
+    renderSpendingBudgets();
+    const simResults = runSimulation(appState.strategy);
+    renderDebtsList(simResults);
+    renderVisualization(simResults);
+    const schedule = renderPaymentPlan();
+    if (schedule !== null) updateHASensors(simResults, schedule);
+  }
+
+  // src/app/advance.js
+  async function advanceToNextMonth() {
+    const currentKey = appState.workingMonthKey || currentMonthKey();
+    const nextKey = addMonthsToKey(currentKey, 1);
+    const nextLabel = formatMonthLabel(nextKey);
+    if (!confirm(`Archive ${formatMonthLabel(currentKey)} and start ${nextLabel} now?
+
+One-time costs will be removed, income will be cleared, and interval costs will advance. This cannot be undone.`)) return;
+    const result = calculateMonthRollover({
+      debts: appState.debts,
+      recurringCosts: appState.recurringCosts,
+      oneTimeCosts: appState.oneTimeCosts,
+      incomeEntries: appState.incomeEntries,
+      checkpoints: appState.checkpoints,
+      startingBalance: appState.startingBalance,
+      paidStatus: appState.paidStatus,
+      spendingBudgets: appState.spendingBudgets
+    }, currentKey, nextKey);
+    appState.monthlyArchives.unshift(result.archive);
+    if (appState.monthlyArchives.length > 24) appState.monthlyArchives.pop();
+    appState.incomeEntries = result.nextState.incomeEntries;
+    appState.checkpoints = result.nextState.checkpoints;
+    appState.recurringCosts = result.nextState.recurringCosts;
+    appState.oneTimeCosts = result.nextState.oneTimeCosts;
+    appState.paidStatus = result.nextState.paidStatus;
+    appState.minPayOverrides = result.nextState.minPayOverrides;
+    appState.spendingBudgets = result.nextState.spendingBudgets;
+    try {
+      await ensureStoreDashboard();
+      await appState._root._hass.connection.sendMessagePromise({
+        type: "lovelace/config/save",
+        url_path: STORE_URL_PATH,
+        config: {
+          debts: appState.debts,
+          recurringCosts: appState.recurringCosts,
+          oneTimeCosts: appState.oneTimeCosts,
+          incomeEntries: appState.incomeEntries,
+          checkpoints: appState.checkpoints,
+          strategy: appState.strategy,
+          startingBalance: appState.startingBalance,
+          showMortgage: appState.showMortgage,
+          paidStatus: appState.paidStatus,
+          paidMonth: nextKey,
+          monthlyArchives: appState.monthlyArchives,
+          spendingBudgets: appState.spendingBudgets
+        }
+      });
+      appState.viewingArchiveIndex = null;
+      appState.workingMonthKey = nextKey;
+      renderUI();
+      showSavedToast(`Started ${nextLabel} \u2713`);
+    } catch (err) {
+      console.error("Debt Snowball: advance month failed \u2014", err);
+      showErrorToast("Failed to advance month. Please try again.");
+    }
+  }
+
+  // src/app/events.js
+  function setupEventListeners() {
+    appState._root.addEventListener("click", (e) => {
+      const btn = e.target.closest(".btn");
+      if (!btn || btn.disabled) return;
+      const ripple = document.createElement("span");
+      ripple.className = "btn-ripple";
+      const rect = btn.getBoundingClientRect();
+      const size = Math.max(rect.width, rect.height);
+      ripple.style.cssText = `
+            left: ${e.clientX - rect.left - size / 2}px;
+            top:  ${e.clientY - rect.top - size / 2}px;
+            width: ${size}px;
+            height: ${size}px;
+        `;
+      btn.appendChild(ripple);
+      ripple.addEventListener("animationend", () => ripple.remove());
+    }, true);
+    appState.addDebtBtn.addEventListener("click", () => openDebtModal());
+    appState.addCostBtn.addEventListener("click", () => openCostModal());
+    appState.addIncomeBtn.addEventListener("click", () => openIncomeModal());
+    appState._root.getElementById("advance-month-btn").addEventListener("click", advanceToNextMonth);
+    appState._root.getElementById("add-budget-btn").addEventListener("click", () => openBudgetModal());
+    appState.costsListContainer.addEventListener("click", (e) => {
+      const toggle = e.target.closest("[data-toggle-section]");
+      if (!toggle) return;
+      const key = toggle.dataset.toggleSection;
+      if (appState.expandedCostSections.has(key)) appState.expandedCostSections.delete(key);
+      else appState.expandedCostSections.add(key);
+      renderRecurringCostsList();
+    });
+    appState._root.querySelectorAll(".close-budget-modal").forEach((b) => b.addEventListener("click", closeBudgetModal));
+    appState._root.querySelectorAll(".close-expense-modal").forEach((b) => b.addEventListener("click", closeExpenseModal));
+    appState.budgetForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveBudget();
+    });
+    appState.expenseForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveExpense();
+    });
+    appState._root.getElementById("budget-exception-toggle").addEventListener("change", () => {
+      const show = appState._root.getElementById("budget-exception-toggle").checked;
+      appState._root.getElementById("budget-exception-amount-group").style.display = show ? "" : "none";
+    });
+    appState._root.getElementById("budgets-list").addEventListener("click", (e) => {
+      const toggle = e.target.closest("[data-toggle-budget]");
+      if (toggle) {
+        const bid = toggle.dataset.toggleBudget;
+        if (appState.expandedBudgets.has(bid)) {
+          appState.expandedBudgets.delete(bid);
+          if (appState.inlineExpenseBudget === bid) appState.inlineExpenseBudget = null;
+        } else {
+          appState.expandedBudgets.add(bid);
+        }
+        renderSpendingBudgets();
+        return;
+      }
+      const inlineToggle = e.target.closest(".btn-toggle-inline-expense");
+      if (inlineToggle) {
+        const bid = inlineToggle.dataset.budgetId;
+        appState.inlineExpenseBudget = appState.inlineExpenseBudget === bid ? null : bid;
+        appState.expandedBudgets.add(bid);
+        renderSpendingBudgets();
+        return;
+      }
+      const inlineSave = e.target.closest(".btn-inline-save");
+      if (inlineSave) {
+        const bid = inlineSave.dataset.budgetId;
+        const form = inlineSave.closest(".inline-expense-form");
+        if (!form) return;
+        const desc = form.querySelector(".inline-desc").value.trim();
+        const amount = parseFloat(form.querySelector(".inline-amount").value);
+        const date = form.querySelector(".inline-date").value;
+        if (!desc) {
+          showErrorToast("Please enter a description.");
+          return;
+        }
+        if (isNaN(amount) || amount < 0) {
+          showErrorToast("Please enter a valid amount.");
+          return;
+        }
+        const budget = appState.spendingBudgets.find((b) => b.id === bid);
+        if (!budget) return;
+        if (!budget.expenses) budget.expenses = [];
+        budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date });
+        appState.inlineExpenseBudget = null;
+        appState.expandedBudgets.add(bid);
+        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        renderSpendingBudgets();
+        showSavedToast("Expense added \u2713");
+        return;
+      }
+      const inlineCancel = e.target.closest(".btn-inline-cancel");
+      if (inlineCancel) {
+        appState.inlineExpenseBudget = null;
+        renderSpendingBudgets();
+        return;
+      }
+      const editExp = e.target.closest(".btn-edit-expense");
+      if (editExp) {
+        openExpenseModal(editExp.dataset.budgetId, editExp.dataset.expenseId);
+        return;
+      }
+      const delExp = e.target.closest(".btn-delete-expense");
+      if (delExp) {
+        const row = delExp.closest(".budget-expense-row");
+        if (row) {
+          row.classList.add("expense-removing");
+          setTimeout(() => deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId), 280);
+        } else {
+          deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId);
+        }
+        return;
+      }
+      const override = e.target.closest(".btn-override-budget");
+      if (override) {
+        openBudgetModal(override.dataset.budgetId, true);
+        return;
+      }
+      const editBudget = e.target.closest(".btn-edit-budget");
+      if (editBudget) {
+        openBudgetModal(editBudget.dataset.budgetId);
+        return;
+      }
+      const delBudget = e.target.closest(".btn-delete-budget");
+      if (delBudget) {
+        deleteBudget(delBudget.dataset.budgetId);
+        return;
+      }
+    });
+    appState._root.getElementById("budgets-list").addEventListener("keydown", (e) => {
+      const form = e.target.closest(".inline-expense-form");
+      if (!form) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const saveBtn = form.querySelector(".btn-inline-save");
+        if (saveBtn) saveBtn.click();
+      } else if (e.key === "Escape") {
+        const cancelBtn = form.querySelector(".btn-inline-cancel");
+        if (cancelBtn) cancelBtn.click();
+      }
+    });
+    appState._root.querySelectorAll(".close-debt-modal").forEach((b) => b.addEventListener("click", closeDebtModal));
+    appState._root.querySelectorAll(".close-cost-modal").forEach((b) => b.addEventListener("click", closeCostModal));
+    appState._root.querySelectorAll(".close-income-modal").forEach((b) => b.addEventListener("click", closeIncomeModal));
+    appState._root.querySelectorAll(".close-checkpoint-modal").forEach((b) => b.addEventListener("click", closeCheckpointModal));
+    appState.debtForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveDebt();
+    });
+    appState.checkpointForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveCheckpoint();
+    });
+    appState.costForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveCost();
+    });
+    appState.incomeForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveIncome();
+    });
+    appState.exportBtn.addEventListener("click", exportData);
+    appState.importFileInput.addEventListener("change", importData);
+    appState._root.getElementById("add-checkpoint-btn").addEventListener("click", () => {
+      const dayInput = appState._root.getElementById("new-checkpoint-day");
+      const amountInput = appState._root.getElementById("new-checkpoint-amount");
+      const day = parseInt(dayInput.value);
+      const amount = parseFloat(amountInput.value);
+      if (!day || !Number.isFinite(amount) || amount < 0) {
+        showErrorToast("Please enter a valid day and amount");
+        return;
+      }
+      if (appState.checkpoints.some((cp) => cp.day === day)) {
+        showErrorToast(`A checkpoint for day ${day} already exists`);
+        return;
+      }
+      const newCheckpoint = {
+        id: "cp_" + Date.now(),
+        day,
+        amount
+      };
+      appState.checkpoints.push(newCheckpoint);
+      appState.checkpoints.sort((a, b) => a.day - b.day);
+      saveData().then(() => {
+        renderCheckpointsList();
+        renderUI();
+        amountInput.value = "";
+        showSavedToast("Checkpoint added \u2713");
+      }).catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    });
+    appState._root.getElementById("checkpoints-list").addEventListener("click", (e) => {
+      const deleteBtn = e.target.closest(".delete-checkpoint-btn");
+      if (deleteBtn) {
+        const id = deleteBtn.dataset.id;
+        appState.checkpoints = appState.checkpoints.filter((c) => c.id !== id);
+        saveData().then(() => {
+          renderCheckpointsList();
+          renderUI();
+          showSavedToast("Checkpoint removed \u2713");
+        }).catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      }
+    });
+    appState._root.getElementById("plan-prev-month-btn").addEventListener("click", () => {
+      const btn = appState._root.getElementById("plan-prev-month-btn");
+      const idx = parseInt(btn.dataset.archiveIdx ?? "0");
+      if (idx < appState.monthlyArchives.length) {
+        appState.viewingArchiveIndex = idx;
+        renderUI();
+      }
+    });
+    appState._root.getElementById("plan-next-month-btn").addEventListener("click", () => {
+      appState.viewingArchiveIndex = null;
+      renderUI();
+    });
+    appState._root.getElementById("income-schedule").addEventListener("change", updateIncomeScheduleHint);
+    appState._root.getElementById("history-btn").addEventListener("click", openArchiveModal);
+    appState._root.getElementById("close-archive-modal").addEventListener("click", closeArchiveModal);
+    appState._root.getElementById("archive-modal").addEventListener("click", (e) => {
+      if (e.target === appState._root.getElementById("archive-modal")) closeArchiveModal();
+    });
+    appState._root.getElementById("windfall-btn").addEventListener("click", openWindfallModal);
+    appState._root.getElementById("close-windfall-modal").addEventListener("click", closeWindfallModal);
+    appState._root.getElementById("windfall-calc-btn").addEventListener("click", calcWindfall);
+    appState.windfallModal.addEventListener("click", (e) => {
+      if (e.target === appState.windfallModal) closeWindfallModal();
+    });
+    appState._root.getElementById("checkin-later-btn").addEventListener("click", () => {
+      localStorage.setItem("snowball_checkin_dismissed", currentMonthKey());
+      appState.checkinModal.classList.remove("active");
+      setTimeout(() => {
+        appState.checkinModal.style.display = "none";
+      }, 300);
+    });
+    appState._root.getElementById("checkin-done-btn").addEventListener("click", () => {
+      localStorage.setItem("snowball_checkin_dismissed", currentMonthKey());
+      appState.checkinModal.classList.remove("active");
+      setTimeout(() => {
+        appState.checkinModal.style.display = "none";
+      }, 300);
+    });
+    appState._root.getElementById("cost-category").addEventListener("change", updateCostModalIntervalVisibility);
+    appState._root.getElementById("cost-interval").addEventListener("change", updateCostModalIntervalVisibility);
+    appState._root.getElementById("auto-min-btn").addEventListener("click", autoCalcMinPaymentCC);
+    appState._root.getElementById("debt-balance").addEventListener("input", updateAutoMinHint);
+    appState._root.getElementById("debt-rate").addEventListener("input", updateAutoMinHint);
+    appState._root.getElementById("mortgage-toggle-btn").addEventListener("click", () => {
+      appState.showMortgage = !appState.showMortgage;
+      saveData().then(() => renderUI()).catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    });
+    appState._root.querySelectorAll(".strategy-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        appState.strategy = btn.dataset.strategy;
+        appState._root.querySelectorAll(".strategy-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        saveData().then(() => renderUI()).catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      });
+    });
+    appState._root.getElementById("payment-plan-list").addEventListener("click", (e) => {
+      const paidBtn = e.target.closest(".btn-mark-paid");
+      if (paidBtn) {
+        togglePaid(paidBtn.dataset.id, paidBtn.dataset.autopay === "1");
+        return;
+      }
+      const editBtn = e.target.closest(".btn-edit-inline");
+      if (editBtn) {
+        const { id, type } = editBtn.dataset;
+        if (type === "debt") openDebtModal(id);
+        else if (type === "recurring") openCostModal(id);
+        else if (type === "income") openIncomeModal(id);
+        else if (type === "checkpoint") openCheckpointModal(id);
+        return;
+      }
+      const overrideBtn = e.target.closest(".btn-override-min");
+      if (overrideBtn) {
+        const form = appState._root.getElementById(`override-form-${overrideBtn.dataset.id}`);
+        if (form) form.style.display = form.style.display === "none" ? "" : "none";
+        return;
+      }
+      const cancelBtn = e.target.closest(".btn-override-cancel");
+      if (cancelBtn) {
+        const form = appState._root.getElementById(`override-form-${cancelBtn.dataset.id}`);
+        if (form) form.style.display = "none";
+        return;
+      }
+      const saveBtn = e.target.closest(".btn-override-save");
+      if (saveBtn) {
+        const id = saveBtn.dataset.id;
+        const form = appState._root.getElementById(`override-form-${id}`);
+        const val = parseFloat(form?.querySelector(".override-input")?.value);
+        if (isNaN(val) || val < 0) {
+          showErrorToast("Enter a valid amount.");
+          return;
+        }
+        appState.minPayOverrides[id] = val;
+        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        renderPaymentPlan();
+        return;
+      }
+      const clearBtn = e.target.closest(".btn-override-clear");
+      if (clearBtn) {
+        delete appState.minPayOverrides[clearBtn.dataset.id];
+        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        renderPaymentPlan();
+        return;
+      }
+    });
+    [appState.debtModal, appState.costModal, appState.incomeModal, appState.checkpointModal].forEach((modal) => {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          if (modal === appState.debtModal) closeDebtModal();
+          else if (modal === appState.costModal) closeCostModal();
+          else if (modal === appState.incomeModal) closeIncomeModal();
+          else if (modal === appState.checkpointModal) closeCheckpointModal();
+        }
+      });
+    });
+    appState._root.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (appState.debtModal.classList.contains("active")) closeDebtModal();
+        else if (appState.costModal.classList.contains("active")) closeCostModal();
+        else if (appState.incomeModal.classList.contains("active")) closeIncomeModal();
+        else if (appState.checkpointModal.classList.contains("active")) closeCheckpointModal();
+      }
+      if (e.key === "Tab") {
+        const active = [appState.debtModal, appState.costModal, appState.incomeModal, appState.checkpointModal].find((m) => m.classList.contains("active"));
+        if (!active) return;
+        const focusable = active.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1")');
+        if (focusable.length > 0) {
+          const first = focusable[0], last = focusable[focusable.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+      }
+    });
+    const promoToggle = appState._root.getElementById("debt-promo-toggle");
+    const promoExpiryGroup = appState._root.getElementById("promo-expiry-group");
+    const rateInput = appState._root.getElementById("debt-rate");
+    const rateGroup = rateInput.closest(".input-group");
+    promoToggle.addEventListener("change", () => {
+      if (promoToggle.checked) {
+        promoExpiryGroup.style.display = "block";
+        rateGroup.classList.add("input-disabled");
+        rateInput.value = "0";
+        rateInput.disabled = true;
+        appState._root.getElementById("debt-promo-expiry").required = true;
+        autoCalcMinPayment();
+      } else {
+        promoExpiryGroup.style.display = "none";
+        rateGroup.classList.remove("input-disabled");
+        rateInput.value = "";
+        rateInput.disabled = false;
+        appState._root.getElementById("debt-promo-expiry").required = false;
+        appState._root.getElementById("debt-promo-expiry").value = "";
+      }
+    });
+    appState._root.getElementById("debt-promo-expiry").addEventListener("change", autoCalcMinPayment);
+    appState._root.getElementById("debt-balance").addEventListener("input", () => {
+      if (appState._root.getElementById("debt-promo-toggle").checked) autoCalcMinPayment();
+    });
+  }
+
+  // src/app/template.js
+  var PANEL_CSS = `
 :host {
     display: block;
     width: 100% !important;
@@ -618,7 +3945,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     font-size: 0.875rem;
 }
 
-/* ===== Tablet (≤ 1024px) ===== */
+/* ===== Tablet (\u2264 1024px) ===== */
 @media (max-width: 1024px) {
     .app-container {
         padding: 0.875rem;
@@ -677,7 +4004,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }
 }
 
-/* ===== Mobile (≤ 640px) ===== */
+/* ===== Mobile (\u2264 640px) ===== */
 @media (max-width: 640px) {
     .app-container {
         padding: 0.75rem;
@@ -937,7 +4264,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }
 }
 
-/* ===== Small phone (≤ 480px) ===== */
+/* ===== Small phone (\u2264 480px) ===== */
 @media (max-width: 480px) {
     .app-container {
         padding: 0.625rem;
@@ -1189,7 +4516,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     transform: translateY(-2px);
 }
 
-/* Direct Pay variant — teal/green accent */
+/* Direct Pay variant \u2014 teal/green accent */
 .cost-card-direct {
     border-left-color: var(--teal-color) !important;
     background: linear-gradient(160deg, rgba(20, 184, 166, 0.06) 0%, var(--card-bg) 60%) !important;
@@ -1200,13 +4527,13 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     box-shadow: 0 10px 20px -4px rgba(20, 184, 166, 0.18) !important;
 }
 
-/* Credit Card variant — indigo/violet accent */
+/* Credit Card variant \u2014 indigo/violet accent */
 .cost-card-credit {
     border-left-color: #818cf8 !important;
     background: linear-gradient(160deg, rgba(99, 102, 241, 0.08) 0%, var(--card-bg) 60%) !important;
 }
 
-/* One-Time cost variant — red accent */
+/* One-Time cost variant \u2014 red accent */
 .cost-card-onetime {
     border-left-color: #f87171 !important;
     background: linear-gradient(160deg, rgba(239, 68, 68, 0.08) 0%, var(--card-bg) 60%) !important;
@@ -3245,7 +6572,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 .undo-toast-error::before {
-    content: '⚠';
+    content: '\u26A0';
     font-size: 1rem;
     flex-shrink: 0;
 }
@@ -3261,7 +6588,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 .undo-toast-success::before {
-    content: '✓';
+    content: '\u2713';
     font-size: 1rem;
     font-weight: 700;
     color: var(--success-color);
@@ -3722,7 +7049,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     color: var(--accent-hover);
 }
 
-/* ===== Schedule Row — Mobile Overrides =====
+/* ===== Schedule Row \u2014 Mobile Overrides =====
    Must live AFTER the base schedule CSS above so these win the cascade. */
 @media (max-width: 640px) {
     .schedule-row {
@@ -3814,15 +7141,14 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
         padding: 0.18rem 0.4rem;
     }
 }`;
-
-const PANEL_HTML = `<div class="app-container">
+  var PANEL_HTML = `<div class="app-container">
         <header class="header">
             <div style="display:flex;flex-direction:column;align-items:flex-start;">
                 <h1>Debt Snowball Tracker</h1>
                 <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})" style="font-size:0.65rem;color:var(--text-secondary);opacity:0.6;margin-top:0.25rem;">v${PANEL_VERSION}</span>
             </div>
             <div class="header-actions">
-                <button id="history-btn" class="btn btn-secondary" style="background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.4); color: #c084fc;">📅 History</button>
+                <button id="history-btn" class="btn btn-secondary" style="background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.4); color: #c084fc;">\u{1F4C5} History</button>
                 <label for="import-file" class="btn btn-secondary" style="background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: #60a5fa;">
                     Import Data
                     <input type="file" id="import-file" accept=".json" style="display: none;">
@@ -3832,9 +7158,9 @@ const PANEL_HTML = `<div class="app-container">
         </header>
 
         <div class="month-nav">
-            <button id="plan-prev-month-btn" class="btn btn-secondary btn-sm" style="visibility:hidden;">← Previous</button>
+            <button id="plan-prev-month-btn" class="btn btn-secondary btn-sm" style="visibility:hidden;">\u2190 Previous</button>
             <div class="month-title" id="global-month-title"></div>
-            <button id="plan-next-month-btn" class="btn btn-primary btn-sm" style="visibility:hidden;">Current Month →</button>
+            <button id="plan-next-month-btn" class="btn btn-primary btn-sm" style="visibility:hidden;">Current Month \u2192</button>
         </div>
 
         <nav class="tab-nav">
@@ -3850,7 +7176,7 @@ const PANEL_HTML = `<div class="app-container">
 
                 <section id="balance-checkpoints-card" class="card" style="margin-bottom: 1.5rem;">
                     <div style="margin-bottom: 1rem;">
-                        <h2 style="margin-bottom: 0.25rem;">💰 Cash Position</h2>
+                        <h2 style="margin-bottom: 0.25rem;">\u{1F4B0} Cash Position</h2>
                         <p class="subtitle" style="margin-bottom:0; font-size: 0.85rem;">Track your bank balance throughout the month. Add your Day 1 balance as a checkpoint on day 1.</p>
                     </div>
 
@@ -3861,7 +7187,7 @@ const PANEL_HTML = `<div class="app-container">
                     <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                         <span style="font-size: 0.875rem; color: var(--text-secondary);">Add checkpoint on day</span>
                         <select id="new-checkpoint-day" style="width: 65px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
-                            ${Array.from({length: 31}, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}
+                            ${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("")}
                         </select>
                         <span style="font-size: 0.875rem; color: var(--text-secondary);">for</span>
                         <input type="number" id="new-checkpoint-amount" min="0" step="0.01" placeholder="Amount"
@@ -3873,7 +7199,7 @@ const PANEL_HTML = `<div class="app-container">
                 <section id="payment-plan-section" class="card" style="display: none; margin-bottom: 1.5rem;">
                     <!-- Month Overview Dashboard (at top) -->
                     <div style="margin-bottom: 1.25rem; padding: 1rem; background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(168,85,247,0.05) 100%); border-radius: 12px; border: 1px solid rgba(99,102,241,0.2);">
-                        <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; font-weight: 600;">📊 Month Overview</div>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; font-weight: 600;">\u{1F4CA} Month Overview</div>
                         <div style="display: grid; grid-template-columns: repeat(2, 1fr) auto; gap: 1rem;">
                             <!-- Start Balance -->
                             <div style="display: flex; flex-direction: column; gap: 0.2rem;">
@@ -3887,14 +7213,14 @@ const PANEL_HTML = `<div class="app-container">
                             </div>
                             <!-- Expenditures -->
                             <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                                <span style="font-size: 0.7rem; color: var(--text-secondary);">− Expenses</span>
+                                <span style="font-size: 0.7rem; color: var(--text-secondary);">\u2212 Expenses</span>
                                 <span id="month-overview-expenses" style="font-size: 1.1rem; font-weight: 600; color: var(--expense-color);">-</span>
                             </div>
                         </div>
 
                         <!-- Spending Budgets Summary (only shows if budgets exist) -->
                         <div id="month-overview-budgets" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(99,102,241,0.15);">
-                            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">💳 Spending Budgets (Card Charges)</div>
+                            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">\u{1F4B3} Spending Budgets (Card Charges)</div>
                             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem;" id="month-overview-budgets-grid">
                             </div>
                         </div>
@@ -3907,7 +7233,7 @@ const PANEL_HTML = `<div class="app-container">
                             </div>
                             <!-- Buffer -->
                             <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                                <span style="font-size: 0.7rem; color: var(--text-secondary);">🛡️ Buffer (before 1st paycheck)</span>
+                                <span style="font-size: 0.7rem; color: var(--text-secondary);">\u{1F6E1}\uFE0F Buffer (before 1st paycheck)</span>
                                 <span id="month-overview-buffer" style="font-size: 1.2rem; font-weight: 700; color: var(--success-color);">-</span>
                             </div>
                         </div>
@@ -3956,7 +7282,7 @@ const PANEL_HTML = `<div class="app-container">
                             <p class="subtitle" style="margin-bottom:0;">Add each paycheck, deposit, or other income for this month with its expected date.</p>
                         </div>
                         <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-                            <button id="advance-month-btn" class="btn btn-secondary" title="Archive this month and start fresh for next month early">⏭ Next Month</button>
+                            <button id="advance-month-btn" class="btn btn-secondary" title="Archive this month and start fresh for next month early">\u23ED Next Month</button>
                             <button id="add-income-btn" class="btn btn-success">+ Add Income</button>
                         </div>
                     </div>
@@ -3970,9 +7296,9 @@ const PANEL_HTML = `<div class="app-container">
                         <div>
                             <h2>Bills & Expenses</h2>
                             <p class="subtitle" style="margin-bottom:0;">
-                                <strong>Recurring</strong> = Every month · 
-                                <strong>Quarterly</strong> = Every 3 months · 
-                                <strong>Annual</strong> = Once per year · 
+                                <strong>Recurring</strong> = Every month \xB7 
+                                <strong>Quarterly</strong> = Every 3 months \xB7 
+                                <strong>Annual</strong> = Once per year \xB7 
                                 <strong style="color:var(--danger-color);">One-Time</strong> = This month only (deleted next month)
                             </p>
                         </div>
@@ -4008,10 +7334,10 @@ const PANEL_HTML = `<div class="app-container">
                     <div class="viz-header">
                         <h2>Payoff Timeline</h2>
                         <div class="strategy-toggle" id="strategy-toggle">
-                            <button class="strategy-btn active" data-strategy="snowball" title="Pay smallest balance first — quick wins keep you motivated">
+                            <button class="strategy-btn active" data-strategy="snowball" title="Pay smallest balance first \u2014 quick wins keep you motivated">
                                 &#10052;&#65039; Snowball
                             </button>
-                            <button class="strategy-btn" data-strategy="avalanche" title="Pay highest interest first — saves the most money">
+                            <button class="strategy-btn" data-strategy="avalanche" title="Pay highest interest first \u2014 saves the most money">
                                 &#127754; Avalanche
                             </button>
                         </div>
@@ -4092,13 +7418,13 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group">
                     <div class="min-payment-header">
                         <label for="debt-min-payment">Minimum Monthly Payment ($)</label>
-                        <button type="button" id="auto-min-btn" class="btn-auto-min" title="Auto-calculate based on balance and rate">⚡ Auto-calc</button>
+                        <button type="button" id="auto-min-btn" class="btn-auto-min" title="Auto-calculate based on balance and rate">\u26A1 Auto-calc</button>
                     </div>
                     <input type="number" id="debt-min-payment" min="0" step="0.01" required>
                     <span id="auto-min-hint" class="auto-min-hint" style="display:none;"></span>
                 </div>
                 <div class="input-group">
-                    <label for="debt-due-day">Due Day of Month (1–31)</label>
+                    <label for="debt-due-day">Due Day of Month (1\u201331)</label>
                     <input type="number" id="debt-due-day" min="1" max="31" step="1" required placeholder="e.g. 15">
                 </div>
                 <div class="input-group promo-toggle-group">
@@ -4142,10 +7468,10 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group">
                     <label for="cost-category">Bill Category</label>
                     <select id="cost-category">
-                        <option value="utility">⚡ Utility (Electric, Water, Gas, Internet)</option>
-                        <option value="subscription">📱 Subscription (Streaming, Services)</option>
-                        <option value="other">📦 Other Recurring Bill</option>
-                        <option value="one-time">🔴 ONE-TIME ONLY — This Month Only (No Repeat)</option>
+                        <option value="utility">\u26A1 Utility (Electric, Water, Gas, Internet)</option>
+                        <option value="subscription">\u{1F4F1} Subscription (Streaming, Services)</option>
+                        <option value="other">\u{1F4E6} Other Recurring Bill</option>
+                        <option value="one-time">\u{1F534} ONE-TIME ONLY \u2014 This Month Only (No Repeat)</option>
                     </select>
                     <p class="subtitle" id="category-hint" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem; color: var(--text-secondary);">Choose 'ONE-TIME' for expenses that happen just once this month.</p>
                 </div>
@@ -4156,12 +7482,12 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group" id="cost-interval-group">
                     <label for="cost-interval">How Often Does This Bill Repeat?</label>
                     <select id="cost-interval">
-                        <option value="1">📅 Every Month (Monthly)</option>
-                        <option value="2">📅 Every 2 Months</option>
-                        <option value="3">📅 Quarterly (Every 3 Months)</option>
-                        <option value="6">📅 Semi-Annual (Every 6 Months)</option>
-                        <option value="12">📅 Annual (Once Per Year)</option>
-                        <option value="custom">⚙️ Custom Interval...</option>
+                        <option value="1">\u{1F4C5} Every Month (Monthly)</option>
+                        <option value="2">\u{1F4C5} Every 2 Months</option>
+                        <option value="3">\u{1F4C5} Quarterly (Every 3 Months)</option>
+                        <option value="6">\u{1F4C5} Semi-Annual (Every 6 Months)</option>
+                        <option value="12">\u{1F4C5} Annual (Once Per Year)</option>
+                        <option value="custom">\u2699\uFE0F Custom Interval...</option>
                     </select>
                 </div>
                 <div class="input-group" id="cost-interval-custom-group" style="display:none;">
@@ -4181,11 +7507,11 @@ const PANEL_HTML = `<div class="app-container">
                     <label for="cost-amount-type">Amount Type</label>
                     <select id="cost-amount-type" required>
                         <option value="fixed">Fixed</option>
-                        <option value="flexible">Flexible — varies each occurrence</option>
+                        <option value="flexible">Flexible \u2014 varies each occurrence</option>
                     </select>
                 </div>
                 <div class="input-group">
-                    <label for="cost-due-day">Due Day of Month (1–31)</label>
+                    <label for="cost-due-day">Due Day of Month (1\u201331)</label>
                     <input type="number" id="cost-due-day" min="1" max="31" step="1" required placeholder="e.g. 1">
                 </div>
                 <div class="input-group">
@@ -4319,7 +7645,7 @@ const PANEL_HTML = `<div class="app-container">
     <div id="windfall-modal" class="modal">
         <div class="modal-content" style="max-width:520px;">
             <div class="modal-header">
-                <h3>💰 Lump Sum Windfall Planner</h3>
+                <h3>\u{1F4B0} Lump Sum Windfall Planner</h3>
                 <button class="close-modal" id="close-windfall-modal">&times;</button>
             </div>
             <p style="color:var(--text-secondary);font-size:0.875rem;margin-bottom:1.25rem;line-height:1.6;">
@@ -4338,7 +7664,7 @@ const PANEL_HTML = `<div class="app-container">
                         <div class="windfall-stat"><span>Total Interest</span><strong id="wf-before-interest">-</strong></div>
                         <div class="windfall-stat"><span>Months</span><strong id="wf-before-months">-</strong></div>
                     </div>
-                    <div class="windfall-arrow">→</div>
+                    <div class="windfall-arrow">\u2192</div>
                     <div class="windfall-col windfall-col-after">
                         <div class="windfall-col-title">With Windfall</div>
                         <div class="windfall-stat"><span>Payoff Date</span><strong id="wf-after-date">-</strong></div>
@@ -4363,7 +7689,7 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group">
                     <label for="checkpoint-day">Day of Month</label>
                     <select id="checkpoint-day" required style="width:100%; padding:0.6rem; font-size:0.95rem; background:var(--card-bg); border:1px solid var(--border-color); border-radius:8px; color:var(--text-primary);">
-                        ${Array.from({length: 31}, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}
+                        ${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("")}
                     </select>
                 </div>
                 <div class="input-group">
@@ -4381,7 +7707,7 @@ const PANEL_HTML = `<div class="app-container">
     <div id="checkin-modal" class="modal">
         <div class="modal-content" style="max-width:420px;">
             <div class="modal-header">
-                <h3>📅 New Month Check-In</h3>
+                <h3>\u{1F4C5} New Month Check-In</h3>
             </div>
             <p style="color:var(--text-secondary);font-size:0.9rem;line-height:1.6;margin-bottom:1.5rem;">
                 It's a new month! For the most accurate payoff timeline, update each debt card with your latest statement balance.
@@ -4400,7 +7726,7 @@ const PANEL_HTML = `<div class="app-container">
     <div id="archive-modal" class="modal">
         <div class="modal-content archive-modal-content">
             <div class="modal-header">
-                <h3>📅 Monthly History</h3>
+                <h3>\u{1F4C5} Monthly History</h3>
                 <button class="close-modal" id="close-archive-modal">&times;</button>
             </div>
             <div id="archive-body">
@@ -4411,3928 +7737,80 @@ const PANEL_HTML = `<div class="app-container">
 
     <canvas id="confetti-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;display:none;"></canvas>`;
 
-class DebtSnowballCard extends HTMLElement {
-    // Lovelace Card API - minimal implementation at top
-    // Full implementation at bottom of class
-
+  // src/app/card.js
+  var DebtSnowballCard = class extends HTMLElement {
     set hass(hass) {
-        // Just store the HA object and locale settings when HA pushes them
-        this._hass = hass;
-        this._currency = hass.config?.currency || 'USD';
-        this._language = hass.locale?.language || hass.language || navigator.language;
+      this._hass = hass;
+      this._currency = hass.config?.currency || "USD";
+      this._language = hass.locale?.language || hass.language || navigator.language;
     }
-  
     connectedCallback() {
-        // Guard against multiple injections when HA re-renders
-        if (this._initialized) return;
-        this._initialized = true;
-
-        // Load Google Fonts
-        if (!document.querySelector('link[data-debt-snowball-font]')) {
-            const fontLink = document.createElement('link');
-            fontLink.rel = 'stylesheet';
-            fontLink.setAttribute('data-debt-snowball-font', '1');
-            fontLink.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap';
-            document.head.appendChild(fontLink);
-        }
-
-        // Inject styles directly into the component to bypass HA's Shadow DOM blocking
-        const styleEl = document.createElement('style');
-        styleEl.textContent = PANEL_CSS;
-        this.appendChild(styleEl);
-
-        // Inject HTML
-        const wrapper = document.createElement('div');
-        wrapper.innerHTML = PANEL_HTML;
-        while (wrapper.firstChild) this.appendChild(wrapper.firstChild);
-
-        // Load Chart.js then initialize the app
-        this._loadChartJs().then(() => {
+      if (this._initialized) return;
+      this._initialized = true;
+      if (!document.querySelector("link[data-debt-snowball-font]")) {
+        const fontLink = document.createElement("link");
+        fontLink.rel = "stylesheet";
+        fontLink.setAttribute("data-debt-snowball-font", "1");
+        fontLink.href = "https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap";
+        document.head.appendChild(fontLink);
+      }
+      const styleEl = document.createElement("style");
+      styleEl.textContent = PANEL_CSS;
+      this.appendChild(styleEl);
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = PANEL_HTML;
+      while (wrapper.firstChild) this.appendChild(wrapper.firstChild);
+      this._loadChartJs().then(() => {
         this._initApp();
-        });
+      });
     }
-
-  disconnectedCallback() {
-    // Clean up interval if panel is removed
-    if (typeof countdownInterval !== 'undefined' && countdownInterval) {
-      clearInterval(countdownInterval);
+    disconnectedCallback() {
+      if (appState.countdownInterval) {
+        clearInterval(appState.countdownInterval);
+      }
     }
-  }
-
-  _loadChartJs() {
-    return new Promise((resolve) => {
-      if (window.Chart) return resolve();
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
-      script.onload = resolve;
-      script.onerror = () => {
-        console.error('[DebtSnowball] Failed to load Chart.js');
-        resolve(); // continue anyway
-      };
-      document.head.appendChild(script);
-    });
-  }
-
-
-// ─── 20-state.js ─────────────────────────────────────────────────────────────────
-  _initApp() {
-    // _root is used throughout the app to scope DOM queries to this panel
-    const _root = this;
-    _root.getElementById = (id) => _root.querySelector(`#${id}`);
-
-    // ─── Data Models ────────────────────────────────────────────────────────────
-let debts = [];
-let recurringCosts = [];   // Monthly, quarterly, annual costs (NOT one-time)
-let oneTimeCosts = [];     // One-time expenses for the current month only
-let incomeEntries = [];
-let checkpoints = [];
-let startingBalance = 0;
-let strategy = 'snowball'; // 'snowball' | 'avalanche'
-let showMortgage = true;   // toggle mortgage visibility
-let paidStatus = {};       // { [id: 'paid' | 'autopay' } — resets each calendar month
-let monthlyArchives = [];  // [{ month, label, incomeEntries, recurringCosts, checkpoints, startingBalance, totalIncome, totalCosts }]
-let spendingBudgets = [];  // [{ id, name, amount, exception: {month,amount}|null, expenses: [{id,description,amount,date}] }]
-let expandedBudgets = new Set(); // UI state: which budget IDs are expanded
-let expandedCostSections = new Set(['utility', 'subscription', 'other', 'one-time']); // UI state: expanded cost section keys
-let inlineExpenseBudget = null;  // UI state: which budget ID has the inline add-expense form open
-let paydownChart = null;
-let lastSimPayoffDate = null; // used for countdown ticker
-let countdownInterval = null;
-let viewingArchiveIndex = null; // null = current month, number = index into monthlyArchives
-let workingMonthKey = null;    // the month the data is for — may be ahead of the calendar if user advanced early
-let minPayOverrides = {};      // { [debtId]: amount } — this-month-only minimum payment overrides
-
-// ─── DOM Elements ───────────────────────────────────────────────────────────
-const debtsListContainer    = _root.getElementById('debts-list');
-const costsListContainer    = _root.getElementById('costs-list');
-const incomeListContainer   = _root.getElementById('income-list');
-const addDebtBtn            = _root.getElementById('add-debt-btn');
-const addCostBtn            = _root.getElementById('add-cost-btn');
-const addIncomeBtn          = _root.getElementById('add-income-btn');
-const debtModal             = _root.getElementById('debt-modal');
-const costModal             = _root.getElementById('cost-modal');
-const incomeModal           = _root.getElementById('income-modal');
-const debtForm              = _root.getElementById('debt-form');
-const costForm              = _root.getElementById('cost-form');
-const incomeForm            = _root.getElementById('income-form');
-const exportBtn             = _root.getElementById('export-btn');
-const importFileInput       = _root.getElementById('import-file');
-const windfallModal         = _root.getElementById('windfall-modal');
-const checkinModal          = _root.getElementById('checkin-modal');
-const budgetModal           = _root.getElementById('budget-modal');
-const budgetForm            = _root.getElementById('budget-form');
-const expenseModal          = _root.getElementById('expense-modal');
-const expenseForm           = _root.getElementById('expense-form');
-const checkpointModal       = _root.getElementById('checkpoint-modal');
-const checkpointForm        = _root.getElementById('checkpoint-form');
-
-
-// ─── 30-storage.js ─────────────────────────────────────────────────────────────────
-
-// ─── HA Backend Data Storage ─────────────────────────────────────────────────
-// Storage mechanism: a dedicated hidden Lovelace dashboard used purely as a
-// JSON store. HA writes its config to .storage/lovelace.snowball-store.json
-// on disk immediately on every save, and restores it automatically on restart.
-//
-// Why this works:
-//   ✓ Zero setup — no YAML, no helpers, no config changes required
-//   ✓ Truly persistent — written to disk, survives restarts
-//   ✓ Shared — all users on the server read the same data
-//   ✓ No size limits — the full payload is one JSON object
-//   ✓ Standard HA API — same mechanism Lovelace itself uses for dashboards
-//
-// The dashboard is created automatically on first save (hidden from sidebar).
-// Only the active-tab UI preference is kept in localStorage.
-
-const STORE_URL_PATH = 'snowball-store';
-
-// Ensure the hidden storage dashboard exists (idempotent — safe to call every time).
-async function ensureStoreDashboard() {
-    const conn = _root._hass.connection;
-
-    // Check if it already exists by attempting to list dashboards
-    try {
-        const dashboards = await conn.sendMessagePromise({ type: 'lovelace/dashboards/list' });
-        if (dashboards.some(d => d.url_path === STORE_URL_PATH)) return; // already exists
-    } catch (err) {
-        // If listing fails, attempt creation anyway
-    }
-
-    // Create the hidden dashboard — this only runs once ever
-    try {
-        await conn.sendMessagePromise({
-            type:             'lovelace/dashboards/create',
-            url_path:         STORE_URL_PATH,
-            title:            'Snowball Store',
-            icon:             'mdi:database',
-            show_in_sidebar:  false,
-            require_admin:    false,
-        });
-    } catch (err) {
-        // "already exists" / duplicate key errors are fine — another user may have created it first.
-        const msg = String(err?.message ?? err).toLowerCase();
-        if (!msg.includes('already') && !msg.includes('duplicate') && !msg.includes('exists')) {
-            throw err;
-        }
-    }
-}
-
-// ─── 1. Load ─────────────────────────────────────────────────────────────────
-async function loadBackendData() {
-    try {
-        const result = await _root._hass.connection.sendMessagePromise({
-            type:      'lovelace/config',
-            url_path:  STORE_URL_PATH,
-            force:     true,
-        });
-
-        if (result) {
-            debts           = result.debts          || [];
-            recurringCosts  = result.recurringCosts  || [];
-            incomeEntries   = result.incomeEntries   || [];
-            checkpoints     = result.checkpoints     || [];
-            strategy        = result.strategy        || 'snowball';
-            showMortgage    = result.showMortgage !== false;
-            startingBalance = result.startingBalance || 0;
-            monthlyArchives  = result.monthlyArchives  || [];
-            spendingBudgets  = result.spendingBudgets  || [];
-            minPayOverrides  = result.minPayOverrides  || {};
-
-            // Backward-compat: oneTimeCosts may not exist in older saved data.
-            // If missing, migrate any one-time entries from recurringCosts.
-            if (result.oneTimeCosts) {
-                oneTimeCosts = result.oneTimeCosts;
-            } else {
-                oneTimeCosts = recurringCosts.filter(c => (c.category || 'other') === 'one-time');
-                recurringCosts = recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
-            }
-
-            const prevMonth = result.paidMonth;
-            const thisMonth = currentMonthKey();
-
-            // workingMonthKey is whichever is later: the stored month or the calendar month.
-            // This means if the user advanced early, workingMonthKey stays at the advanced month.
-            workingMonthKey = (prevMonth && monthKeyToIndex(prevMonth) > monthKeyToIndex(thisMonth))
-                ? prevMonth
-                : thisMonth;
-
-            // Only archive if the calendar has moved *past* the stored month (not when user advanced ahead).
-            if (prevMonth && monthKeyToIndex(thisMonth) > monthKeyToIndex(prevMonth)) {
-                const rollover = calculateMonthRollover({
-                    debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
-                    startingBalance, paidStatus, spendingBudgets,
-                }, prevMonth, thisMonth);
-
-                monthlyArchives.unshift(rollover.archive);
-                if (monthlyArchives.length > 24) monthlyArchives.pop();
-
-                incomeEntries   = rollover.nextState.incomeEntries;
-                checkpoints     = rollover.nextState.checkpoints;
-                recurringCosts  = rollover.nextState.recurringCosts;
-                oneTimeCosts    = rollover.nextState.oneTimeCosts;
-                paidStatus      = rollover.nextState.paidStatus;
-                minPayOverrides = rollover.nextState.minPayOverrides;
-                spendingBudgets = rollover.nextState.spendingBudgets;
-
-                saveData().catch(err => console.error('Debt Snowball: rollover save failed —', err));
-            } else if (result.paidStatus) {
-                // Covers: stored month == calendar month, OR stored month is ahead (user advanced early)
-                paidStatus = result.paidStatus;
-            } else {
-                paidStatus = {};
-            }
-        }
-    } catch (err) {
-        // A "not found" / "config_not_found" error just means first run — start empty.
-        // Any other error (network, auth, etc.) is worth logging.
-        const msg = String(err?.message ?? err).toLowerCase();
-        if (!msg.includes('not_found') && !msg.includes('not found') && !msg.includes('config_not_found')) {
-            console.error('Debt Snowball: error loading data —', err);
-        }
-    }
-
-    // Active tab is the one genuine per-browser preference
-    const savedTab = localStorage.getItem('snowball_active_tab');
-    if (savedTab) {
-        const savedBtn = _root.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
-        if (savedBtn) savedBtn.click();
-    }
-
-    initTabs();
-    renderUI();
-}
-
-// ─── 2. Save ─────────────────────────────────────────────────────────────────
-async function saveData() {
-    if (!_root._hass) return;
-
-    // Active tab stays in the browser
-    const activeTabEl = _root.querySelector('.tab-btn.active');
-    if (activeTabEl) localStorage.setItem('snowball_active_tab', activeTabEl.dataset.tab);
-
-    await ensureStoreDashboard();
-
-    await _root._hass.connection.sendMessagePromise({
-        type:      'lovelace/config/save',
-        url_path:  STORE_URL_PATH,
-        config:    {
-            debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
-            strategy, startingBalance, showMortgage,
-            paidStatus, paidMonth: workingMonthKey || currentMonthKey(),
-            monthlyArchives, spendingBudgets, minPayOverrides,
-        },
-    });
-}
-
-function currentMonthKey() {
-    const d = new Date();
-    return `${d.getFullYear()}-${d.getMonth()}`;
-}
-
-// ─── Manual Month Advance ─────────────────────────────────────────────────────
-
-
-// ─── 40-advance.js ─────────────────────────────────────────────────────────────────
-async function advanceToNextMonth() {
-    const currentKey = workingMonthKey || currentMonthKey();
-    const nextKey    = addMonthsToKey(currentKey, 1);
-    const nextLabel  = formatMonthLabel(nextKey);
-
-    if (!confirm(`Archive ${formatMonthLabel(currentKey)} and start ${nextLabel} now?\n\nOne-time costs will be removed, income will be cleared, and interval costs will advance. This cannot be undone.`)) return;
-
-    const result = calculateMonthRollover({
-        debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
-        startingBalance, paidStatus, spendingBudgets,
-    }, currentKey, nextKey);
-
-    monthlyArchives.unshift(result.archive);
-    if (monthlyArchives.length > 24) monthlyArchives.pop();
-
-    incomeEntries   = result.nextState.incomeEntries;
-    checkpoints     = result.nextState.checkpoints;
-    recurringCosts  = result.nextState.recurringCosts;
-    oneTimeCosts    = result.nextState.oneTimeCosts;
-    paidStatus      = result.nextState.paidStatus;
-    minPayOverrides = result.nextState.minPayOverrides;
-    spendingBudgets = result.nextState.spendingBudgets;
-
-    // Save with paidMonth set to nextKey so the automatic rollover doesn't re-fire
-    try {
-        await ensureStoreDashboard();
-        await _root._hass.connection.sendMessagePromise({
-            type:     'lovelace/config/save',
-            url_path: STORE_URL_PATH,
-            config:   {
-                debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
-                strategy, startingBalance, showMortgage,
-                paidStatus, paidMonth: nextKey,
-                monthlyArchives, spendingBudgets,
-            },
-        });
-        viewingArchiveIndex = null;
-        workingMonthKey = nextKey;
-        renderUI();
-        showSavedToast(`Started ${nextLabel} ✓`);
-    } catch (err) {
-        console.error('Debt Snowball: advance month failed —', err);
-        showErrorToast('Failed to advance month. Please try again.');
-    }
-}
-
-
-// ─── 50-pure.js ─────────────────────────────────────────────────────────────────
-
-function formatMonthLabel(key) {
-    const [year, month] = key.split('-').map(Number);
-    return new Date(year, month).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-}
-
-function monthKeyToIndex(key) {
-    const [y, m] = key.split('-').map(Number);
-    return y * 12 + m;
-}
-
-function addMonthsToKey(key, n) {
-    const total = monthKeyToIndex(key) + n;
-    return `${Math.floor(total / 12)}-${total % 12}`;
-}
-
-// Generate all biweekly occurrences of a paycheck within a given month.
-// anchorDateStr is any past reference date on the correct two-week cycle (YYYY-MM-DD).
-function generateBiweeklyForMonth(label, amount, anchorDateStr, monthKey) {
-    const anchor = new Date(anchorDateStr + 'T00:00:00');
-    const [y, m] = monthKey.split('-').map(Number);
-    const monthStart = new Date(y, m, 1);
-    const monthEnd   = new Date(y, m + 1, 0);
-    const msPerDay   = 86400000;
-    const entries    = [];
-
-    // Step forward from anchor in 14-day increments until we enter the month
-    let d = new Date(anchor);
-    const daysToStart = Math.floor((monthStart - anchor) / msPerDay);
-    if (daysToStart > 0) {
-        d = new Date(anchor.getTime() + Math.floor(daysToStart / 14) * 14 * msPerDay);
-    }
-
-    while (d <= monthEnd) {
-        if (d >= monthStart) {
-            const mm = String(m + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            entries.push({
-                id: `${Date.now()}${Math.random().toString(36).slice(2, 7)}`,
-                label, amount,
-                date: `${y}-${mm}-${dd}`,
-                scheduleType: 'biweekly',
-                scheduleAnchorDate: anchorDateStr,
-            });
-        }
-        d = new Date(d.getTime() + 14 * msPerDay);
-    }
-    return entries;
-}
-
-// Carry recurring income entries forward into monthKey.
-// Monthly entries (and legacy entries with no scheduleType) get their date updated;
-// biweekly entries are regenerated; explicit one-time entries are dropped.
-function generateRecurringIncomeForMonth(entries, monthKey) {
-    const [y, m] = monthKey.split('-').map(Number);
-    const newEntries = [];
-
-    // Monthly recurring: update date to same day in new month.
-    // Legacy entries with no scheduleType are treated as monthly.
-    entries.filter(e => !e.scheduleType || e.scheduleType === 'monthly').forEach(e => {
-        const day     = e.scheduleDay || parseInt(e.date.split('-')[2]);
-        const lastDay = new Date(y, m + 1, 0).getDate();
-        const actual  = Math.min(day, lastDay);
-        const mm = String(m + 1).padStart(2, '0');
-        const dd = String(actual).padStart(2, '0');
-        newEntries.push({ ...e, scheduleDay: day, date: `${y}-${mm}-${dd}` });
-    });
-
-    // Biweekly: deduplicate templates by (label|amount|anchorDate) then regenerate
-    const seen = new Set();
-    entries.filter(e => e.scheduleType === 'biweekly' && e.scheduleAnchorDate).forEach(e => {
-        const key = `${e.label}|${e.amount}|${e.scheduleAnchorDate}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            newEntries.push(...generateBiweeklyForMonth(e.label, e.amount, e.scheduleAnchorDate, monthKey));
-        }
-    });
-
-    return newEntries;
-}
-
-// Convert app month key (YYYY-M, 0-indexed month) ↔ HTML month input value (YYYY-MM, 1-indexed)
-function keyToHtmlMonth(key) {
-    const [year, month] = key.split('-').map(Number);
-    return `${year}-${String(month + 1).padStart(2, '0')}`;
-}
-function htmlMonthToKey(htmlMonth) {
-    const [year, month] = htmlMonth.split('-').map(Number);
-    return `${year}-${month - 1}`;
-}
-
-function isCostDueThisMonth(cost, monthKey) {
-    const key = monthKey || workingMonthKey || currentMonthKey();
-    if ((cost.category || 'other') === 'one-time') {
-        // One-time costs are only due in the month they were added (or legacy ones with no addedMonth)
-        return !cost.addedMonth || cost.addedMonth === key;
-    }
-    if ((cost.intervalMonths || 1) <= 1) return true;
-    const next = cost.nextDueMonth || key;
-    const targetIdx = monthKeyToIndex(key);
-    const nextIdx = monthKeyToIndex(next);
-    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
-}
-
-function isCostDueInMonth(cost, monthKey) {
-    if ((cost.category || 'other') === 'one-time') {
-        return !cost.addedMonth || cost.addedMonth === monthKey;
-    }
-    if ((cost.intervalMonths || 1) <= 1) return true;
-    const next = cost.nextDueMonth || monthKey;
-    const targetIdx = monthKeyToIndex(monthKey);
-    const nextIdx = monthKeyToIndex(next);
-    return targetIdx >= nextIdx && (targetIdx - nextIdx) % cost.intervalMonths === 0;
-}
-
-function intervalLabel(n) {
-    if (!n || n <= 1) return null;
-    if (n === 3)  return '📆 Quarterly';
-    if (n === 6)  return '📆 Semi-Annual';
-    if (n === 12) return '📆 Annual';
-    return `📆 Every ${n} mo.`;
-}
-
-function formatOrdinal(day) {
-    const s = ['th','st','nd','rd'], v = day % 100;
-    return day + (s[(v-20)%10] || s[v] || s[0]);
-}
-
-function formatMoney(n) {
-    const currency = (typeof _root !== 'undefined' && _root._currency) ? _root._currency : 'USD';
-    const language = (typeof _root !== 'undefined' && _root._language) ? _root._language : undefined;
-
-    try {
-        return new Intl.NumberFormat(language, {
-            style: 'currency',
-            currency: currency,
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }).format(n);
-    } catch (e) {
-        return Number(n).toLocaleString(language, { style: 'currency', currency: 'USD' });
-    }
-}
-
-function escHtml(str) {
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function calcAutoMin(balance, aprPct) {
-    if (!balance || balance <= 0) return null;
-    const monthlyInterest = balance * (aprPct / 100 / 12);
-    const onePercent      = balance * 0.01;
-    return Math.max(25, parseFloat((onePercent + monthlyInterest).toFixed(2)));
-}
-
-function getStrategyOrder(debtList, strat) {
-    const copy = [...debtList];
-    if (strat === 'avalanche') {
-        copy.sort((a,b) => {
-            const ra = a.promoZeroInterest ? (a.originalRate || 0) : a.rate;
-            const rb = b.promoZeroInterest ? (b.originalRate || 0) : b.rate;
-            return rb - ra || a.balance - b.balance;
-        });
-    } else {
-        copy.sort((a,b) => a.balance - b.balance);
-    }
-    return copy;
-}
-
-function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
-    const {
-        debts,
-        recurringCosts,
-        oneTimeCosts = [],
-        incomeEntries,
-        checkpoints,
-        startingBalance,
-        paidStatus,
-        spendingBudgets,
-    } = state;
-
-    const archive = {
-        month: closingMonthKey,
-        label: formatMonthLabel(closingMonthKey),
-        incomeEntries: [...incomeEntries],
-        recurringCosts: [...recurringCosts],
-        oneTimeCosts: [...oneTimeCosts],
-        checkpoints: [...checkpoints],
-        debts: debts.map(d => ({ ...d })),
-        startingBalance,
-        paidStatus: { ...paidStatus },
-        totalIncome: incomeEntries.reduce((s, e) => s + e.amount, 0),
-        totalCosts: [
-            ...recurringCosts.filter(c => isCostDueInMonth(c, closingMonthKey)),
-            ...oneTimeCosts,
-        ].reduce((s, c) => s + c.amount, 0),
-    };
-
-    const day1Cp = checkpoints.find(cp => cp.day === 1);
-    let cashPool = day1Cp ? day1Cp.amount : 0;
-    const totalIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
-    const totalCosts = [
-        ...recurringCosts.filter(c => isCostDueInMonth(c, closingMonthKey)),
-        ...oneTimeCosts,
-    ].reduce((s, c) => s + c.amount, 0);
-    const finalBalance = cashPool + totalIncome - totalCosts;
-    archive.finalBalance = finalBalance;
-
-    const nextIncome = generateRecurringIncomeForMonth(incomeEntries, nextMonthKey);
-    const nextCheckpoints = finalBalance > 0
-        ? [{ id: 'cp_' + Date.now(), day: 1, amount: finalBalance }]
-        : [];
-    // Defensive: strip any one-time costs that may still be in recurringCosts (backward compat)
-    const cleanRecurring = recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
-    const nextCosts = cleanRecurring.map(c => {
-        if ((c.intervalMonths || 1) <= 1) return c;
-        let next = c.nextDueMonth || closingMonthKey;
-        while (monthKeyToIndex(next) <= monthKeyToIndex(closingMonthKey)) {
-            next = addMonthsToKey(next, c.intervalMonths);
-        }
-        return { ...c, nextDueMonth: next };
-    });
-    const nextBudgets = spendingBudgets.map(b => ({
-        ...b,
-        expenses: [],
-        exception: (b.exception?.month === closingMonthKey) ? null : b.exception,
-    }));
-
-    return {
-        archive,
-        nextState: {
-            incomeEntries: nextIncome,
-            checkpoints: nextCheckpoints,
-            recurringCosts: nextCosts,
-            oneTimeCosts: [],
-            paidStatus: {},
-            minPayOverrides: {},
-            spendingBudgets: nextBudgets,
-        },
-    };
-}
-
-
-// ─── 60-modals.js ─────────────────────────────────────────────────────────────────
-
-function updateCostModalIntervalVisibility() {
-    const cat      = _root.getElementById('cost-category').value;
-    const intGrp   = _root.getElementById('cost-interval-group');
-    const custGrp  = _root.getElementById('cost-interval-custom-group');
-    const startGrp = _root.getElementById('cost-start-month-group');
-    const isOneTime = cat === 'one-time';
-    intGrp.style.display  = isOneTime ? 'none' : '';
-    if (isOneTime) {
-        custGrp.style.display = 'none';
-        startGrp.style.display = 'none';
-    } else {
-        const val = _root.getElementById('cost-interval').value;
-        const isMultiMonth = val === 'custom' || parseInt(val) > 1;
-        custGrp.style.display  = val === 'custom' ? '' : 'none';
-        startGrp.style.display = isMultiMonth ? '' : 'none';
-    }
-}
-
-// ─── Archive Viewer ───────────────────────────────────────────────────────────
-function openArchiveModal() {
-    const body = _root.getElementById('archive-body');
-    body.innerHTML = '';
-
-    if (monthlyArchives.length === 0) {
-        body.innerHTML = '<div class="archive-empty">No archived months yet.<br>History is saved automatically when each month rolls over.</div>';
-        showModal(_root.getElementById('archive-modal'));
-        return;
-    }
-
-    // Dropdown
-    const select = document.createElement('select');
-    select.className = 'input-group archive-select';
-    monthlyArchives.forEach((a, i) => {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = a.label;
-        select.appendChild(opt);
-    });
-    body.appendChild(select);
-
-    const detailWrap = document.createElement('div');
-    body.appendChild(detailWrap);
-
-    function renderArchiveDetail(idx) {
-        const a = monthlyArchives[idx];
-        detailWrap.innerHTML = '';
-
-        const summary = document.createElement('div');
-        summary.className = 'archive-summary';
-
-        const fmt = n => typeof n === 'number' ? formatMoney(n) : '$0.00';
-
-        summary.innerHTML = `
-            <div class="archive-summary-row">
-                <span class="archive-summary-label">Starting Balance</span>
-                <span class="archive-summary-value">${fmt(a.startingBalance)}</span>
-            </div>
-            <div class="archive-summary-row">
-                <span class="archive-summary-label">Total Income</span>
-                <span class="archive-summary-value income">${fmt(a.totalIncome)}</span>
-            </div>
-            <div class="archive-summary-row">
-                <span class="archive-summary-label">Total Costs</span>
-                <span class="archive-summary-value expense">${fmt(a.totalCosts)}</span>
-            </div>`;
-
-        // Income detail toggle
-        if (a.incomeEntries && a.incomeEntries.length > 0) {
-            const incBtn = document.createElement('button');
-            incBtn.className = 'archive-detail-toggle';
-            incBtn.textContent = `▶ Income entries (${a.incomeEntries.length})`;
-            const incDetail = document.createElement('div');
-            incDetail.className = 'archive-detail-section';
-            a.incomeEntries.forEach(e => {
-                const row = document.createElement('div');
-                row.className = 'archive-detail-item';
-                row.innerHTML = `<span>${escHtml(e.label)}</span><span>${fmt(e.amount)}</span>`;
-                incDetail.appendChild(row);
-            });
-            incBtn.addEventListener('click', () => {
-                incDetail.classList.toggle('open');
-                incBtn.textContent = incDetail.classList.contains('open')
-                    ? `▼ Income entries (${a.incomeEntries.length})`
-                    : `▶ Income entries (${a.incomeEntries.length})`;
-            });
-            summary.appendChild(incBtn);
-            summary.appendChild(incDetail);
-        }
-
-        // Recurring costs detail toggle
-        if (a.recurringCosts && a.recurringCosts.length > 0) {
-            const costBtn = document.createElement('button');
-            costBtn.className = 'archive-detail-toggle';
-            costBtn.textContent = `▶ Recurring costs (${a.recurringCosts.length})`;
-            const costDetail = document.createElement('div');
-            costDetail.className = 'archive-detail-section';
-            a.recurringCosts.forEach(c => {
-                const row = document.createElement('div');
-                row.className = 'archive-detail-item';
-                row.innerHTML = `<span>${escHtml(c.name)} <span style="opacity:0.6;font-size:0.75em;">${c.category || 'other'}</span></span><span>${fmt(c.amount)}</span>`;
-                costDetail.appendChild(row);
-            });
-            costBtn.addEventListener('click', () => {
-                costDetail.classList.toggle('open');
-                costBtn.textContent = costDetail.classList.contains('open')
-                    ? `▼ Recurring costs (${a.recurringCosts.length})`
-                    : `▶ Recurring costs (${a.recurringCosts.length})`;
-            });
-            summary.appendChild(costBtn);
-            summary.appendChild(costDetail);
-        }
-
-        // One-time costs detail toggle
-        if (a.oneTimeCosts && a.oneTimeCosts.length > 0) {
-            const otBtn = document.createElement('button');
-            otBtn.className = 'archive-detail-toggle';
-            otBtn.textContent = `▶ One-time costs (${a.oneTimeCosts.length})`;
-            const otDetail = document.createElement('div');
-            otDetail.className = 'archive-detail-section';
-            a.oneTimeCosts.forEach(c => {
-                const row = document.createElement('div');
-                row.className = 'archive-detail-item';
-                row.innerHTML = `<span>${escHtml(c.name)} <span style="opacity:0.6;font-size:0.75em;">one-time</span></span><span>${fmt(c.amount)}</span>`;
-                otDetail.appendChild(row);
-            });
-            otBtn.addEventListener('click', () => {
-                otDetail.classList.toggle('open');
-                otBtn.textContent = otDetail.classList.contains('open')
-                    ? `▼ One-time costs (${a.oneTimeCosts.length})`
-                    : `▶ One-time costs (${a.oneTimeCosts.length})`;
-            });
-            summary.appendChild(otBtn);
-            summary.appendChild(otDetail);
-        }
-
-        detailWrap.appendChild(summary);
-    }
-
-    renderArchiveDetail(0);
-    select.addEventListener('change', () => renderArchiveDetail(Number(select.value)));
-
-    showModal(_root.getElementById('archive-modal'));
-}
-
-function closeArchiveModal() {
-    const modal = _root.getElementById('archive-modal');
-    modal.classList.remove('active');
-    setTimeout(() => { modal.style.display = 'none'; }, 300);
-}
-
-function showModal(modal) {
-    modal.style.display = 'flex';
-    void modal.offsetWidth;
-    modal.classList.add('active');
-}
-
-
-// ─── 70-events.js ─────────────────────────────────────────────────────────────────
-// ─── Event Listeners ─────────────────────────────────────────────────────────
-function setupEventListeners() {
-
-    // ── Global ripple effect on all .btn clicks ───────────────────────────────
-    _root.addEventListener('click', e => {
-        const btn = e.target.closest('.btn');
-        if (!btn || btn.disabled) return;
-        const ripple = document.createElement('span');
-        ripple.className = 'btn-ripple';
-        const rect = btn.getBoundingClientRect();
-        const size = Math.max(rect.width, rect.height);
-        ripple.style.cssText = `
-            left: ${e.clientX - rect.left - size/2}px;
-            top:  ${e.clientY - rect.top  - size/2}px;
-            width: ${size}px;
-            height: ${size}px;
-        `;
-        btn.appendChild(ripple);
-        ripple.addEventListener('animationend', () => ripple.remove());
-    }, true);
-
-    addDebtBtn.addEventListener('click',   () => openDebtModal());
-    addCostBtn.addEventListener('click',   () => openCostModal());
-    addIncomeBtn.addEventListener('click', () => openIncomeModal());
-    _root.getElementById('advance-month-btn').addEventListener('click', advanceToNextMonth);
-    _root.getElementById('add-budget-btn').addEventListener('click', () => openBudgetModal());
-
-    // Delegated toggle for collapsible cost sections (utility / subscription)
-    costsListContainer.addEventListener('click', e => {
-        const toggle = e.target.closest('[data-toggle-section]');
-        if (!toggle) return;
-        const key = toggle.dataset.toggleSection;
-        if (expandedCostSections.has(key)) expandedCostSections.delete(key);
-        else expandedCostSections.add(key);
-        renderRecurringCostsList();
-    });
-
-    _root.querySelectorAll('.close-budget-modal').forEach(b  => b.addEventListener('click', closeBudgetModal));
-    _root.querySelectorAll('.close-expense-modal').forEach(b => b.addEventListener('click', closeExpenseModal));
-
-    budgetForm.addEventListener('submit',  e => { e.preventDefault(); saveBudget(); });
-    expenseForm.addEventListener('submit', e => { e.preventDefault(); saveExpense(); });
-
-    _root.getElementById('budget-exception-toggle').addEventListener('change', () => {
-        const show = _root.getElementById('budget-exception-toggle').checked;
-        _root.getElementById('budget-exception-amount-group').style.display = show ? '' : 'none';
-    });
-
-    // Delegated click handler for all budget card interactions
-    _root.getElementById('budgets-list').addEventListener('click', e => {
-        const toggle = e.target.closest('[data-toggle-budget]');
-        if (toggle) {
-            const bid = toggle.dataset.toggleBudget;
-            if (expandedBudgets.has(bid)) {
-                expandedBudgets.delete(bid);
-                // Close inline form too when collapsing
-                if (inlineExpenseBudget === bid) inlineExpenseBudget = null;
-            } else {
-                expandedBudgets.add(bid);
-            }
-            renderSpendingBudgets();
-            return;
-        }
-
-        // Inline expense toggle (open/close inline form)
-        const inlineToggle = e.target.closest('.btn-toggle-inline-expense');
-        if (inlineToggle) {
-            const bid = inlineToggle.dataset.budgetId;
-            inlineExpenseBudget = (inlineExpenseBudget === bid) ? null : bid;
-            expandedBudgets.add(bid); // Ensure card is expanded
-            renderSpendingBudgets();
-            return;
-        }
-
-        // Inline save button
-        const inlineSave = e.target.closest('.btn-inline-save');
-        if (inlineSave) {
-            const bid = inlineSave.dataset.budgetId;
-            const form = inlineSave.closest('.inline-expense-form');
-            if (!form) return;
-            const desc   = form.querySelector('.inline-desc').value.trim();
-            const amount = parseFloat(form.querySelector('.inline-amount').value);
-            const date   = form.querySelector('.inline-date').value;
-            if (!desc)              { showErrorToast('Please enter a description.'); return; }
-            if (isNaN(amount) || amount < 0) { showErrorToast('Please enter a valid amount.'); return; }
-            const budget = spendingBudgets.find(b => b.id === bid);
-            if (!budget) return;
-            if (!budget.expenses) budget.expenses = [];
-            budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date });
-            inlineExpenseBudget = null;
-            expandedBudgets.add(bid);
-            saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-            renderSpendingBudgets();
-            showSavedToast('Expense added ✓');
-            return;
-        }
-
-        // Inline cancel button
-        const inlineCancel = e.target.closest('.btn-inline-cancel');
-        if (inlineCancel) {
-            inlineExpenseBudget = null;
-            renderSpendingBudgets();
-            return;
-        }
-
-        // Edit expense (opens modal for editing)
-        const editExp = e.target.closest('.btn-edit-expense');
-        if (editExp) { openExpenseModal(editExp.dataset.budgetId, editExp.dataset.expenseId); return; }
-
-        const delExp = e.target.closest('.btn-delete-expense');
-        if (delExp) {
-            // Animate the row out before removing
-            const row = delExp.closest('.budget-expense-row');
-            if (row) {
-                row.classList.add('expense-removing');
-                setTimeout(() => deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId), 280);
-            } else {
-                deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId);
-            }
-            return;
-        }
-
-        const override = e.target.closest('.btn-override-budget');
-        if (override) { openBudgetModal(override.dataset.budgetId, true); return; }
-
-        const editBudget = e.target.closest('.btn-edit-budget');
-        if (editBudget) { openBudgetModal(editBudget.dataset.budgetId); return; }
-
-        const delBudget = e.target.closest('.btn-delete-budget');
-        if (delBudget) { deleteBudget(delBudget.dataset.budgetId); return; }
-    });
-
-    // Inline expense form — keyboard handling
-    _root.getElementById('budgets-list').addEventListener('keydown', e => {
-        const form = e.target.closest('.inline-expense-form');
-        if (!form) return;
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const saveBtn = form.querySelector('.btn-inline-save');
-            if (saveBtn) saveBtn.click();
-        } else if (e.key === 'Escape') {
-            const cancelBtn = form.querySelector('.btn-inline-cancel');
-            if (cancelBtn) cancelBtn.click();
-        }
-    });
-
-    _root.querySelectorAll('.close-debt-modal').forEach(b       => b.addEventListener('click', closeDebtModal));
-    _root.querySelectorAll('.close-cost-modal').forEach(b       => b.addEventListener('click', closeCostModal));
-    _root.querySelectorAll('.close-income-modal').forEach(b     => b.addEventListener('click', closeIncomeModal));
-    _root.querySelectorAll('.close-checkpoint-modal').forEach(b  => b.addEventListener('click', closeCheckpointModal));
-
-    debtForm.addEventListener('submit',       e => { e.preventDefault(); saveDebt(); });
-    checkpointForm.addEventListener('submit', e => { e.preventDefault(); saveCheckpoint(); });
-    costForm.addEventListener('submit',       e => { e.preventDefault(); saveCost(); });
-    incomeForm.addEventListener('submit',     e => { e.preventDefault(); saveIncome(); });
-
-    exportBtn.addEventListener('click', exportData);
-    importFileInput.addEventListener('change', importData);
-
-    // Add new checkpoint inline form
-    _root.getElementById('add-checkpoint-btn').addEventListener('click', () => {
-        const dayInput = _root.getElementById('new-checkpoint-day');
-        const amountInput = _root.getElementById('new-checkpoint-amount');
-        const day = parseInt(dayInput.value);
-        const amount = parseFloat(amountInput.value);
-
-        if (!day || !Number.isFinite(amount) || amount < 0) {
-            showErrorToast('Please enter a valid day and amount');
-            return;
-        }
-
-        // Check for duplicate day
-        if (checkpoints.some(cp => cp.day === day)) {
-            showErrorToast(`A checkpoint for day ${day} already exists`);
-            return;
-        }
-
-        const newCheckpoint = {
-            id: 'cp_' + Date.now(),
-            day,
-            amount
+    _loadChartJs() {
+      return new Promise((resolve) => {
+        if (window.Chart) return resolve();
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/chart.js";
+        script.onload = resolve;
+        script.onerror = () => {
+          console.error("[DebtSnowball] Failed to load Chart.js");
+          resolve();
         };
-        checkpoints.push(newCheckpoint);
-        checkpoints.sort((a, b) => a.day - b.day);
-
-        saveData().then(() => {
-            renderCheckpointsList();
-            renderUI();
-            amountInput.value = '';
-            showSavedToast('Checkpoint added ✓');
-        }).catch(err => console.error("Debt Snowball: save failed —", err));
-    });
-
-    // Delete checkpoint handler (delegated)
-    _root.getElementById('checkpoints-list').addEventListener('click', (e) => {
-        const deleteBtn = e.target.closest('.delete-checkpoint-btn');
-        if (deleteBtn) {
-            const id = deleteBtn.dataset.id;
-            checkpoints = checkpoints.filter(c => c.id !== id);
-            saveData().then(() => {
-                renderCheckpointsList();
-                renderUI();
-                showSavedToast('Checkpoint removed ✓');
-            }).catch(err => console.error("Debt Snowball: save failed —", err));
+        document.head.appendChild(script);
+      });
+    }
+    _initApp() {
+      initDomRefs(this);
+      setupEventListeners();
+      const waitForHass = setInterval(() => {
+        if (appState._root._hass) {
+          clearInterval(waitForHass);
+          loadBackendData();
         }
-    });
-
-    // Payment plan month navigation
-    _root.getElementById('plan-prev-month-btn').addEventListener('click', () => {
-        const btn = _root.getElementById('plan-prev-month-btn');
-        const idx = parseInt(btn.dataset.archiveIdx ?? '0');
-        if (idx < monthlyArchives.length) { viewingArchiveIndex = idx; renderUI(); }
-    });
-    _root.getElementById('plan-next-month-btn').addEventListener('click', () => {
-        viewingArchiveIndex = null;
-        renderUI();
-    });
-
-    // Income schedule type hint
-    _root.getElementById('income-schedule').addEventListener('change', updateIncomeScheduleHint);
-
-    // Archive / History
-    _root.getElementById('history-btn').addEventListener('click', openArchiveModal);
-    _root.getElementById('close-archive-modal').addEventListener('click', closeArchiveModal);
-    _root.getElementById('archive-modal').addEventListener('click', e => {
-        if (e.target === _root.getElementById('archive-modal')) closeArchiveModal();
-    });
-
-    // Windfall planner
-    _root.getElementById('windfall-btn').addEventListener('click', openWindfallModal);
-    _root.getElementById('close-windfall-modal').addEventListener('click', closeWindfallModal);
-    _root.getElementById('windfall-calc-btn').addEventListener('click', calcWindfall);
-    windfallModal.addEventListener('click', e => { if (e.target === windfallModal) closeWindfallModal(); });
-
-    // Check-in modal
-    _root.getElementById('checkin-later-btn').addEventListener('click', () => {
-        localStorage.setItem('snowball_checkin_dismissed', currentMonthKey());
-        checkinModal.classList.remove('active');
-        setTimeout(() => { checkinModal.style.display = 'none'; }, 300);
-    });
-    _root.getElementById('checkin-done-btn').addEventListener('click', () => {
-        localStorage.setItem('snowball_checkin_dismissed', currentMonthKey());
-        checkinModal.classList.remove('active');
-        setTimeout(() => { checkinModal.style.display = 'none'; }, 300);
-    });
-
-    // Cost modal: show/hide interval fields based on category and interval select
-    _root.getElementById('cost-category').addEventListener('change', updateCostModalIntervalVisibility);
-    _root.getElementById('cost-interval').addEventListener('change', updateCostModalIntervalVisibility);
-
-    // Auto min-payment calc
-    _root.getElementById('auto-min-btn').addEventListener('click', autoCalcMinPaymentCC);
-    _root.getElementById('debt-balance').addEventListener('input', updateAutoMinHint);
-    _root.getElementById('debt-rate').addEventListener('input', updateAutoMinHint);
-
-    // Mortgage toggle
-    _root.getElementById('mortgage-toggle-btn').addEventListener('click', () => {
-        showMortgage = !showMortgage;
-        saveData().then(() => renderUI()).catch(err => console.error("Debt Snowball: save failed —", err));
-    });
-
-    // Strategy toggle
-    _root.querySelectorAll('.strategy-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            strategy = btn.dataset.strategy;
-            _root.querySelectorAll('.strategy-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            saveData().then(() => renderUI()).catch(err => console.error("Debt Snowball: save failed —", err));
-        });
-    });
-
-    // Payment plan "Mark as Paid" and inline "Edit" buttons
-    _root.getElementById('payment-plan-list').addEventListener('click', e => {
-        const paidBtn = e.target.closest('.btn-mark-paid');
-        if (paidBtn) {
-            togglePaid(paidBtn.dataset.id, paidBtn.dataset.autopay === '1');
-            return;
-        }
-        const editBtn = e.target.closest('.btn-edit-inline');
-        if (editBtn) {
-            const { id, type } = editBtn.dataset;
-            if (type === 'debt') openDebtModal(id);
-            else if (type === 'recurring') openCostModal(id);
-            else if (type === 'income') openIncomeModal(id);
-            else if (type === 'checkpoint') openCheckpointModal(id);
-            return;
-        }
-
-        // Override min payment — toggle inline form
-        const overrideBtn = e.target.closest('.btn-override-min');
-        if (overrideBtn) {
-            const form = _root.getElementById(`override-form-${overrideBtn.dataset.id}`);
-            if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
-            return;
-        }
-        const cancelBtn = e.target.closest('.btn-override-cancel');
-        if (cancelBtn) {
-            const form = _root.getElementById(`override-form-${cancelBtn.dataset.id}`);
-            if (form) form.style.display = 'none';
-            return;
-        }
-        const saveBtn = e.target.closest('.btn-override-save');
-        if (saveBtn) {
-            const id  = saveBtn.dataset.id;
-            const form = _root.getElementById(`override-form-${id}`);
-            const val  = parseFloat(form?.querySelector('.override-input')?.value);
-            if (isNaN(val) || val < 0) { showErrorToast('Enter a valid amount.'); return; }
-            minPayOverrides[id] = val;
-            saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-            renderPaymentPlan();
-            return;
-        }
-        const clearBtn = e.target.closest('.btn-override-clear');
-        if (clearBtn) {
-            delete minPayOverrides[clearBtn.dataset.id];
-            saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-            renderPaymentPlan();
-            return;
-        }
-    });
-
-    // Backdrop + Escape
-    [debtModal, costModal, incomeModal, checkpointModal].forEach(modal => {
-        modal.addEventListener('click', e => {
-            if (e.target === modal) {
-                if (modal === debtModal)      closeDebtModal();
-                else if (modal === costModal) closeCostModal();
-                else if (modal === incomeModal) closeIncomeModal();
-                else if (modal === checkpointModal) closeCheckpointModal();
-            }
-        });
-    });
-
-    _root.addEventListener('keydown', e => {
-        if (e.key === 'Escape') {
-            if (debtModal.classList.contains('active'))    closeDebtModal();
-            else if (costModal.classList.contains('active'))   closeCostModal();
-            else if (incomeModal.classList.contains('active')) closeIncomeModal();
-            else if (checkpointModal.classList.contains('active')) closeCheckpointModal();
-        }
-        if (e.key === 'Tab') {
-            const active = [debtModal, costModal, incomeModal, checkpointModal].find(m => m.classList.contains('active'));
-            if (!active) return;
-            const focusable = active.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1")');
-            if(focusable.length > 0) {
-                const first = focusable[0], last = focusable[focusable.length - 1];
-                if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
-                else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
-            }
-        }
-    });
-
-    // Promo toggle
-    const promoToggle      = _root.getElementById('debt-promo-toggle');
-    const promoExpiryGroup = _root.getElementById('promo-expiry-group');
-    const rateInput        = _root.getElementById('debt-rate');
-    const rateGroup        = rateInput.closest('.input-group');
-
-    promoToggle.addEventListener('change', () => {
-        if (promoToggle.checked) {
-            promoExpiryGroup.style.display = 'block';
-            rateGroup.classList.add('input-disabled');
-            rateInput.value = '0';
-            rateInput.disabled = true;
-            _root.getElementById('debt-promo-expiry').required = true;
-            autoCalcMinPayment();
-        } else {
-            promoExpiryGroup.style.display = 'none';
-            rateGroup.classList.remove('input-disabled');
-            rateInput.value = '';
-            rateInput.disabled = false;
-            _root.getElementById('debt-promo-expiry').required = false;
-            _root.getElementById('debt-promo-expiry').value = '';
-        }
-    });
-
-    _root.getElementById('debt-promo-expiry').addEventListener('change', autoCalcMinPayment);
-    _root.getElementById('debt-balance').addEventListener('input', () => {
-        if (_root.getElementById('debt-promo-toggle').checked) autoCalcMinPayment();
-    });
-}
-
-function autoCalcMinPayment() {
-    if (!_root.getElementById('debt-promo-toggle').checked) return;
-    const balance    = parseFloat(_root.getElementById('debt-balance').value) || 0;
-    const expiryDate = _root.getElementById('debt-promo-expiry').value;
-    if (!expiryDate || balance <= 0) return;
-    const now    = new Date();
-    const expiry = new Date(expiryDate + 'T00:00:00');
-    const diff   = (expiry.getFullYear() - now.getFullYear()) * 12 + (expiry.getMonth() - now.getMonth());
-    if (diff > 0) {
-        _root.getElementById('debt-min-payment').value = (Math.ceil((balance / diff) * 100) / 100).toFixed(2);
+      }, 50);
     }
-}
-
-
-// ─── 80-render-modals.js ─────────────────────────────────────────────────────────────────
-// ─── Debt Modal ──────────────────────────────────────────────────────────────
-function openDebtModal(debtId = null) {
-    debtForm.reset();
-    _root.getElementById('debt-id').value = '';
-
-    const promoToggle      = _root.getElementById('debt-promo-toggle');
-    const promoExpiryGroup = _root.getElementById('promo-expiry-group');
-    const rateInput        = _root.getElementById('debt-rate');
-
-    promoToggle.checked = false;
-    promoExpiryGroup.style.display = 'none';
-    rateInput.closest('.input-group').classList.remove('input-disabled');
-    rateInput.disabled = false;
-    _root.getElementById('debt-promo-expiry').value    = '';
-    _root.getElementById('debt-promo-expiry').required = false;
-    _root.getElementById('debt-autopay-toggle').checked = false;
-    _root.getElementById('debt-url').value = '';
-
-    if (debtId) {
-        _root.getElementById('modal-title').textContent = 'Edit Debt';
-        const debt = debts.find(d => d.id === debtId);
-        if (debt) {
-            _root.getElementById('debt-id').value          = debt.id;
-            _root.getElementById('debt-name').value        = debt.name;
-            _root.getElementById('debt-type').value        = debt.type || 'credit-card';
-            _root.getElementById('debt-balance').value     = debt.balance;
-            _root.getElementById('debt-rate').value        = debt.rate;
-            _root.getElementById('debt-min-payment').value = debt.minPayment;
-            _root.getElementById('debt-due-day').value     = debt.dueDay || '';
-            _root.getElementById('debt-autopay-toggle').checked = !!debt.autoPay;
-            _root.getElementById('debt-url').value = debt.paymentUrl || '';
-            if (debt.promoZeroInterest) {
-                promoToggle.checked = true;
-                promoExpiryGroup.style.display = 'block';
-                rateInput.closest('.input-group').classList.add('input-disabled');
-                rateInput.disabled = true;
-                rateInput.value = '0';
-                _root.getElementById('debt-promo-expiry').value    = debt.promoExpiryDate || '';
-                _root.getElementById('debt-promo-expiry').required = true;
-            }
-        }
-    } else {
-        _root.getElementById('modal-title').textContent = 'Add New Debt';
-        _root.getElementById('debt-type').value = 'credit-card';
+    setConfig(config) {
+      this._config = config;
     }
-
-    debtModal.style.display = 'flex';
-    void debtModal.offsetWidth;
-    debtModal.classList.add('active');
-    setTimeout(() => debtModal.querySelector('input:not([type=hidden])').focus(), 50);
-}
-
-function closeDebtModal() {
-    debtModal.classList.remove('active');
-    setTimeout(() => { debtModal.style.display = 'none'; }, 300);
-}
-
-// ─── Recurring Cost Modal ────────────────────────────────────────────────────
-function openCostModal(costId = null) {
-    costForm.reset();
-    _root.getElementById('cost-id').value = '';
-    _root.getElementById('cost-autopay-toggle').checked = false;
-
-    if (costId) {
-        _root.getElementById('cost-modal-title').textContent = 'Edit Cost';
-        const cost = recurringCosts.find(c => c.id === costId) || oneTimeCosts.find(c => c.id === costId);
-        if (cost) {
-            _root.getElementById('cost-id').value              = cost.id;
-            _root.getElementById('cost-name').value            = cost.name;
-            _root.getElementById('cost-amount').value          = cost.amount;
-            _root.getElementById('cost-due-day').value         = cost.dueDay || '';
-            _root.getElementById('cost-category').value        = cost.category || 'other';
-            _root.getElementById('cost-payment-method').value  = cost.paymentMethod || 'direct';
-            _root.getElementById('cost-amount-type').value     = cost.amountType || 'fixed';
-            _root.getElementById('cost-autopay-toggle').checked = !!cost.autoPay;
-            // Restore interval
-            const n = cost.intervalMonths || 1;
-            const intervalEl = _root.getElementById('cost-interval');
-            if ([1,2,3,6,12].includes(n)) {
-                intervalEl.value = String(n);
-            } else {
-                intervalEl.value = 'custom';
-                _root.getElementById('cost-interval-custom').value = n;
-            }
-            // Restore next due month
-            if (n > 1 && cost.nextDueMonth) {
-                _root.getElementById('cost-start-month').value = keyToHtmlMonth(cost.nextDueMonth);
-            } else {
-                _root.getElementById('cost-start-month').value = '';
-            }
-        }
-    } else {
-        _root.getElementById('cost-modal-title').textContent = 'Add Cost';
-        _root.getElementById('cost-payment-method').value = 'direct';
-        _root.getElementById('cost-amount-type').value = 'fixed';
-        _root.getElementById('cost-interval').value = '1';
+    getCardSize() {
+      return 12;
     }
-    updateCostModalIntervalVisibility();
-
-    costModal.style.display = 'flex';
-    void costModal.offsetWidth;
-    costModal.classList.add('active');
-    setTimeout(() => costModal.querySelector('input:not([type=hidden])').focus(), 50);
-}
-
-function closeCostModal() {
-    costModal.classList.remove('active');
-    setTimeout(() => { costModal.style.display = 'none'; }, 300);
-}
-
-// ─── Income Modal ────────────────────────────────────────────────────────────
-function openIncomeModal(incomeId = null) {
-    incomeForm.reset();
-    _root.getElementById('income-id').value = '';
-    _root.getElementById('income-schedule').value = 'one-time';
-    _root.getElementById('income-schedule-hint').style.display = 'none';
-
-    if (incomeId) {
-        _root.getElementById('income-modal-title').textContent = 'Edit Income Entry';
-        const entry = incomeEntries.find(e => e.id === incomeId);
-        if (entry) {
-            _root.getElementById('income-id').value       = entry.id;
-            _root.getElementById('income-label').value    = entry.label;
-            _root.getElementById('income-date').value     = entry.date;
-            _root.getElementById('income-amount').value   = entry.amount;
-            _root.getElementById('income-schedule').value = entry.scheduleType || 'one-time';
-            updateIncomeScheduleHint();
-        }
-    } else {
-        _root.getElementById('income-modal-title').textContent = 'Add Income Entry';
+    static getConfigElement() {
+      return document.createElement("div");
     }
-
-    incomeModal.style.display = 'flex';
-    void incomeModal.offsetWidth;
-    incomeModal.classList.add('active');
-    setTimeout(() => incomeModal.querySelector('input:not([type=hidden])').focus(), 50);
-}
-
-function updateIncomeScheduleHint() {
-    const sel  = _root.getElementById('income-schedule');
-    const hint = _root.getElementById('income-schedule-hint');
-    if (!sel || !hint) return;
-    if (sel.value === 'monthly') {
-        hint.textContent = 'This day of the month will be reused each month automatically.';
-        hint.style.display = '';
-    } else if (sel.value === 'biweekly') {
-        hint.textContent = 'All biweekly occurrences within the current month will be added as separate entries.';
-        hint.style.display = '';
-    } else {
-        hint.style.display = 'none';
+    static getStubConfig() {
+      return {};
     }
-}
-
-function closeIncomeModal() {
-    incomeModal.classList.remove('active');
-    setTimeout(() => { incomeModal.style.display = 'none'; }, 300);
-}
-
-// ─── CRUD: Debts ─────────────────────────────────────────────────────────────
-function saveDebt() {
-    try {
-        const id         = _root.getElementById('debt-id').value;
-        const name       = _root.getElementById('debt-name').value;
-        const type       = _root.getElementById('debt-type').value;
-        const balance    = parseFloat(_root.getElementById('debt-balance').value);
-        const rate       = parseFloat(_root.getElementById('debt-rate').value);
-        const minPayment = parseFloat(_root.getElementById('debt-min-payment').value);
-        const dueDay     = parseInt(_root.getElementById('debt-due-day').value) || 1;
-        const autoPay    = _root.getElementById('debt-autopay-toggle').checked;
-        const paymentUrl = _root.getElementById('debt-url').value.trim();
-
-        const promoZeroInterest = _root.getElementById('debt-promo-toggle').checked;
-        const promoExpiryDate   = promoZeroInterest ? _root.getElementById('debt-promo-expiry').value : null;
-
-        if (!name.trim())          throw new Error('Please enter a name for this debt.');
-        if (isNaN(balance))        throw new Error('Please enter a valid balance.');
-        if (!promoZeroInterest && isNaN(rate)) throw new Error('Please enter a valid interest rate.');
-        if (isNaN(minPayment))     throw new Error('Please enter a valid minimum payment.');
-
-        const existingDebt = debts.find(d => d.id === id);
-        const originalRate = promoZeroInterest
-            ? (existingDebt?.originalRate != null ? existingDebt.originalRate : rate)
-            : rate;
-
-        const debtData = {
-            name, type,
-            balance,
-            rate:         promoZeroInterest ? 0 : rate,
-            originalRate: promoZeroInterest ? originalRate : rate,
-            minPayment, dueDay, autoPay, paymentUrl,
-            promoZeroInterest, promoExpiryDate
-        };
-
-        if (id) {
-            const idx = debts.findIndex(d => d.id === id);
-            if (idx !== -1) debts[idx] = { id, ...debtData };
-        } else {
-            debts.push({ id: Date.now().toString(), ...debtData });
-        }
-
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-        closeDebtModal();
-        showSavedToast(id ? 'Debt updated ✓' : 'Debt added ✓');
-    } catch (err) {
-        showErrorToast(err.message || 'Failed to save debt.');
-    }
-}
-
-function deleteDebt(id) {
-    showInlineConfirm(id, 'debt', () => {
-        const deleted = debts.find(d => d.id === id);
-        debts = debts.filter(d => d.id !== id);
-        delete paidStatus[id];
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-        showUndoToast('Debt deleted', () => { debts.push(deleted); saveData().catch(err => console.error('Debt Snowball: save failed —', err)); });
-    });
-}
-
-// ─── CRUD: Recurring Costs ───────────────────────────────────────────────────
-function saveCost() {
-    try {
-        const id            = _root.getElementById('cost-id').value;
-        const name          = _root.getElementById('cost-name').value;
-        const amount        = parseFloat(_root.getElementById('cost-amount').value);
-        const dueDay        = parseInt(_root.getElementById('cost-due-day').value) || 1;
-        const category      = _root.getElementById('cost-category').value || 'other';
-        const paymentMethod = _root.getElementById('cost-payment-method').value || 'direct';
-        const amountType    = _root.getElementById('cost-amount-type').value || 'fixed';
-        const autoPay       = _root.getElementById('cost-autopay-toggle').checked;
-        const intervalSel   = _root.getElementById('cost-interval').value;
-        const intervalMonths = intervalSel === 'custom'
-            ? (parseInt(_root.getElementById('cost-interval-custom').value) || 1)
-            : parseInt(intervalSel) || 1;
-
-        if (!name.trim())   throw new Error('Please enter a name for this cost.');
-        if (isNaN(amount))  throw new Error('Please enter a valid amount.');
-        if (intervalMonths < 1) throw new Error('Interval must be at least 1 month.');
-
-        const startMonthInput = _root.getElementById('cost-start-month').value;
-        const startMonthKey = startMonthInput ? htmlMonthToKey(startMonthInput) : null;
-
-        const addedMonth = category === 'one-time' ? (workingMonthKey || currentMonthKey()) : undefined;
-
-        const targetArray = category === 'one-time' ? oneTimeCosts : recurringCosts;
-        const sourceArray = category === 'one-time' ? recurringCosts : oneTimeCosts;
-
-        if (id) {
-            // Find in current or other array (user may have changed category)
-            const idx = targetArray.findIndex(c => c.id === id);
-            const otherIdx = sourceArray.findIndex(c => c.id === id);
-            if (idx !== -1) {
-                const existing = targetArray[idx];
-                const nextDueMonth = intervalMonths > 1
-                    ? (startMonthKey ?? (existing.intervalMonths === intervalMonths ? existing.nextDueMonth : currentMonthKey()))
-                    : undefined;
-                targetArray[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth };
-            } else if (otherIdx !== -1) {
-                // Moved from other array — remove from old, add to new
-                const [moved] = sourceArray.splice(otherIdx, 1);
-                const nextDueMonth = intervalMonths > 1
-                    ? (startMonthKey ?? currentMonthKey())
-                    : undefined;
-                targetArray.push({ id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
-            }
-        } else {
-            const nextDueMonth = intervalMonths > 1 ? (startMonthKey ?? currentMonthKey()) : undefined;
-            targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
-        }
-
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-        closeCostModal();
-        showSavedToast(id ? 'Cost updated ✓' : 'Cost added ✓');
-    } catch (err) {
-        showErrorToast(err.message || 'Failed to save cost.');
-    }
-}
-
-function deleteCost(id) {
-    showInlineConfirm(id, 'cost', () => {
-        let deleted = recurringCosts.find(c => c.id === id);
-        let array = recurringCosts;
-        if (!deleted) {
-            deleted = oneTimeCosts.find(c => c.id === id);
-            array = oneTimeCosts;
-        }
-        if (deleted) {
-            array = array.filter(c => c.id !== id);
-            if (array === recurringCosts) recurringCosts = array;
-            else oneTimeCosts = array;
-            delete paidStatus[id];
-            saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-            showUndoToast('Cost deleted', () => {
-                array.push(deleted);
-                if (array === recurringCosts) recurringCosts = array;
-                else oneTimeCosts = array;
-                saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-            });
-        }
-    });
-}
-
-// ─── Spending Budgets ────────────────────────────────────────────────────────
-
-function getBudgetAmount(budget) {
-    const exc = budget.exception;
-    if (exc && exc.month === (workingMonthKey || currentMonthKey())) return exc.amount;
-    return budget.amount;
-}
-
-function renderSpendingBudgets() {
-    const container = _root.getElementById('budgets-list');
-    if (!container) return;
-
-    if (spendingBudgets.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                No spending budgets yet.<br>Track discretionary spending by setting a spending limit for each category.
-                <br><button class="empty-cta-btn" id="empty-add-budget-btn">+ Add Your First Budget</button>
-            </div>`;
-        const emptyBtn = container.querySelector('#empty-add-budget-btn');
-        if (emptyBtn) emptyBtn.addEventListener('click', () => openBudgetModal());
-        return;
-    }
-
-    // Budget meta bar — current month + totals across all budgets
-    const now = new Date();
-    const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-    const totalBudgeted = spendingBudgets.reduce((s, b) => s + getBudgetAmount(b), 0);
-    const totalSpent    = spendingBudgets.reduce((s, b) => s + (b.expenses || []).reduce((x, e) => x + e.amount, 0), 0);
-    const totalOver     = totalSpent - totalBudgeted;
-    const metaSpentClass = totalOver > 0 ? 'budget-meta-over' : 'budget-meta-ok';
-
-    const metaBar = `
-        <div class="budget-meta-bar">
-            <span class="budget-meta-month">📅 ${monthName}</span>
-            <div class="budget-meta-divider"></div>
-            <span class="budget-meta-budgeted">${spendingBudgets.length} budget${spendingBudgets.length !== 1 ? 's' : ''} · ${formatMoney(totalBudgeted)} total limit</span>
-            <span class="budget-meta-total">
-                <span class="budget-meta-budgeted">Spent:</span>
-                <span class="${metaSpentClass}">${formatMoney(totalSpent)}</span>
-                ${totalOver > 0
-                    ? `<span class="budget-meta-over" style="font-size:0.75rem;">⚠ ${formatMoney(totalOver)} over</span>`
-                    : `<span class="budget-meta-ok" style="font-size:0.75rem;">${formatMoney(totalBudgeted - totalSpent)} left</span>`}
-            </span>
-        </div>`;
-
-    const cards = spendingBudgets.map((budget, cardIdx) => {
-        const budgetAmt  = getBudgetAmount(budget);
-        const expenses   = budget.expenses || [];
-        const spent      = expenses.reduce((s, e) => s + e.amount, 0);
-        const over       = spent - budgetAmt;
-        const isOver     = over > 0;
-        const rawPct     = budgetAmt > 0 ? (spent / budgetAmt) * 100 : (spent > 0 ? 100 : 0);
-        const barPct     = Math.min(rawPct, 100);
-        const isExpanded = expandedBudgets.has(budget.id);
-        const showInline = inlineExpenseBudget === budget.id;
-        const hasExc     = budget.exception?.month === (workingMonthKey || currentMonthKey());
-
-        // Gradient fill for premium look
-        let fillGradient;
-        if (isOver) {
-            fillGradient = 'linear-gradient(90deg, var(--danger-color), #f87171)';
-        } else if (rawPct < 70) {
-            fillGradient = 'linear-gradient(90deg, var(--success-color), #34d399)';
-        } else if (rawPct < 90) {
-            fillGradient = 'linear-gradient(90deg, var(--warning-color), #fbbf24)';
-        } else {
-            fillGradient = 'linear-gradient(90deg, #f87171, var(--danger-color))';
-        }
-
-        const expenseRows = expenses.length === 0
-            ? `<p class="budget-empty-text">No expenses logged yet.</p>`
-            : [...expenses].sort((a, b) => (b.date || '') > (a.date || '') ? 1 : -1).map(exp => `
-                <div class="budget-expense-row" data-expense-id="${exp.id}">
-                    <span class="expense-description">${escHtml(exp.description)}</span>
-                    <span class="expense-date">${exp.date ? new Date(exp.date + 'T00:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'}) : ''}</span>
-                    <span class="expense-amount" style="color:var(--expense-color);">−${formatMoney(exp.amount)}</span>
-                    <div class="expense-actions">
-                        <button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">✎</button>
-                        <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">✕</button>
-                    </div>
-                </div>`).join('');
-
-        const totalRow = expenses.length > 0 ? `
-            <div class="budget-total-row ${isOver ? 'budget-total-over' : 'budget-total-ok'}">
-                <span>${formatMoney(spent)} / ${formatMoney(budgetAmt)}</span>
-                ${isOver
-                    ? `<span style="color:var(--danger-color); font-weight:700;">⚠ Over by ${formatMoney(over)}</span>`
-                    : `<span style="color:var(--success-color);">${formatMoney(budgetAmt - spent)} remaining</span>`}
-            </div>` : '';
-
-        // Inline add-expense form (shown instead of modal for new expenses)
-        const inlineForm = showInline ? `
-            <div class="inline-expense-form">
-                <div class="inline-expense-form-row">
-                    <div class="inline-field field-desc">
-                        <label>Description</label>
-                        <input type="text" class="inline-desc" placeholder="e.g. Walmart run" autocomplete="off">
-                    </div>
-                    <div class="inline-field">
-                        <label>Amount ($)</label>
-                        <input type="number" class="inline-amount" min="0" step="0.01" placeholder="0.00">
-                    </div>
-                    <div class="inline-field">
-                        <label>Date</label>
-                        <input type="date" class="inline-date" value="${new Date().toISOString().slice(0,10)}">
-                    </div>
-                    <div class="inline-expense-form-actions">
-                        <button class="btn-inline-save" data-budget-id="${budget.id}">Save</button>
-                        <button class="btn-inline-cancel" data-budget-id="${budget.id}">✕</button>
-                    </div>
-                </div>
-            </div>` : '';
-
-        const addExpBtn = showInline
-            ? `<button class="btn btn-secondary btn-sm btn-toggle-inline-expense" data-budget-id="${budget.id}" style="border-color:rgba(91,127,255,0.4);color:var(--accent-color);">✕ Cancel</button>`
-            : `<button class="btn btn-secondary btn-sm btn-toggle-inline-expense" data-budget-id="${budget.id}">+ Add Expense</button>`;
-
-        return `
-        <div class="budget-card ${isOver ? 'budget-over' : ''}" data-budget-id="${budget.id}" data-expanded="${isExpanded}" style="animation-delay:${cardIdx * 0.06}s;">
-            <div class="budget-card-header" data-toggle-budget="${budget.id}">
-                <div class="budget-header-left">
-                    <span class="budget-toggle-icon">▶</span>
-                    <span class="budget-name">${escHtml(budget.name)}</span>
-                    ${hasExc ? `<span class="budget-exception-badge">Override: ${formatMoney(budgetAmt)}</span>` : ''}
-                </div>
-                <div class="budget-header-right">
-                    ${isOver
-                        ? `<span class="budget-over-label">⚠ Over ${formatMoney(over)}</span>`
-                        : `<span class="budget-remaining">${formatMoney(budgetAmt - spent)} left</span>`}
-                    <span class="budget-spent-of">${formatMoney(spent)} / ${formatMoney(budgetAmt)}</span>
-                </div>
-            </div>
-            <div class="budget-progress-track">
-                <div class="budget-progress-fill" style="width:${barPct}%; background:${fillGradient};"></div>
-            </div>
-            ${isExpanded ? `
-            <div class="budget-expenses-panel">
-                ${expenseRows}
-                ${totalRow}
-                ${inlineForm}
-                <div class="budget-card-actions">
-                    ${addExpBtn}
-                    <button class="btn btn-sm btn-override btn-override-budget" data-budget-id="${budget.id}">${hasExc ? '✎ Edit' : '⚡ Override'}</button>
-                    <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}">✎ Edit</button>
-                    <button class="btn btn-secondary btn-sm btn-delete-budget" data-budget-id="${budget.id}" style="margin-left:auto; border-color:var(--danger-color); color:var(--danger-color);">🗑 Delete</button>
-                </div>
-            </div>` : ''}
-        </div>`;
-    }).join('');
-
-    container.innerHTML = metaBar + cards;
-
-    // Auto-focus the inline form description field if open
-    if (inlineExpenseBudget) {
-        const descInput = container.querySelector('.inline-expense-form .inline-desc');
-        if (descInput) setTimeout(() => descInput.focus(), 50);
-    }
-}
-
-// ─── Budget Modal ─────────────────────────────────────────────────────────────
-function openBudgetModal(budgetId = null, focusException = false) {
-    budgetForm.reset();
-    _root.getElementById('budget-id').value = '';
-    _root.getElementById('budget-exception-amount-group').style.display = 'none';
-    _root.getElementById('budget-exception-toggle').checked = false;
-
-    if (budgetId) {
-        _root.getElementById('budget-modal-title').textContent = 'Edit Budget';
-        const budget = spendingBudgets.find(b => b.id === budgetId);
-        if (budget) {
-            _root.getElementById('budget-id').value     = budget.id;
-            _root.getElementById('budget-name').value   = budget.name;
-            _root.getElementById('budget-amount').value = budget.amount;
-            const hasExc = budget.exception?.month === currentMonthKey();
-            if (hasExc || focusException) {
-                _root.getElementById('budget-exception-toggle').checked = true;
-                _root.getElementById('budget-exception-amount-group').style.display = '';
-                if (hasExc) _root.getElementById('budget-exception-amount').value = budget.exception.amount;
-            }
-        }
-    } else {
-        _root.getElementById('budget-modal-title').textContent = 'Add Budget';
-    }
-
-    budgetModal.style.display = 'flex';
-    void budgetModal.offsetWidth;
-    budgetModal.classList.add('active');
-    setTimeout(() => budgetModal.querySelector('input:not([type=hidden])').focus(), 50);
-}
-
-function closeBudgetModal() {
-    budgetModal.classList.remove('active');
-    setTimeout(() => { budgetModal.style.display = 'none'; }, 300);
-}
-
-function saveBudget() {
-    try {
-        const id     = _root.getElementById('budget-id').value;
-        const name   = _root.getElementById('budget-name').value.trim();
-        const amount = parseFloat(_root.getElementById('budget-amount').value);
-        const useExc = _root.getElementById('budget-exception-toggle').checked;
-        const excAmt = parseFloat(_root.getElementById('budget-exception-amount').value);
-
-        if (!name)       throw new Error('Please enter a category name.');
-        if (isNaN(amount) || amount < 0) throw new Error('Please enter a valid budget amount.');
-        if (useExc && (isNaN(excAmt) || excAmt < 0)) throw new Error('Please enter a valid override amount.');
-
-        const _wk = workingMonthKey || currentMonthKey();
-        const exception = useExc ? { month: _wk, amount: excAmt } : null;
-
-        if (id) {
-            const idx = spendingBudgets.findIndex(b => b.id === id);
-            if (idx !== -1) {
-                // Preserve existing expenses; only replace exception when toggle was used
-                const existing = spendingBudgets[idx];
-                const newException = useExc ? { month: _wk, amount: excAmt }
-                    : (existing.exception?.month === _wk ? null : existing.exception);
-                spendingBudgets[idx] = { ...existing, name, amount, exception: newException };
-            }
-        } else {
-            spendingBudgets.push({ id: Date.now().toString(), name, amount, exception, expenses: [] });
-        }
-
-        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-        closeBudgetModal();
-        renderSpendingBudgets();
-        showSavedToast(id ? 'Budget updated ✓' : 'Budget added ✓');
-    } catch (err) {
-        showErrorToast(err.message || 'Failed to save budget.');
-    }
-}
-
-function deleteBudget(id) {
-    const budget = spendingBudgets.find(b => b.id === id);
-    if (!budget) return;
-    if (!confirm(`Delete the "${budget.name}" budget and all its expenses for this month?`)) return;
-    spendingBudgets = spendingBudgets.filter(b => b.id !== id);
-    expandedBudgets.delete(id);
-    saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-    renderSpendingBudgets();
-    showSavedToast('Budget deleted ✓');
-}
-
-// ─── Expense Modal ────────────────────────────────────────────────────────────
-function openExpenseModal(budgetId, expenseId = null) {
-    expenseForm.reset();
-    _root.getElementById('expense-budget-id').value = budgetId;
-    _root.getElementById('expense-id').value = '';
-
-    const budget = spendingBudgets.find(b => b.id === budgetId);
-    const budgetLabel = budget ? ` — ${budget.name}` : '';
-
-    if (expenseId) {
-        _root.getElementById('expense-modal-title').textContent = `Edit Expense${budgetLabel}`;
-        const exp = budget?.expenses?.find(e => e.id === expenseId);
-        if (exp) {
-            _root.getElementById('expense-id').value          = exp.id;
-            _root.getElementById('expense-description').value = exp.description;
-            _root.getElementById('expense-amount').value      = exp.amount;
-            _root.getElementById('expense-date').value        = exp.date || '';
-        }
-    } else {
-        _root.getElementById('expense-modal-title').textContent = `Add Expense${budgetLabel}`;
-        // Default date to today
-        _root.getElementById('expense-date').value = new Date().toISOString().slice(0, 10);
-    }
-
-    expenseModal.style.display = 'flex';
-    void expenseModal.offsetWidth;
-    expenseModal.classList.add('active');
-    setTimeout(() => expenseModal.querySelector('input:not([type=hidden])').focus(), 50);
-}
-
-function closeExpenseModal() {
-    expenseModal.classList.remove('active');
-    setTimeout(() => { expenseModal.style.display = 'none'; }, 300);
-}
-
-function saveExpense() {
-    try {
-        const budgetId    = _root.getElementById('expense-budget-id').value;
-        const expenseId   = _root.getElementById('expense-id').value;
-        const description = _root.getElementById('expense-description').value.trim();
-        const amount      = parseFloat(_root.getElementById('expense-amount').value);
-        const date        = _root.getElementById('expense-date').value;
-
-        if (!description)          throw new Error('Please enter a description.');
-        if (isNaN(amount) || amount < 0) throw new Error('Please enter a valid amount.');
-
-        const budget = spendingBudgets.find(b => b.id === budgetId);
-        if (!budget) throw new Error('Budget not found.');
-
-        if (!budget.expenses) budget.expenses = [];
-
-        if (expenseId) {
-            const idx = budget.expenses.findIndex(e => e.id === expenseId);
-            if (idx !== -1) budget.expenses[idx] = { id: expenseId, description, amount, date };
-        } else {
-            budget.expenses.push({ id: Date.now().toString(), description, amount, date });
-        }
-
-        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-        closeExpenseModal();
-        expandedBudgets.add(budgetId);
-        renderSpendingBudgets();
-        showSavedToast(expenseId ? 'Expense updated ✓' : 'Expense added ✓');
-    } catch (err) {
-        showErrorToast(err.message || 'Failed to save expense.');
-    }
-}
-
-function deleteExpense(budgetId, expenseId) {
-    const budget = spendingBudgets.find(b => b.id === budgetId);
-    if (!budget) return;
-    const deleted = budget.expenses.find(e => e.id === expenseId);
-    if (!deleted) return;
-    budget.expenses = budget.expenses.filter(e => e.id !== expenseId);
-    saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-    renderSpendingBudgets();
-    showUndoToast('Expense deleted', () => {
-        budget.expenses.push(deleted);
-        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-        renderSpendingBudgets();
-    });
-}
-
-// ─── CRUD: Income ────────────────────────────────────────────────────────────
-function saveIncome() {
-    try {
-        const id           = _root.getElementById('income-id').value;
-        const label        = _root.getElementById('income-label').value;
-        const date         = _root.getElementById('income-date').value;
-        const amount       = parseFloat(_root.getElementById('income-amount').value);
-        const scheduleType = _root.getElementById('income-schedule').value || 'one-time';
-
-        if (!label.trim()) throw new Error('Please enter a label for this income entry.');
-        if (!date)         throw new Error('Please select a date.');
-        if (isNaN(amount)) throw new Error('Please enter a valid amount.');
-
-        const entryBase = { label, date, amount, scheduleType };
-        if (scheduleType === 'monthly')   entryBase.scheduleDay = parseInt(date.split('-')[2]);
-        if (scheduleType === 'biweekly')  entryBase.scheduleAnchorDate = date;
-
-        if (id) {
-            const idx = incomeEntries.findIndex(e => e.id === id);
-            if (idx !== -1) incomeEntries[idx] = { id, ...entryBase };
-        } else if (scheduleType === 'biweekly') {
-            const generated = generateBiweeklyForMonth(label, amount, date, workingMonthKey || currentMonthKey());
-            if (generated.length === 0) throw new Error('No occurrences of this schedule fall in the current month. Choose a date within the current month as the starting point.');
-            incomeEntries.push(...generated);
-        } else {
-            incomeEntries.push({ id: Date.now().toString(), ...entryBase });
-        }
-
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-        closeIncomeModal();
-        showSavedToast(id ? 'Income updated ✓' : 'Income added ✓');
-    } catch (err) {
-        showErrorToast(err.message || 'Failed to save income entry.');
-    }
-}
-
-function deleteIncome(id) {
-    showInlineConfirm(id, 'income', () => {
-        const deleted = incomeEntries.find(e => e.id === id);
-        incomeEntries = incomeEntries.filter(e => e.id !== id);
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-        showUndoToast('Income entry deleted', () => { incomeEntries.push(deleted); saveData().catch(err => console.error('Debt Snowball: save failed —', err)); });
-    });
-}
-
-// ─── Paid-this-month toggle ───────────────────────────────────────────────────
-function togglePaid(id, autoPay) {
-    const wasUnpaid = !paidStatus[id];
-    if (paidStatus[id]) {
-        delete paidStatus[id];
-    } else {
-        paidStatus[id] = autoPay ? 'autopay' : 'paid';
-        if (wasUnpaid && debts.find(d => d.id === id)) {
-            launchConfetti();
-        }
-    }
-    // Micro-animation on the card being toggled
-    const card = _root.querySelector(`.debt-card[data-cost-id="${id}"], .debt-card .btn-mark-paid-action[data-id="${id}"]`)
-        ?.closest('.debt-card');
-    if (card) {
-        card.style.transition = 'transform 0.15s ease, opacity 0.15s ease';
-        card.style.transform  = 'scale(0.99)';
-        card.style.opacity    = '0.8';
-        setTimeout(() => {
-            card.style.transform = '';
-            card.style.opacity   = '';
-        }, 160);
-    }
-    saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-    renderRecurringCostsList();
-    renderDebtsList(runSimulation(strategy));
-}
-
-// ─── Inline Confirm & Undo Toast ─────────────────────────────────────────────
-function showInlineConfirm(id, type, onConfirm) {
-    const selector = type === 'debt' ? '.btn-delete' : type === 'cost' ? '.btn-delete-cost' : '.btn-delete-income';
-    const btn      = _root.querySelector(`${selector}[data-id="${id}"]`);
-    if (!btn) return;
-
-    const actions      = btn.parentElement;
-    const originalHTML = actions.innerHTML;
-
-    actions.innerHTML = `
-        <span class="confirm-text">Are you sure?</span>
-        <button class="btn btn-danger btn-confirm-yes" data-id="${id}">Delete</button>
-        <button class="btn btn-secondary btn-confirm-no">Cancel</button>`;
-
-    actions.querySelector('.btn-confirm-yes').addEventListener('click', onConfirm);
-    actions.querySelector('.btn-confirm-no').addEventListener('click', () => {
-        actions.innerHTML = originalHTML;
-        const editBtn   = actions.querySelector('.btn-edit, .btn-edit-cost, .btn-edit-income');
-        const deleteBtn = actions.querySelector('.btn-delete, .btn-delete-cost, .btn-delete-income');
-        if (editBtn)   { const fn = type==='debt'?openDebtModal:type==='cost'?openCostModal:openIncomeModal; editBtn.addEventListener('click', e=>fn(e.target.dataset.id)); }
-        if (deleteBtn) { const fn = type==='debt'?deleteDebt:type==='cost'?deleteCost:deleteIncome; deleteBtn.addEventListener('click', e=>fn(e.target.dataset.id)); }
-    });
-}
-
-let undoToastTimer = null;
-function showUndoToast(message, onUndo) {
-    const existing = _root.getElementById('undo-toast');
-    if (existing) existing.remove();
-    if (undoToastTimer) clearTimeout(undoToastTimer);
-
-    const toast     = document.createElement('div');
-    toast.id        = 'undo-toast';
-    toast.className = 'undo-toast';
-    toast.innerHTML = `<span class="undo-toast-msg">${message}</span><button class="undo-toast-btn">Undo</button>`;
-    _root.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('undo-toast-visible'));
-    toast.querySelector('.undo-toast-btn').addEventListener('click', () => { onUndo(); dismissToast(toast); });
-    undoToastTimer = setTimeout(() => dismissToast(toast), 5000);
-}
-
-function dismissToast(toast) {
-    toast.classList.remove('undo-toast-visible');
-    setTimeout(() => toast.remove(), 300);
-}
-
-function showSavedToast(message) {
-    const existing = _root.getElementById('saved-toast');
-    if (existing) existing.remove();
-    const toast     = document.createElement('div');
-    toast.id        = 'saved-toast';
-    toast.className = 'undo-toast undo-toast-success';
-    toast.innerHTML = `<span class="undo-toast-msg">${message}</span>`;
-    _root.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('undo-toast-visible'));
-    setTimeout(() => dismissToast(toast), 2500);
-}
-
-function showErrorToast(message) {
-    const existing = _root.getElementById('error-toast');
-    if (existing) existing.remove();
-    const toast     = document.createElement('div');
-    toast.id        = 'error-toast';
-    toast.className = 'undo-toast undo-toast-error';
-    toast.innerHTML = `<span class="undo-toast-msg">${message}</span>`;
-    _root.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('undo-toast-visible'));
-    setTimeout(() => dismissToast(toast), 4000);
-}
-
-// ─── HA Sensor Bridge ────────────────────────────────────────────────────────
-function updateHASensors(simResults, schedule) {
-    if (!_root._hass) return; // Safety check: Ensure HA object exists
-
-    // 1. Push Total Debt Sensor
-    const totalDebt = debts.reduce((s, d) => s + d.balance, 0);
-    _root._hass.callApi('POST', 'states/sensor.snowball_total_debt', {
-        state: totalDebt.toFixed(2),
-        attributes: {
-            friendly_name: 'Total Remaining Debt',
-            unit_of_measurement: _root._currency || 'USD',
-            icon: 'mdi:cash-multiple'
-        }
-    });
-
-    // 2. Push Payoff Date Sensor
-    if (simResults && simResults.valid && simResults.monthsElapsed < 1200) {
-        const today = new Date();
-        const payoffDate = new Date(today.getFullYear(), today.getMonth() + simResults.monthsElapsed, 1);
-        _root._hass.callApi('POST', 'states/sensor.snowball_payoff_date', {
-            state: payoffDate.toISOString().split('T')[0],
-            attributes: {
-                friendly_name: 'Debt Free Date',
-                device_class: 'date',
-                icon: 'mdi:calendar-star'
-            }
-        });
-    }
-
-    // 3. Push Next Upcoming Payment Sensor
-    if (schedule && schedule.length > 0) {
-        const currentDay = new Date().getDate();
-        // Find the next unpaid debt in the schedule that is due today or later
-        const nextPayment = schedule.find(item => 
-            item.type === 'debt' && 
-            !paidStatus[item.id] && 
-            item.day >= currentDay
-        );
-
-        if (nextPayment) {
-            _root._hass.callApi('POST', 'states/sensor.snowball_next_payment', {
-                state: nextPayment.amount.toFixed(2),
-                attributes: {
-                    friendly_name: 'Next Debt Payment',
-                    unit_of_measurement: _root._currency || 'USD',
-                    debt_name: nextPayment.name,
-                    due_day: nextPayment.day,
-                    icon: 'mdi:calendar-clock'
-                }
-            });
-        } else {
-            // All caught up for the month!
-            _root._hass.callApi('POST', 'states/sensor.snowball_next_payment', {
-                state: '0.00',
-                attributes: {
-                    friendly_name: 'Next Debt Payment',
-                    debt_name: 'All Caught Up!',
-                    icon: 'mdi:check-circle'
-                }
-            });
-        }
-    }
-}
-
-// ─── Rendering ───────────────────────────────────────────────────────────────
-function renderUI() {
-    // Render checkpoints list
-    renderCheckpointsList();
-
-    _root.querySelectorAll('.strategy-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.strategy === strategy);
-    });
-    renderIncomeList();
-    renderRecurringCostsList();
-    renderSpendingBudgets();
-    
-    const simResults = runSimulation(strategy);
-    renderDebtsList(simResults);
-    renderVisualization(simResults);
-    
-    const schedule = renderPaymentPlan();
-
-    // Only update HA sensors from current-month data; renderPaymentPlan returns null in archive view
-    if (schedule !== null) updateHASensors(simResults, schedule);
-}
-
-
-// ─── 80a-checkpoints.js ─────────────────────────────────────────────────────────────────
-// ─── Checkpoints ─────────────────────────────────────────────────────────────
-// Focused module for checkpoint list rendering and CRUD modal.
-// Extracted from 80-render-modals.js to keep the modals module focused on
-// debt, cost, income, budget, and expense modals.
-
-function renderCheckpointsList() {
-    const container = _root.getElementById('checkpoints-list');
-    if (!container) return;
-
-    if (checkpoints.length === 0) {
-        container.innerHTML = '';
-        return;
-    }
-
-    // Sort by day
-    const sorted = [...checkpoints].sort((a, b) => a.day - b.day);
-
-    const formatMoneyLocal = (n) => {
-        const currency = _root._currency || 'USD';
-        const locale = _root._locale || 'en-US';
-        return new Intl.NumberFormat(locale, {
-            style: 'currency',
-            currency: currency,
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-        }).format(n);
-    };
-
-    const listHtml = sorted.map(cp => `
-        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: rgba(168,85,247,0.06); border-radius: 6px; border: 1px solid rgba(168,85,247,0.2);">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(168,85,247,0.15); padding: 0.2rem 0.4rem; border-radius: 4px;">Day ${cp.day}</span>
-                <span style="font-weight: 500; color: var(--text-primary);">${formatMoneyLocal(cp.amount)}</span>
-            </div>
-            <button class="btn btn-icon delete-checkpoint-btn" data-id="${cp.id}" title="Remove checkpoint" style="padding: 0.25rem; font-size: 0.75rem; background: transparent; color: var(--danger-color); border: none; cursor: pointer;">
-                ✕
-            </button>
-        </div>
-    `).join('');
-
-    container.innerHTML = `
-        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Mid-month checkpoints:</div>
-        ${listHtml}
-    `;
-}
-
-function openCheckpointModal(cpId = null) {
-    checkpointForm.reset();
-    _root.getElementById('checkpoint-id').value = '';
-
-    if (cpId) {
-        _root.getElementById('checkpoint-modal-title').textContent = 'Edit Checkpoint';
-        const cp = checkpoints.find(c => c.id === cpId);
-        if (cp) {
-            _root.getElementById('checkpoint-id').value = cp.id;
-            _root.getElementById('checkpoint-day').value = cp.day;
-            _root.getElementById('checkpoint-amount').value = cp.amount.toFixed(2);
-        }
-    } else {
-        _root.getElementById('checkpoint-modal-title').textContent = 'Add Checkpoint';
-    }
-
-    checkpointModal.style.display = 'flex';
-    setTimeout(() => checkpointModal.classList.add('active'), 10);
-    setTimeout(() => _root.getElementById('checkpoint-amount').focus(), 50);
-}
-
-function closeCheckpointModal() {
-    checkpointModal.classList.remove('active');
-    setTimeout(() => { checkpointModal.style.display = 'none'; }, 300);
-}
-
-function saveCheckpoint() {
-    try {
-        const id      = _root.getElementById('checkpoint-id').value;
-        const day     = parseInt(_root.getElementById('checkpoint-day').value);
-        const amount  = parseFloat(_root.getElementById('checkpoint-amount').value);
-
-        if (!day || day < 1 || day > 31) throw new Error('Please select a valid day (1-31).');
-        if (!Number.isFinite(amount) || amount < 0) throw new Error('Please enter a valid amount.');
-
-        // Check for duplicate day (if adding new or changing day)
-        const existingSameDay = checkpoints.find(cp => cp.day === day && cp.id !== id);
-        if (existingSameDay) throw new Error(`A checkpoint for day ${day} already exists.`);
-
-        if (id) {
-            // Edit existing
-            const idx = checkpoints.findIndex(cp => cp.id === id);
-            if (idx !== -1) {
-                checkpoints[idx] = { id, day, amount };
-            }
-        } else {
-            // Add new
-            const newCp = {
-                id: 'cp_' + Date.now(),
-                day,
-                amount
-            };
-            checkpoints.push(newCp);
-        }
-
-        checkpoints.sort((a, b) => a.day - b.day);
-
-        saveData().then(() => {
-            renderCheckpointsList();
-            renderUI();
-            closeCheckpointModal();
-            showSavedToast(id ? 'Checkpoint updated ✓' : 'Checkpoint added ✓');
-        }).catch(err => console.error('Debt Snowball: save failed —', err));
-    } catch (err) {
-        showErrorToast(err.message || 'Failed to save checkpoint.');
-    }
-}
-
-
-// ─── 80b-export-import.js ─────────────────────────────────────────────────────────────────
-// ─── Export / Import ─────────────────────────────────────────────────────────
-// Focused module for data backup/restore and notification toasts.
-// Extracted from 80-render-modals.js.
-
-function exportData() {
-    const dataStr = JSON.stringify({ debts, incomeEntries, recurringCosts, oneTimeCosts, checkpoints, strategy }, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-    const link    = document.createElement('a');
-    link.setAttribute('href', dataUri);
-    link.setAttribute('download', `debt-snowball-backup-${new Date().toISOString().split('T')[0]}.json`);
-    link.click();
-}
-
-function importData(e) {
-    const file    = e.target.files[0];
-    if (!file) return;
-    const hasData = debts.length > 0 || recurringCosts.length > 0 || incomeEntries.length > 0;
-
-    const doImport = () => {
-        const reader = new FileReader();
-        reader.onload = async ev => {
-            let data;
-            try {
-                data = JSON.parse(ev.target.result);
-            } catch {
-                showNotificationToast('Error: Invalid backup file — could not parse JSON.', 'error');
-                return;
-            }
-            try {
-                if (data.debts)          debts          = data.debts;
-                if (data.recurringCosts) recurringCosts = data.recurringCosts;
-                if (data.oneTimeCosts)   oneTimeCosts   = data.oneTimeCosts;
-                if (data.incomeEntries)  incomeEntries  = data.incomeEntries;
-                if (data.checkpoints)    checkpoints    = data.checkpoints;
-                if (data.strategy)       strategy       = data.strategy;
-                if (data.monthlyBudget !== undefined && !data.incomeEntries) {
-                    const now = new Date();
-                    incomeEntries = [{ id: Date.now().toString(), label: 'Monthly Budget (migrated)',
-                        date: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`,
-                        amount: data.monthlyBudget }];
-                }
-                await saveData();
-                location.reload();
-            } catch (err) {
-                console.error('Debt Snowball: import save failed —', err);
-                showNotificationToast('Error: Data parsed but could not be saved to server.', 'error');
-            }
-        };
-        reader.readAsText(file);
-        e.target.value = '';
-    };
-
-    hasData ? showImportConfirmModal(doImport, () => { e.target.value = ''; }) : doImport();
-}
-
-function showImportConfirmModal(onConfirm, onCancel) {
-    const overlay = document.createElement('div');
-    overlay.className    = 'modal active';
-    overlay.style.zIndex = '200';
-    overlay.innerHTML = `
-        <div class="modal-content" style="max-width:400px;">
-            <div class="modal-header"><h3>⚠️ Replace Existing Data?</h3></div>
-            <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:1.5rem;line-height:1.6;">
-                Importing will <strong style="color:var(--text-primary);">replace all your current data</strong>. Export a backup first if needed.
-            </p>
-            <div style="display:flex;gap:0.75rem;justify-content:flex-end;flex-wrap:wrap;">
-                <button class="btn btn-secondary" id="import-cancel-btn">Cancel</button>
-                <button class="btn btn-secondary" id="import-export-first-btn">Export First, then Import</button>
-                <button class="btn btn-danger"    id="import-confirm-btn">Replace Anyway</button>
-            </div>
-        </div>`;
-    _root.appendChild(overlay);
-    overlay.querySelector('#import-cancel-btn').addEventListener('click',       () => { overlay.remove(); onCancel(); });
-    overlay.querySelector('#import-export-first-btn').addEventListener('click', () => { exportData(); overlay.remove(); onConfirm(); });
-    overlay.querySelector('#import-confirm-btn').addEventListener('click',      () => { overlay.remove(); onConfirm(); });
-    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); onCancel(); } });
-}
-
-function showNotificationToast(message, type = 'info') {
-    const existing = _root.getElementById('notif-toast');
-    if (existing) existing.remove();
-    const toast     = document.createElement('div');
-    toast.id        = 'notif-toast';
-    toast.className = `undo-toast undo-toast-${type}`;
-    toast.innerHTML = `<span class="undo-toast-msg">${message}</span>`;
-    _root.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('undo-toast-visible'));
-    setTimeout(() => dismissToast(toast), 4000);
-}
-
-
-// ─── 81-render-lists.js ─────────────────────────────────────────────────────────────────
-// ─── Income List ─────────────────────────────────────────────────────────────
-function renderIncomeList() {
-    incomeListContainer.innerHTML = '';
-    const summaryEl = _root.getElementById('income-summary');
-
-    if (incomeEntries.length === 0) {
-        incomeListContainer.innerHTML = `
-            <div class="empty-state">
-                No income entries yet.<br>Add your paychecks and other income for this month.
-                <br><button class="empty-cta-btn" id="empty-add-income-btn">+ Add Income</button>
-            </div>`;
-        incomeListContainer.style.display = 'block';
-        summaryEl.style.display = 'none';
-        const emptyBtn = incomeListContainer.querySelector('#empty-add-income-btn');
-        if (emptyBtn) emptyBtn.addEventListener('click', () => openIncomeModal());
-        return;
-    }
-
-    incomeListContainer.style.display = 'grid';
-    const sorted = [...incomeEntries.sort((a,b) => a.date.localeCompare(b.date))];
-
-    sorted.forEach((entry, idx) => {
-        const dateStr = new Date(entry.date+'T00:00:00').toLocaleDateString(undefined, { month:'short', day:'numeric' });
-        const el = document.createElement('div');
-        el.className = 'debt-card income-card';
-        el.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${idx * 0.08}s`;
-        el.innerHTML = `
-            <div class="income-compact-inner">
-                <div class="income-compact-info">
-                    <span class="income-compact-name">${escHtml(entry.label)}</span>
-                    <span class="income-compact-date">${dateStr}</span>
-                </div>
-                <div class="income-compact-right">
-                    <span class="income-compact-amount">${formatMoney(entry.amount)}</span>
-                    <button class="btn btn-xs btn-secondary btn-edit-income" data-id="${entry.id}">Edit</button>
-                    <button class="btn btn-xs btn-danger btn-delete-income" data-id="${entry.id}">Delete</button>
-                </div>
-            </div>`;
-        incomeListContainer.appendChild(el);
-    });
-
-    incomeListContainer.querySelectorAll('.btn-edit-income').forEach(b   => b.addEventListener('click', e => openIncomeModal(e.target.dataset.id)));
-    incomeListContainer.querySelectorAll('.btn-delete-income').forEach(b => b.addEventListener('click', e => deleteIncome(e.target.dataset.id)));
-
-    const total = incomeEntries.reduce((s,e) => s + e.amount, 0);
-    summaryEl.style.display = 'block';
-    summaryEl.innerHTML = `<span class="income-summary-label">Total Monthly Income:</span><span class="income-summary-value">${formatMoney(total)}</span>`;
-}
-
-// ─── Recurring Costs List ────────────────────────────────────────────────────
-function renderRecurringCostsList() {
-    costsListContainer.innerHTML = '';
-    const recurringSummaryEl = _root.getElementById('recurring-summary');
-
-    // Recurring costs only (one-time costs are rendered separately)
-    const visibleRecurring = recurringCosts.filter(c => isCostDueThisMonth(c));
-    const totalRecurring   = visibleRecurring.reduce((sum, c) => sum + c.amount, 0);
-    const directRecurring  = visibleRecurring.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
-    const cardRecurring    = visibleRecurring.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
-    const totalOneTime     = oneTimeCosts.reduce((sum, c) => sum + c.amount, 0);
-    const grandTotal       = totalRecurring + totalOneTime;
-
-    if (recurringSummaryEl) {
-        const otLabel = totalOneTime > 0 ? ` + ${formatMoney(totalOneTime)} one-time` : '';
-        recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span><span class="recurring-due-breakdown">🏦 Direct ${formatMoney(directRecurring)} &nbsp;·&nbsp; 💳 Card ${formatMoney(cardRecurring)}${otLabel}</span>`;
-    }
-
-    const hasAnyCosts = visibleRecurring.length > 0 || oneTimeCosts.length > 0;
-    if (!hasAnyCosts) {
-        costsListContainer.innerHTML = `
-            <div class="empty-state">
-                No costs yet.<br>Add your bills, subscriptions, and one-time expenses.
-                <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Cost</button>
-            </div>`;
-        costsListContainer.style.display = 'block';
-        const emptyBtn = costsListContainer.querySelector('#empty-add-cost-btn');
-        if (emptyBtn) emptyBtn.addEventListener('click', () => openCostModal());
-        return;
-    }
-
-    costsListContainer.style.display = 'block';
-    const currentDay = new Date().getDate();
-    let cardIndex = 0;
-
-    // ── Recurring sections ──────────────────────────────────────────────────
-    const recurringSorted = [...visibleRecurring].sort((a,b) => (a.dueDay||1) - (b.dueDay||1));
-    const categories = [
-        { key: 'utility',      label: '⚡ Utilities (Monthly Bills)',           cls: 'cost-subsection-utility' },
-        { key: 'subscription', label: '📱 Subscriptions (Recurring Services)',   cls: 'cost-subsection-subscription' },
-        { key: 'other',        label: '📦 Other Recurring Bills',               cls: 'cost-subsection-other' },
-    ];
-
-    categories.forEach(({ key, label, cls }) => {
-        const group = recurringSorted.filter(c => (c.category || 'other') === key);
-        if (group.length === 0) return;
-
-        const section = document.createElement('div');
-        section.className = `cost-subsection ${cls}`;
-
-        const isCompact     = key === 'utility' || key === 'subscription';
-        const isCollapsible = isCompact;
-        const isExpanded    = expandedCostSections.has(key);
-        const groupTotal    = group.reduce((s, c) => s + c.amount, 0);
-
-        const header = document.createElement('div');
-        header.className = 'cost-subsection-header' + (isCollapsible ? ' cost-section-collapsible' : '');
-        if (isCollapsible) header.dataset.toggleSection = key;
-        const toggleIcon = isCollapsible
-            ? `<span class="cost-section-toggle-icon${isExpanded ? '' : ' collapsed'}">▼</span>`
-            : '';
-        header.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">${toggleIcon}${label}</span><span class="cost-subsection-total">${formatMoney(groupTotal)}/mo</span>`;
-        section.appendChild(header);
-
-        if (!isCollapsible || isExpanded) {
-            const grid = document.createElement('div');
-            grid.className = 'debts-list';
-            grid.style.display = 'grid';
-            if (isCompact) {
-                grid.style.gridTemplateColumns = '1fr';
-                grid.style.gap = '0.4rem';
-            }
-
-            group.forEach(cost => renderCostCard(cost, grid, false, currentDay));
-            section.appendChild(grid);
-        }
-        costsListContainer.appendChild(section);
-    });
-
-    // ── One-time section ────────────────────────────────────────────────────
-    if (oneTimeCosts.length > 0) {
-        const otSection = document.createElement('div');
-        otSection.className = 'cost-subsection cost-subsection-onetime';
-        const otTotal = oneTimeCosts.reduce((s, c) => s + c.amount, 0);
-
-        const otHeader = document.createElement('div');
-        otHeader.className = 'cost-subsection-header';
-        otHeader.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">🔴 ONE-TIME EXPENSES (This Month Only)</span><span class="cost-subsection-total">${formatMoney(otTotal)}</span>`;
-        otSection.appendChild(otHeader);
-
-        const otGrid = document.createElement('div');
-        otGrid.className = 'debts-list';
-        otGrid.style.display = 'grid';
-        oneTimeCosts.forEach(cost => renderCostCard(cost, otGrid, true, currentDay));
-        otSection.appendChild(otGrid);
-        costsListContainer.appendChild(otSection);
-    }
-
-    costsListContainer.querySelectorAll('.btn-edit-cost').forEach(b   => b.addEventListener('click', e => openCostModal(e.target.dataset.id)));
-    costsListContainer.querySelectorAll('.btn-delete-cost').forEach(b => b.addEventListener('click', e => deleteCost(e.target.dataset.id)));
-    costsListContainer.querySelectorAll('.btn-mark-paid').forEach(b   => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === 'true')));
-}
-
-function renderCostCard(cost, grid, isOneTime, currentDay) {
-    const isPastDue = (cost.dueDay || 1) <= currentDay;
-    const isCard    = cost.paymentMethod === 'card';
-    const isDue     = isOneTime || isCostDueThisMonth(cost);
-    const intN      = cost.intervalMonths || 1;
-    const paidState = paidStatus[cost.id];
-
-    const paymentMethodBadge = isCard
-        ? '<span class="debt-type-badge card-badge">💳 Card</span>'
-        : '<span class="debt-type-badge direct-badge">🏦 Direct</span>';
-    const amountTypeBadge = (cost.amountType || 'fixed') === 'flexible'
-        ? '<span class="amount-type-badge flexible-badge">〜 Flexible</span>'
-        : '';
-
-    let freqBadge;
-    if (isOneTime) {
-        freqBadge = '<span class="interval-badge" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);">🔴 ONE-TIME</span>';
-    } else if (intN > 1) {
-        freqBadge = `<span class="interval-badge">${intervalLabel(intN)}</span>`;
-    } else {
-        freqBadge = '<span class="interval-badge" style="background:rgba(99,102,241,0.1);color:var(--primary-light);border:1px solid rgba(99,102,241,0.25);">📅 Monthly</span>';
-    }
-    const notDueBadge = (!isDue && intN > 1)
-        ? `<span class="not-due-badge">Next: ${formatMonthLabel(cost.nextDueMonth)}</span>` : '';
-    const autoBadge   = (!isOneTime && cost.autoPay) ? '<span class="autopay-badge">⚡ Auto-Pay</span>' : '';
-    const paidOverlay = paidState ? buildPaidOverlay(cost.autoPay) : '';
-
-    let dueFreq;
-    if (isOneTime) {
-        dueFreq = 'One-Time Only';
-    } else if (intN > 1) {
-        dueFreq = intervalLabel(intN).replace('📆 ', '');
-    } else {
-        dueFreq = 'Monthly';
-    }
-
-    const el = document.createElement('div');
-    const isCompact = !isOneTime && (cost.category === 'utility' || cost.category === 'subscription');
-
-    if (isCompact) {
-        el.className = 'debt-card cost-card cost-card-compact' +
-            (isCard ? ' cost-card-credit' : ' cost-card-direct') +
-            (paidState ? ' card-paid' : '') +
-            (isDue ? '' : ' not-due-month');
-        const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
-        const metaParts  = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
-        el.innerHTML = `
-            ${paidOverlay}
-            <div class="cost-compact-body">
-                <div class="cost-compact-info">
-                    <div class="cost-compact-name-row">
-                        <span class="cost-compact-name">${escHtml(cost.name)}</span>
-                        <span class="cost-amount cost-compact-amount">${formatMoney(cost.amount)}</span>
-                    </div>
-                    ${badgesHtml ? `<div class="cost-compact-badges">${badgesHtml}</div>` : ''}
-                    <div class="cost-compact-meta">${metaParts.map((p, i) => i < metaParts.length - 1 ? `<span>${p}</span><span class="cost-meta-dot">·</span>` : `<span>${p}</span>`).join('')}</div>
-                </div>
-                <div class="cost-compact-actions">
-                    ${isDue ? `<div class="cost-compact-paid">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue)}</div>` : ''}
-                    <div class="cost-mini-actions">
-                        <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
-                        <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
-                    </div>
-                </div>
-            </div>`;
-    } else {
-        el.className = 'debt-card cost-card' +
-            (isCard ? ' cost-card-credit' : ' cost-card-direct') +
-            (paidState ? ' card-paid' : '') +
-            (isDue ? '' : ' not-due-month') +
-            (isOneTime ? ' cost-card-onetime' : '');
-        const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
-        const amountLabel = isOneTime ? 'One-Time Amount' : (intN > 1 ? 'Amount' : 'Monthly Amount');
-        const paymentMethodLabel = isCard ? 'Credit / Debit Card' : 'Direct Pay (Bank / Cash)';
-        const dueValue = `${formatOrdinal(cost.dueDay||1)} (${dueFreq})`;
-        el.innerHTML = `
-            ${paidOverlay}
-            <div class="debt-name">${escHtml(cost.name)}</div>
-            ${badgesHtml ? `<div class="cost-badges-line">${badgesHtml}</div>` : ''}
-            <div class="debt-detail"><span class="debt-detail-label">${amountLabel}</span><span class="debt-detail-value cost-amount">${formatMoney(cost.amount)}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Due</span><span class="debt-detail-value">${dueValue}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Payment</span><span class="debt-detail-value">${paymentMethodLabel}</span></div>
-            <div class="paid-action-row">${isDue ? buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue) : ''}</div>
-            <div class="cost-icon-actions">
-                <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
-                <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
-            </div>`;
-    }
-    grid.appendChild(el);
-}
-
-// Section collapse/expand — delegated on the container so it survives re-renders
-
-// ─── Debts List ──────────────────────────────────────────────────────────────
-function renderDebtsList(simResults) {
-    debtsListContainer.innerHTML = '';
-    const debtsSummaryEl    = _root.getElementById('debts-summary');
-    const mortgageToggleBtn = _root.getElementById('mortgage-toggle-btn');
-
-    // ── Archive-view wiring ────────────────────────────────────────────────────
-    const isArchiveView = viewingArchiveIndex !== null && !!monthlyArchives[viewingArchiveIndex];
-    const archiveData   = isArchiveView ? monthlyArchives[viewingArchiveIndex] : null;
-    const _debts        = archiveData ? (archiveData.debts || debts) : debts;
-    const _paidStatus   = archiveData ? (archiveData.paidStatus || {}) : paidStatus;
-
-    const hasMortgage = _debts.some(d => d.type === 'mortgage');
-    if (mortgageToggleBtn) {
-        mortgageToggleBtn.style.display = hasMortgage ? '' : 'none';
-        mortgageToggleBtn.textContent   = showMortgage ? 'Hide Mortgage' : 'Show Mortgage';
-    }
-
-    if (_debts.length === 0) {
-        if (debtsSummaryEl) debtsSummaryEl.textContent = 'Total Debt: $0.00';
-        debtsListContainer.innerHTML = `
-            <div class="empty-state">
-                No debts added yet.<br>Add your credit cards, loans, and other debts to start your payoff plan.
-                <br><button class="empty-cta-btn" id="empty-add-debt-btn">+ Add Debt</button>
-            </div>`;
-        debtsListContainer.style.display = 'block';
-        const emptyBtn = debtsListContainer.querySelector('#empty-add-debt-btn');
-        if (emptyBtn) emptyBtn.addEventListener('click', () => openDebtModal());
-        return;
-    }
-
-    const totalDebt = _debts.reduce((sum, d) => sum + d.balance, 0);
-    if (debtsSummaryEl) {
-        debtsSummaryEl.textContent = `Total Debt: $${totalDebt.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-    }
-
-    debtsListContainer.style.display = 'block';
-    const ordered    = getStrategyOrder(_debts, strategy);
-    const currentDay = new Date().getDate();
-
-    // Apply mortgage filter; keep global order index for order badge numbers
-    const visible = showMortgage ? ordered : ordered.filter(d => d.type !== 'mortgage');
-
-    const promoDebts   = visible.filter(d => d.promoZeroInterest);
-    const regularDebts = visible.filter(d => !d.promoZeroInterest);
-
-    // The "target" debt is the first in the full visible list
-    const targetId = visible[0]?.id;
-
-    function buildDebtCard(debt, globalIdx) {
-        const isPastDue    = (debt.dueDay || 1) <= currentDay;
-        const payoffMonths = simResults?.debtPayoffMonths?.[debt.id];
-        const isTarget     = debt.id === targetId;
-        const paidState    = _paidStatus[debt.id];
-
-        const debtElt = document.createElement('div');
-        debtElt.className = 'debt-card' +
-            (debt.promoZeroInterest ? ' promo-card' : '') +
-            (paidState ? ' card-paid' : '') +
-            (isTarget ? ' snowball-target-card' : '');
-        debtElt.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${globalIdx * 0.09}s`;
-
-        const promoBadge = debt.promoZeroInterest ? '<span class="promo-badge">🎉 0% Promo</span>' : '';
-        const autoBadge  = debt.autoPay ? '<span class="autopay-badge">⚡ Auto-Pay</span>' : '';
-
-        const typeLabel = debt.type
-            ? debt.type.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())
-            : '';
-        const typeIcon = debt.type === 'credit-card' ? '💳'
-            : debt.type === 'personal-loan' ? '🤝'
-            : debt.type === 'student-loan' ? '🎓'
-            : debt.type === 'auto-loan' ? '🚗'
-            : debt.type === 'mortgage' ? '🏠'
-            : '📌';
-        const typeBadge = debt.type
-            ? `<span class="debt-type-badge ${debt.type === 'credit-card' ? 'card-badge' : ''}">${typeIcon} ${typeLabel}</span>`
-            : '';
-
-        let promoExpiryRow = '';
-        if (debt.promoZeroInterest && debt.promoExpiryDate) {
-            const expStr = new Date(debt.promoExpiryDate+'T00:00:00').toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
-            promoExpiryRow = `<div class="debt-detail"><span class="debt-detail-label">Promo Expires</span><span class="debt-detail-value promo-expiry-value">${expStr}</span></div>`;
-        }
-
-        const rateDisplay = debt.promoZeroInterest
-            ? '0% APR <span class="promo-auto-note">(promo)</span>'
-            : `${debt.rate}% APR`;
-
-        const minPayNote = debt.promoZeroInterest ? '<span class="promo-auto-note">(auto: payoff by promo end)</span>' : '';
-
-        const payoffLine = payoffMonths != null
-            ? `<div class="debt-detail payoff-months-row">
-                <span class="debt-detail-label">Paid off in</span>
-                <span class="debt-detail-value payoff-months-value">${payoffMonths} month${payoffMonths !== 1 ? 's' : ''}</span>
-               </div>`
-            : '';
-
-        const targetBadge = isTarget
-            ? `<div class="snowball-target-banner">${strategy === 'snowball' ? '❄️' : '🌊'} ${strategy === 'snowball' ? 'Snowball' : 'Avalanche'} Target — extra payments go here</div>`
-            : '';
-
-        const payUrlRow = debt.paymentUrl
-            ? `<div class="debt-detail debt-pay-url-row">
-                <a href="${escHtml(debt.paymentUrl)}" target="_blank" rel="noopener noreferrer" class="btn-pay-now">Pay Now →</a>
-               </div>`
-            : '';
-
-        const paidOverlay = paidState ? buildPaidOverlay(debt.autoPay) : '';
-
-        debtElt.innerHTML = `
-            ${paidOverlay}
-            <div class="debt-order-badge" title="${strategy === 'snowball' ? 'Payoff order: smallest balance first' : 'Payoff order: highest interest first'}">${globalIdx + 1}</div>
-            <div class="debt-name">${escHtml(debt.name)}</div>
-            <div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.35rem;">${typeBadge}${promoBadge}${autoBadge}</div>
-            ${targetBadge}
-            <div class="debt-detail debt-balance-row"><span class="debt-detail-label">Balance</span><span class="debt-detail-value debt-balance-value">${formatMoney(debt.balance)}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Interest Rate</span><span class="debt-detail-value">${rateDisplay}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Min Payment</span><span class="debt-detail-value">${formatMoney(debt.minPayment)} ${minPayNote}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Due Day</span><span class="debt-detail-value">${formatOrdinal(debt.dueDay||1)} of each month</span></div>
-            ${promoExpiryRow}
-            ${payoffLine}
-            ${payUrlRow}
-            <div class="paid-action-row">${buildPaidButton(debt.id, debt.autoPay, paidState, isPastDue)}</div>
-            <div class="debt-actions">
-                <button class="btn btn-secondary btn-edit" data-id="${debt.id}">Edit</button>
-                <button class="btn btn-danger btn-delete" data-id="${debt.id}">Delete</button>
-            </div>`;
-
-        return debtElt;
-    }
-
-    function appendSection(debtsSubset, globalOffset, headerEl) {
-        const wrapper = document.createElement('div');
-        if (headerEl) wrapper.appendChild(headerEl);
-        const grid = document.createElement('div');
-        grid.className = 'debts-list';
-        grid.style.display = 'grid';
-        debtsSubset.forEach((debt, i) => grid.appendChild(buildDebtCard(debt, globalOffset + i)));
-        wrapper.appendChild(grid);
-        debtsListContainer.appendChild(wrapper);
-    }
-
-    if (promoDebts.length > 0) {
-        const header = document.createElement('div');
-        header.className = 'promo-section-header';
-        const promoTotal = promoDebts.reduce((s, d) => s + d.balance, 0);
-        header.innerHTML = `<span>🎉 0% Promo — Pay Off Before Rate Jumps!</span><span>${formatMoney(promoTotal)}</span>`;
-        appendSection(promoDebts, 0, header);
-    }
-
-    if (regularDebts.length > 0) {
-        let header = null;
-        if (promoDebts.length > 0) {
-            header = document.createElement('div');
-            header.className = 'regular-section-header';
-            header.textContent = '📋 Standard Debts';
-        }
-        appendSection(regularDebts, promoDebts.length, header);
-    }
-
-    debtsListContainer.querySelectorAll('.btn-edit').forEach(b   => b.addEventListener('click', e => openDebtModal(e.target.dataset.id)));
-    debtsListContainer.querySelectorAll('.btn-delete').forEach(b => b.addEventListener('click', e => deleteDebt(e.target.dataset.id)));
-    debtsListContainer.querySelectorAll('.btn-mark-paid').forEach(b => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === 'true')));
-}
-
-function buildPaidButton(id, autoPay, paidState, isPastDue) {
-    if (paidState) {
-        return `<button class="btn btn-paid-undo btn-mark-paid" data-id="${id}" data-autopay="${!!autoPay}">✓ Paid this month — tap to undo</button>`;
-    }
-    if (autoPay) {
-        if (isPastDue) {
-            return `<button class="btn btn-mark-paid" style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24; font-weight: 600; width: 100%; font-size: 0.8rem; padding: 0.5rem 1rem;" data-id="${id}" data-autopay="true">⚡ Auto-Paid</button>`;
-        } else {
-            return `<button class="btn" disabled style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); width: 100%; font-size: 0.8rem; padding: 0.5rem 1rem; cursor: not-allowed;">⚡ Scheduled for Auto-Pay</button>`;
-        }
-    }
-    return `<button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false">Mark as Paid This Month</button>`;
-}
-
-function buildPaidOverlay(autoPay) {
-    // We only show an overlay once it has actually been paid/confirmed
-    return `
-        <div class="paid-overlay">
-            <span class="paid-overlay-icon">✓</span>
-            <span class="paid-overlay-text">Paid This Month</span>
-        </div>`;
-}
-
-
-// ─── 82-render-payment.js ─────────────────────────────────────────────────────────────────
-// ─── Core Simulation ─────────────────────────────────────────────────────────
-// Date-aware: income arrives on its specific day-of-month, payments are only
-// made after sufficient cash has arrived. Returns a rich result object used
-// for both the chart and the debt cards.
-function runSimulation(strat) {
-    const totalIncome         = incomeEntries.reduce((s,e) => s + e.amount, 0);
-    const activeCosts          = recurringCosts.filter(c => isCostDueThisMonth(c));
-    // Timeline projection uses recurring costs only; one-time costs are separate.
-    const totalRecurringDirect = activeCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurringCard   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurring       = activeCosts.reduce((s,c) => s + c.amount, 0);
-    // Only direct-payment costs reduce the immediate cash available for debt payoff;
-    // card-charged costs are already folded into the card's minimum payment.
-    const effectiveBudget = totalIncome - totalRecurringDirect;
-
-    if (debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
-        return { valid: false, totalIncome, totalRecurring, effectiveBudget };
-    }
-
-    const totalMinPayments = debts.reduce((s,d) => s + d.minPayment, 0);
-    if (effectiveBudget < totalMinPayments) {
-        return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
-    }
-
-    // Build income day schedule (sorted)
-    const incomeDays = [...incomeEntries
-        .map(e => ({ day: parseInt(e.date.split('-')[2]), amount: e.amount }))
-        .sort((a,b) => a.day - b.day)];
-
-    let simDebts = debts.map(d => ({ ...d, interestPaid: 0 }));
-    const MAX_MONTHS = 1200;
-    let monthsElapsed     = 0;
-    let totalInterestPaid = 0;
-    let payoffLog         = [];
-
-    // Per-debt monthly balance snapshots
-    const perDebtMonthly = {};
-    simDebts.forEach(d => { perDebtMonthly[d.id] = [d.balance]; });
-
-    // Get day 1 checkpoint amount for initial cash
-    const day1Checkpoint = checkpoints.find(cp => cp.day === 1);
-    const day1Balance = day1Checkpoint ? day1Checkpoint.amount : 0;
-
-    while (simDebts.some(d => d.balance > 0) && monthsElapsed < MAX_MONTHS) {
-        monthsElapsed++;
-        // Add starting cash in first month to the monthly available amount
-        let availableCash = effectiveBudget + (monthsElapsed === 1 ? day1Balance : 0); // eslint-disable-line no-unused-vars
-
-        // 1. Accrue interest
-        simDebts.forEach(d => {
-            if (d.balance <= 0) return;
-            let effectiveRate = d.rate;
-            if (d.promoZeroInterest && d.promoExpiryDate) {
-                const today   = new Date();
-                const simDate = new Date(today.getFullYear(), today.getMonth() + monthsElapsed, 1);
-                if (simDate <= new Date(d.promoExpiryDate+'T00:00:00')) effectiveRate = 0;
-                else effectiveRate = d.originalRate || d.rate;
-            }
-            const interest     = d.balance * (effectiveRate / 100 / 12);
-            d.balance         += interest;
-            totalInterestPaid += interest;
-            d.interestPaid    += interest;
-        });
-
-        // 2. Date-aware payment scheduling
-        const alive    = simDebts.filter(d => d.balance > 0);
-        const ordered  = getStrategyOrder(alive, strat);
-        const targetId = ordered[0]?.id;
-        const aliveMinSum   = alive.reduce((s,d) => s + d.minPayment, 0);
-        const extraAvail    = Math.max(0, effectiveBudget - aliveMinSum);
-
-        // Build payment queue sorted by due day
-        const paymentQueue = alive.map(d => ({
-            id:     d.id,
-            dueDay: d.dueDay || 1,
-            needed: Math.min(
-                d.balance,
-                d.minPayment + (d.id === targetId ? Math.min(extraAvail, Math.max(0, d.balance - d.minPayment)) : 0)
-            )
-        })).sort((a,b) => a.dueDay - b.dueDay);
-
-        let cashPool   = 0;
-        let incomeIdx  = 0;
-
-        for (const payment of paymentQueue) {
-            // Advance income whose day <= payment due day
-            while (incomeIdx < incomeDays.length && incomeDays[incomeIdx].day <= payment.dueDay) {
-                cashPool += incomeDays[incomeIdx++].amount;
-            }
-            // If still short, pull remaining income (payment deferred until next check)
-            while (cashPool < payment.needed && incomeIdx < incomeDays.length) {
-                cashPool += incomeDays[incomeIdx++].amount;
-            }
-
-            const debt   = simDebts.find(d => d.id === payment.id);
-            if (!debt || debt.balance <= 0) continue;
-            const actual = Math.min(payment.needed, cashPool, debt.balance);
-            cashPool    -= actual;
-            debt.balance = Math.max(0, debt.balance - actual);
-
-            if (debt.balance <= 0.01) {
-                debt.balance = 0;
-                if (!payoffLog.find(l => l.id === debt.id)) {
-                    payoffLog.push({ ...debt, payoffMonth: monthsElapsed });
-                }
-            }
-        }
-
-        // Snapshot balances this month
-        simDebts.forEach(d => {
-            perDebtMonthly[d.id].push(Math.max(0, d.balance));
-        });
-    }
-
-    const debtPayoffMonths = {};
-    payoffLog.forEach(l => { debtPayoffMonths[l.id] = l.payoffMonth; });
-
-    const maxLen = Math.max(...Object.values(perDebtMonthly).map(a => a.length));
-    const monthlyTotals = Array.from({ length: maxLen }, (_,i) =>
-        Object.values(perDebtMonthly).reduce((sum, arr) => sum + (arr[i] ?? 0), 0)
-    );
-
-    return {
-        valid: true,
-        monthsElapsed,
-        totalInterestPaid,
-        payoffLog,
-        monthlyTotals,
-        perDebtMonthly,
-        debtPayoffMonths,
-        totalIncome,
-        totalRecurring,
-        effectiveBudget
-    };
-}
-
-// ─── Visualization ───────────────────────────────────────────────────────────
-function renderVisualization(simResults) {
-    const statTotalDebt     = _root.getElementById('stat-total-debt');
-    const statTotalInterest = _root.getElementById('stat-total-interest');
-    const statSavingsBox    = _root.getElementById('stat-savings-box');
-    const statSavings       = _root.getElementById('stat-savings');
-    const statSavingsLabel  = _root.getElementById('stat-savings-label');
-    const stratDesc         = _root.getElementById('strategy-desc');
-    const timelineChart     = _root.getElementById('timeline-chart');
-    const countdownBox      = _root.getElementById('stat-countdown-box');
-    const payoffBoxAlt      = _root.getElementById('stat-payoff-box');
-    const windfallBar       = _root.getElementById('windfall-bar');
-
-    // Get archive data if in archive view
-    const isArchiveViewTimeline = viewingArchiveIndex !== null && !!monthlyArchives[viewingArchiveIndex];
-    const archiveDataForDebt = isArchiveViewTimeline ? monthlyArchives[viewingArchiveIndex] : null;
-    const debtsForCalc = archiveDataForDebt ? (archiveDataForDebt.debts || debts) : debts;
-    
-    const initialTotalDebt = debtsForCalc.reduce((s,d) => s + d.balance, 0);
-    statTotalDebt.textContent = formatMoney(initialTotalDebt);
-
-    stratDesc.textContent = strategy === 'snowball'
-        ? 'Snowball: paying the smallest balance first. Quick wins build momentum and keep you motivated.'
-        : 'Avalanche: paying the highest interest rate first. Mathematically optimal — minimises total interest paid.';
-
-    // Show archive notice for historical months
-    if (isArchiveViewTimeline) {
-        countdownBox.style.display    = 'none';
-        payoffBoxAlt.style.display    = 'block';
-        _root.getElementById('stat-payoff-date-alt').textContent = 'Historical Data';
-        statTotalInterest.textContent = '-';
-        statSavingsBox.style.display  = 'none';
-        windfallBar.style.display     = 'none';
-        stopCountdown();
-        
-        const totalDebtArchive = (archiveDataForDebt.debts || []).reduce((s,d) => s + d.balance, 0);
-        
-        timelineChart.innerHTML = `
-            <div class="timeline-error-card" style="background: linear-gradient(145deg, rgba(91,127,255,0.08) 0%, rgba(168,85,247,0.05) 100%); border-color: rgba(91,127,255,0.2);">
-                <span class="timeline-error-icon">📅</span>
-                <div class="timeline-error-title">${formatMonthLabel(archiveDataForDebt.month)}</div>
-                <div class="timeline-error-message">
-                    This is a historical view. The timeline projection shows future payoff estimates based on <strong>current</strong> data, not historical snapshots.<br><br>
-                    <strong>Total Debt this month:</strong> ${formatMoney(totalDebtArchive)}<br>
-                    <strong>Income:</strong> ${formatMoney(archiveDataForDebt.totalIncome || 0)}<br>
-                    <strong>Costs:</strong> ${formatMoney(archiveDataForDebt.totalCosts || 0)}
-                </div>
-                <div class="timeline-error-actions">
-                    <button class="btn btn-primary" onclick="document.getElementById('plan-next-month-btn').click()">📅 Return to Current Month</button>
-                </div>
-            </div>`;
-        renderPaydownChart([], {});
-        return;
-    }
-
-    if (debts.length === 0) {
-        countdownBox.style.display    = 'none';
-        payoffBoxAlt.style.display    = 'block';
-        _root.getElementById('stat-payoff-date-alt').textContent = '-';
-        statTotalInterest.textContent = '$0.00';
-        statSavingsBox.style.display  = 'none';
-        windfallBar.style.display     = 'none';
-        timelineChart.innerHTML = `
-            <div class="timeline-error-card">
-                <span class="timeline-error-icon">📊</span>
-                <div class="timeline-error-title">No Debts Added</div>
-                <div class="timeline-error-message">Add your credit cards, loans, and other debts to see your personalized payoff timeline and calculate your debt-free date.</div>
-                <div class="timeline-error-actions">
-                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab=\"debts\"]').click()">💳 Add Your First Debt</button>
-                </div>
-            </div>`;
-        renderPaydownChart([], {});
-        stopCountdown();
-        return;
-    }
-
-    if (!simResults.valid) {
-        const { totalIncome, totalRecurring, effectiveBudget, totalMinPayments } = simResults;
-        countdownBox.style.display    = 'none';
-        payoffBoxAlt.style.display    = 'block';
-        _root.getElementById('stat-payoff-date-alt').textContent = 'Budget Too Low!';
-        statTotalInterest.textContent = 'N/A';
-        statSavingsBox.style.display  = 'none';
-        windfallBar.style.display     = 'none';
-        stopCountdown();
-        
-        let icon = '⚠️';
-        let title = '';
-        let message = '';
-        let primaryAction = '';
-        let secondaryAction = '';
-        
-        if ((totalIncome || 0) <= 0) {
-            icon = '💰';
-            title = 'No Income Added';
-            message = 'You need to add income entries before we can calculate your payoff timeline. Tell us about your paychecks, deposits, or any other monthly income.';
-            primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click(); setTimeout(() => document.getElementById('add-income-btn').click(), 100)">➕ Add Income</button>`;
-        } else if ((effectiveBudget || 0) <= 0) {
-            const _active              = recurringCosts.filter(c => isCostDueThisMonth(c));
-            const totalRecurringDirect = _active.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-            const totalRecurringCard   = _active.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
-            icon = '📉';
-            title = 'Budget Over-Committed';
-            message = `Your income of ${formatMoney(totalIncome)} is entirely consumed by direct recurring costs of ${formatMoney(totalRecurringDirect)}.${totalRecurringCard > 0 ? ` (Card-charged costs of ${formatMoney(totalRecurringCard)} are already factored into card payments.)` : ''} You need to either increase income or reduce costs to free up money for debt payoff.`;
-            primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click()">💰 Add Income</button>`;
-            secondaryAction = `<button class="btn btn-warning" onclick="document.querySelector('[data-tab=\"income\"]').click()">📝 Review Costs</button>`;
-        } else {
-            icon = '💳';
-            title = 'Can\'t Cover Minimum Payments';
-            message = `Your effective budget of ${formatMoney(effectiveBudget)} is less than your total minimum payments of ${formatMoney(totalMinPayments)}. You need more available cash to make progress on your debts.`;
-            primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click()">💰 Increase Income</button>`;
-            secondaryAction = `<button class="btn btn-secondary" onclick="document.querySelector('[data-tab=\"debts\"]').click()">📉 Review Debts</button>`;
-        }
-        
-        timelineChart.innerHTML = `
-            <div class="timeline-error-card">
-                <span class="timeline-error-icon">${icon}</span>
-                <div class="timeline-error-title">${title}</div>
-                <div class="timeline-error-message">${message}</div>
-                <div class="timeline-error-actions">
-                    ${primaryAction}
-                    ${secondaryAction}
-                </div>
-            </div>`;
-        renderPaydownChart([], {});
-        return;
-    }
-
-    if (simResults.monthsElapsed >= 1200) {
-        countdownBox.style.display    = 'none';
-        payoffBoxAlt.style.display    = 'block';
-        _root.getElementById('stat-payoff-date-alt').textContent = '> 100 Years';
-        statTotalInterest.textContent = 'Too High';
-        statSavingsBox.style.display  = 'none';
-        windfallBar.style.display     = 'none';
-        stopCountdown();
-        timelineChart.innerHTML = `
-            <div class="timeline-error-card">
-                <span class="timeline-error-icon">⏰</span>
-                <div class="timeline-error-title">Payoff Exceeds 100 Years</div>
-                <div class="timeline-error-message">With your current budget, these debts would take over 100 years to pay off. This usually means either the balances are very high compared to your available payoff budget, or interest rates are preventing progress.</div>
-                <div class="timeline-error-actions">
-                    <button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click()">💰 Increase Budget</button>
-                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab=\"debts\"]').click()">📉 Review Debts</button>
-                </div>
-            </div>`;
-        return;
-    }
-
-    const today      = new Date();
-    const payoffDate = new Date(today.getFullYear(), today.getMonth() + simResults.monthsElapsed, 1);
-    lastSimPayoffDate = payoffDate;
-    statTotalInterest.textContent = formatMoney(simResults.totalInterestPaid);
-
-    // Countdown box
-    countdownBox.style.display = 'block';
-    payoffBoxAlt.style.display = 'none';
-    windfallBar.style.display  = 'flex';
-    _root.getElementById('stat-payoff-date').textContent =
-        payoffDate.toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' });
-    startCountdown(payoffDate);
-
-    // Compare against the other strategy
-    const otherStrat  = strategy === 'snowball' ? 'avalanche' : 'snowball';
-    const otherLabel  = otherStrat.charAt(0).toUpperCase() + otherStrat.slice(1);
-    const otherResult = runSimulation(otherStrat);
-    if (otherResult.valid) {
-        const interestDiff = otherResult.totalInterestPaid - simResults.totalInterestPaid;
-        statSavingsBox.style.display  = 'block';
-        statSavingsLabel.textContent  = `vs. ${otherLabel}`;
-        if (interestDiff > 0.01) {
-            statSavings.textContent = `Save ${formatMoney(interestDiff)}`;
-            statSavings.style.color = 'var(--success-color)';
-        } else if (interestDiff < -0.01) {
-            statSavings.textContent = `${formatMoney(Math.abs(interestDiff))} more interest`;
-            statSavings.style.color = 'var(--warning-color)';
-        } else {
-            statSavings.textContent = 'Same cost';
-            statSavings.style.color = 'var(--text-secondary)';
-        }
-    } else {
-        statSavingsBox.style.display = 'none';
-    }
-
-    renderTimelineChart(simResults.payoffLog, simResults.monthsElapsed);
-    renderPaydownChart(simResults.monthlyTotals, simResults.perDebtMonthly);
-}
-// ─── Payment Plan ─────────────────────────────────────────────────────────────
-function renderPaymentPlan() {
-    const section = _root.getElementById('payment-plan-section');
-    const list    = _root.getElementById('payment-plan-list');
-
-    // ── Archive-view wiring ────────────────────────────────────────────────────
-    const isArchiveView = viewingArchiveIndex !== null && !!monthlyArchives[viewingArchiveIndex];
-    const archiveData   = isArchiveView ? monthlyArchives[viewingArchiveIndex] : null;
-    const _income       = archiveData ? (archiveData.incomeEntries  || []) : incomeEntries;
-    const _costs        = archiveData ? (archiveData.recurringCosts || []) : recurringCosts;
-    const _oneTimeCosts = archiveData ? (archiveData.oneTimeCosts   || []) : oneTimeCosts;
-    const _checkpoints  = archiveData ? (archiveData.checkpoints    || []) : checkpoints;
-    const _debts        = archiveData ? (archiveData.debts           || debts) : debts;
-    const _startBal     = archiveData ? (archiveData.startingBalance || 0)  : startingBalance;
-    const _paidStatus   = archiveData ? (archiveData.paidStatus      || {}) : paidStatus;
-    const _monthKey     = archiveData ? archiveData.month : (workingMonthKey || currentMonthKey());
-
-    // ── Month title & navigation ───────────────────────────────────────────────
-    const monthTitleEl = _root.getElementById('global-month-title');
-    const prevBtn      = _root.getElementById('plan-prev-month-btn');
-    const nextBtn      = _root.getElementById('plan-next-month-btn');
-
-    const monthDisplay = formatMonthLabel(_monthKey);
-    if (monthTitleEl) monthTitleEl.textContent = monthDisplay;
-
-    if (prevBtn) {
-        const prevIdx = isArchiveView ? viewingArchiveIndex + 1 : 0;
-        if (prevIdx < monthlyArchives.length) {
-            prevBtn.style.visibility = 'visible';
-            prevBtn.dataset.archiveIdx = prevIdx;
-        } else {
-            prevBtn.style.visibility = 'hidden';
-        }
-    }
-    if (nextBtn) nextBtn.style.visibility = isArchiveView ? 'visible' : 'hidden';
-
-    list.innerHTML = '';
-
-    if (_income.length === 0 && _checkpoints.length === 0) { section.style.display = 'none'; return; }
-
-    const events = [];
-    const today = new Date();
-    const currentDay = today.getDate();
-
-    _income.forEach(entry => {
-        const day = parseInt(entry.date.split('-')[2]);
-        events.push({ type:'income', id: entry.id, name: entry.label, day, date: new Date(entry.date+'T00:00:00'), amount: entry.amount, sortKey: day * 1000 });
-    });
-
-    _checkpoints.forEach(cp => {
-        // Sortkey +0.5 ensures checkpoints happen AFTER standard income on that day, but BEFORE bills are paid.
-        events.push({ type: 'checkpoint', id: cp.id, name: 'Bank Balance Sync', day: cp.day, amount: cp.amount, sortKey: cp.day * 1000 + 0.5 });
-    });
-
-    _costs.filter(c => isCostDueInMonth(c, _monthKey)).forEach(cost => {
-        const day = cost.dueDay || 1;
-        events.push({
-            type:'recurring',
-            id: cost.id,
-            name: cost.name,
-            day,
-            amount: cost.amount,
-            paymentMethod: cost.paymentMethod || 'direct',
-            amountType: cost.amountType || 'fixed',
-            autoPay: !!cost.autoPay,
-            sortKey: day * 1000 + 1
-        });
-    });
-
-    // One-time costs always apply to the current month
-    _oneTimeCosts.forEach(cost => {
-        events.push({
-            type: 'one-time',
-            id: cost.id,
-            name: cost.name,
-            day: cost.dueDay || 1,
-            amount: cost.amount,
-            paymentMethod: cost.paymentMethod || 'direct',
-            amountType: cost.amountType || 'fixed',
-            autoPay: !!cost.autoPay,
-            sortKey: (cost.dueDay || 1) * 1000 + 1
-        });
-    });
-
-    const sortedDebts   = getStrategyOrder(_debts.filter(d => d.balance > 0), strategy);
-    const _overrides    = isArchiveView ? {} : minPayOverrides;
-    const totalMinPay   = sortedDebts.reduce((s,d) => s + (_overrides[d.id] ?? d.minPayment), 0);
-    const totalInc      = _income.reduce((s,e) => s + e.amount, 0);
-    const totalRec      = [
-        ..._costs.filter(c => isCostDueInMonth(c, _monthKey)),
-        ..._oneTimeCosts,
-    ].reduce((s,c) => s + c.amount, 0);
-    const extra         = Math.max(0, totalInc - totalRec - totalMinPay);
-    const targetId      = sortedDebts[0]?.id;
-
-    sortedDebts.forEach(debt => {
-        const day      = debt.dueDay || 1;
-        const isTarget = debt.id === targetId;
-        const effMin   = _overrides[debt.id] ?? debt.minPayment;
-        const amount   = isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
-        const hasOverride = debt.id in _overrides;
-        events.push({ type:'debt', id: debt.id, name: debt.name, day, amount, minPayment: debt.minPayment, effMin, hasOverride, balance: debt.balance, isSnowballTarget: isTarget, autoPay: !!debt.autoPay, sortKey: day * 1000 + 2 });
-    });
-
-    events.sort((a,b) => a.sortKey - b.sortKey);
-
-    // Date-aware scheduling with card-passthrough logic
-    // Initial cash = first checkpoint on day 1, or 0 if no day 1 checkpoint
-    const day1Checkpoint = _checkpoints.find(cp => cp.day === 1);
-    let cashPool       = day1Checkpoint ? day1Checkpoint.amount : 0;
-    let incomeReleased = 0;
-    const incomeSorted = events.filter(e => e.type === 'income').sort((a,b) => a.day - b.day);
-    const schedule     = [];
-    const deferred     = [];
-    let totalExpenses  = 0;
-
-    const releaseIncomeThroughDay = (day) => {
-        while (incomeReleased < incomeSorted.length && incomeSorted[incomeReleased].day <= day) {
-            const ev = incomeSorted[incomeReleased++];
-            cashPool += ev.amount;
-            schedule.push({ ...ev, balance: cashPool });
-        }
-    };
-
-    for (const ev of events) {
-        if (ev.type === 'income') continue;
-        releaseIncomeThroughDay(ev.day);
-
-        // Retry deferred items before this one
-        const retry = [...deferred];
-        deferred.length = 0;
-        for (const def of retry) {
-            if (cashPool >= def.amount) {
-                cashPool -= def.amount; totalExpenses += def.amount;
-                schedule.push({ ...def, balance: cashPool, deferred: true });
-            } else deferred.push(def);
-        }
-
-        // If it's a checkpoint, hard-reset the pool here
-        if (ev.type === 'checkpoint') {
-            cashPool = ev.amount;
-            schedule.push({ ...ev, balance: cashPool });
-            continue;
-        }
-
-        // Card-method recurring costs bypass the cash pool entirely
-        if (ev.type === 'recurring' && ev.paymentMethod === 'card') {
-            schedule.push({ ...ev, balance: cashPool, isCard: true });
-            continue;
-        }
-
-        if (cashPool >= ev.amount) {
-            cashPool -= ev.amount; totalExpenses += ev.amount;
-            schedule.push({ ...ev, balance: cashPool });
-        } else if (cashPool > 0.009 && ev.type === 'debt') {
-            const partial    = parseFloat(cashPool.toFixed(2));
-            const remainder  = parseFloat((ev.amount - partial).toFixed(2));
-            cashPool         = 0;
-            totalExpenses   += partial;
-            schedule.push({ ...ev, amount: partial, balance: 0, partial: true });
-            if (remainder > 0.01) deferred.push({ ...ev, amount: remainder });
-        } else {
-            deferred.push(ev);
-        }
-    }
-
-    // Flush remaining income and deferred
-    releaseIncomeThroughDay(31);
-    for (const def of deferred) {
-        if (cashPool >= def.amount) {
-            cashPool -= def.amount; totalExpenses += def.amount;
-            schedule.push({ ...def, balance: cashPool, deferred: true });
-        } else {
-            schedule.push({ ...def, balance: cashPool, deferred: true, unpaid: true });
-        }
-    }
-
-    if (schedule.length === 0) { section.style.display = 'none'; return; }
-
-    // --- MATH ONLY: Cash runway estimate (current month only) ---
-    const sortedFutureIncomes = _income
-        .map(e => ({ date: new Date(e.date+'T00:00:00'), amount: e.amount, label: e.label }))
-        .filter(e => e.date >= today)
-        .sort((a,b) => a.date - b.date);
-    const nextIncome = sortedFutureIncomes[0] || null;
-    const targetDay  = nextIncome ? nextIncome.date.getDate() : 31;
-
-    let testBalance  = _startBal;
-    let minProjected = testBalance;
-
-    schedule.forEach(item => {
-        const itemDay = item.day || 1;
-        if (itemDay < currentDay) return;
-        if (nextIncome && itemDay >= targetDay && item.type !== 'income') return;
-
-        if (item.type === 'checkpoint')                       testBalance = item.amount;
-        else if (item.type === 'income')                      testBalance += item.amount;
-        else if (item.type === 'recurring' && item.isCard) { /* card — no cash impact */ }
-        else if (item.type !== 'starting-balance')            testBalance -= item.amount;
-
-        if (testBalance < minProjected) {
-            minProjected = testBalance;
-        }
-    });
-
-    // Update the visual dashboard boxes
-    const summaryNext   = _root.getElementById('runway-next-paycheck');
-    const summaryMin    = _root.getElementById('runway-min-project');
-    const summaryStatus = _root.getElementById('runway-status');
-
-    if (summaryNext)   summaryNext.textContent   = nextIncome ? `${nextIncome.label} (${nextIncome.date.toLocaleDateString(undefined,{month:'short',day:'numeric'})})` : 'None';
-    if (summaryMin)    summaryMin.textContent    = formatMoney(minProjected);
-
-    if (summaryStatus) {
-        if (minProjected < 0) {
-            summaryStatus.innerHTML = '<span style="color:var(--danger-color);">⚠ At Risk (Negative Balance)</span>';
-        } else if (minProjected < 100) {
-            summaryStatus.innerHTML = '<span style="color:var(--warning-color);">⚠ Low Buffer</span>';
-        } else {
-            summaryStatus.innerHTML = '<span style="color:var(--success-color);">✓ Safe</span>';
-        }
-    }
-
-    // --- Month Overview Dashboard ---
-    // Calculate month totals
-    const totalIncomeVal = _income.reduce((s, e) => s + e.amount, 0);
-    // Expenses = direct costs + debt payments (exclude card charges as they don't affect cash)
-    const totalDirectCosts = _costs
-        .filter(c => isCostDueInMonth(c, _monthKey) && c.paymentMethod !== 'card')
-        .reduce((s, c) => s + c.amount, 0);
-    const totalDebtPayments = sortedDebts
-        .reduce((s, d) => s + (_overrides[d.id] ?? d.minPayment), 0);
-    const totalExpensesVal = totalDirectCosts + totalDebtPayments;
-
-    // Next month start = Day 1 balance + all income - all cash expenses
-    // If there are checkpoints, use the last checkpoint's balance as the base
-    const lastCheckpoint = _checkpoints.length > 0
-        ? [..._checkpoints].sort((a, b) => b.day - a.day)[0]
-        : null;
-
-    // Calculate final balance through the schedule
-    const finalBalance = schedule.length > 0
-        ? schedule[schedule.length - 1].balance
-        : _startBal;
-
-    // Buffer = cash available before first income of NEXT month
-    // Find first income date of next month
-    const nextMonthKey = addMonthsToKey(_monthKey, 1);
-    const nextMonthFirstDay = new Date(nextMonthKey.split('-')[0], parseInt(nextMonthKey.split('-')[1]), 1);
-
-    // Get income entries that would appear in next month
-    const nextMonthIncome = generateRecurringIncomeForMonth(_income, nextMonthKey);
-    const firstNextMonthIncome = nextMonthIncome.length > 0
-        ? [...nextMonthIncome].sort((a, b) => parseInt(a.date.split('-')[2]) - parseInt(b.date.split('-')[2]))[0]
-        : null;
-
-    // Buffer = final balance of this month (this is what carries over)
-    const bufferAmount = finalBalance;
-
-    // Populate Month Overview
-    const ovStart = _root.getElementById('month-overview-start');
-    const ovIncome = _root.getElementById('month-overview-income');
-    const ovExpenses = _root.getElementById('month-overview-expenses');
-    const ovNextStart = _root.getElementById('month-overview-next-start');
-    const ovBuffer = _root.getElementById('month-overview-buffer');
-
-    // Get day 1 checkpoint amount (or 0 if none)
-    const day1Cp = _checkpoints.find(cp => cp.day === 1);
-    const day1Amount = day1Cp ? day1Cp.amount : 0;
-    if (ovStart) ovStart.textContent = formatMoney(day1Amount);
-    if (ovIncome) ovIncome.textContent = formatMoney(totalIncomeVal);
-    if (ovExpenses) ovExpenses.textContent = formatMoney(totalExpensesVal);
-    if (ovNextStart) ovNextStart.textContent = formatMoney(finalBalance);
-
-    if (ovBuffer) {
-        // Color-code the buffer
-        let bufferColor = 'var(--success-color)';
-        let bufferIcon = '🛡️';
-        if (bufferAmount < 0) {
-            bufferColor = 'var(--danger-color)';
-            bufferIcon = '⚠️';
-        } else if (bufferAmount < 100) {
-            bufferColor = 'var(--warning-color)';
-            bufferIcon = '⚡';
-        }
-        ovBuffer.innerHTML = `<span style="color:${bufferColor};">${bufferIcon} ${formatMoney(bufferAmount)}</span>`;
-    }
-
-    // --- Spending Budgets Summary ---
-    const ovBudgetsContainer = _root.getElementById('month-overview-budgets');
-    const ovBudgetsGrid = _root.getElementById('month-overview-budgets-grid');
-
-    if (ovBudgetsContainer && ovBudgetsGrid && spendingBudgets.length > 0) {
-        ovBudgetsContainer.style.display = 'block';
-
-        // Calculate budget status for each
-        const budgetSummaries = spendingBudgets.map(budget => {
-            const budgeted = getBudgetAmount(budget);
-            const spent = (budget.expenses || []).reduce((s, e) => s + e.amount, 0);
-            const remaining = budgeted - spent;
-            const percentUsed = budgeted > 0 ? (spent / budgeted) * 100 : 0;
-            return { name: budget.name, budgeted, spent, remaining, percentUsed };
-        });
-
-        // Render grid
-        ovBudgetsGrid.innerHTML = budgetSummaries.map(b => {
-            const colorClass = b.percentUsed > 100 ? 'color: var(--danger-color);' :
-                              b.percentUsed > 80 ? 'color: var(--warning-color);' :
-                              'color: var(--success-color);';
-            const statusIcon = b.percentUsed > 100 ? '🔴' : b.percentUsed > 80 ? '⚡' : '✓';
-
-            return `
-                <div style="background: rgba(7,6,26,0.4); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(99,102,241,0.2);">
-                    <div style="font-size: 0.65rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${b.name}</div>
-                    <div style="font-size: 0.9rem; font-weight: 600; ${colorClass}">${statusIcon} ${formatMoney(b.remaining)}</div>
-                    <div style="font-size: 0.6rem; color: var(--text-secondary);">of ${formatMoney(b.budgeted)}</div>
-                </div>
-            `;
-        }).join('');
-
-        // Add total row
-        const totalBudgeted = budgetSummaries.reduce((s, b) => s + b.budgeted, 0);
-        const totalSpent = budgetSummaries.reduce((s, b) => s + b.spent, 0);
-        const totalRemaining = totalBudgeted - totalSpent;
-
-        ovBudgetsGrid.innerHTML += `
-            <div style="background: rgba(168,85,247,0.1); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(168,85,247,0.3);">
-                <div style="font-size: 0.65rem; color: var(--text-secondary);">TOTAL BUDGETS</div>
-                <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">${formatMoney(totalRemaining)}</div>
-                <div style="font-size: 0.6rem; color: var(--text-secondary);">remaining</div>
-            </div>
-        `;
-    } else if (ovBudgetsContainer) {
-        ovBudgetsContainer.style.display = 'none';
-    }
-
-    section.style.display = 'block';
-
-    // --- UI CREATION: Build the visual rows ---
-    let todayMarkerInserted = isArchiveView; // skip in archive view
-    schedule.forEach((item, index) => {
-        // Insert "Today" marker before the first item on or after today
-        if (!todayMarkerInserted && (item.day || 1) >= currentDay) {
-            todayMarkerInserted = true;
-            const marker = document.createElement('div');
-            marker.className = 'schedule-today-marker';
-            marker.innerHTML = `<span class="schedule-today-label">Today — ${today.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</span>`;
-            list.appendChild(marker);
-        }
-
-        const itemPaid = _paidStatus[item.id];
-        const row      = document.createElement('div');
-
-        let icon, typeBadge = '', amountClass, dayLabel, rowBgClass;
-
-        if (item.type === 'checkpoint') {
-            const isDay1 = item.day === 1;
-            icon        = isDay1 ? '🏁' : '⚖️';
-            typeBadge   = isDay1
-                ? '<span class="schedule-badge schedule-badge-start" style="background:rgba(99,102,241,0.15);color:var(--accent-color);border-color:rgba(99,102,241,0.3);">Day 1 Balance</span>'
-                : '<span class="schedule-badge schedule-badge-start" style="background:rgba(168,85,247,0.15);color:var(--promo-light);border-color:rgba(168,85,247,0.3);">Manual Sync</span>';
-            amountClass = '';
-            dayLabel    = formatOrdinal(item.day);
-            rowBgClass  = isDay1 ? 'schedule-starting' : 'schedule-checkpoint';
-
-        } else if (item.type === 'income') {
-            icon        = '💵';
-            typeBadge   = '<span class="schedule-badge schedule-badge-income">Deposit</span>';
-            amountClass = 'schedule-amount-income';
-            dayLabel    = item.date.toLocaleDateString(undefined, { month:'short', day:'numeric' });
-            rowBgClass  = 'schedule-income';
-
-        } else if (item.type === 'recurring') {
-            const isCard = item.paymentMethod === 'card' || item.isCard;
-            icon = isCard ? '💳' : '🏦';
-
-            const methodBadge = isCard
-                ? '<span class="schedule-badge card-badge" style="border: 1px solid rgba(99, 102, 241, 0.45);">💳 Card</span>'
-                : '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🏦 Direct</span>';
-
-            const amtBadge = item.amountType === 'flexible'
-                ? '<span class="schedule-badge flexible-badge">〜 Flexible</span>'
-                : '<span class="schedule-badge fixed-badge">= Fixed</span>';
-
-            typeBadge = methodBadge + amtBadge;
-
-            if (item.autoPay && !itemPaid) {
-                typeBadge += '<span class="schedule-badge schedule-badge-autopay">⚡ Auto</span>';
-            }
-
-            amountClass = 'schedule-amount-expense';
-            dayLabel    = formatOrdinal(item.day);
-            rowBgClass  = isCard ? 'schedule-recurring-card' : 'schedule-recurring-direct';
-
-        } else {
-            icon        = '🧾';
-            const directBadge = '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🏦 Direct</span>';
-            const targetBadge = item.isSnowballTarget
-                ? `<span class="snowball-badge">${strategy==='snowball'?'❄️':'🌊'} ${strategy==='snowball'?'Snowball':'Avalanche'} Target</span>`
-                : '';
-
-            typeBadge = directBadge + targetBadge;
-
-            if (item.autoPay && !itemPaid) {
-                typeBadge += '<span class="schedule-badge schedule-badge-autopay">⚡ Auto</span>';
-            }
-
-            amountClass = 'schedule-amount-expense';
-            dayLabel    = formatOrdinal(item.day);
-            rowBgClass  = 'schedule-debt';
-        }
-
-        row.className  = `schedule-row ${rowBgClass}${itemPaid ? ' schedule-row-paid' : ''}`;
-        row.style.animation = `fadeIn 0.4s ease backwards ${index * 0.04}s`;
-
-        let statusBadges = '';
-        if (item.deferred) statusBadges += '<span class="schedule-badge schedule-badge-deferred">⏳ Deferred</span>';
-        if (item.partial)  statusBadges += '<span class="schedule-badge schedule-badge-partial">⚠ Partial</span>';
-        if (item.unpaid)   statusBadges += '<span class="schedule-badge schedule-badge-unpaid">❌ Unpaid</span>';
-
-        let paidBadge = '';
-        if (item.type !== 'income' && item.type !== 'checkpoint') {
-            if (itemPaid) paidBadge = '<span class="schedule-badge schedule-badge-paid">✓ Paid</span>';
-        }
-
-        const sign     = item.type === 'income' ? '+' : (item.type === 'checkpoint') ? '' : '−';
-        const balClass = item.balance <= 0 ? 'balance-zero' : item.balance < 500 ? 'balance-low' : 'balance-healthy';
-
-        const amountLabel = item.type === 'income'           ? 'Deposit'
-            : item.type === 'checkpoint'                       ? 'Synced to'
-            : 'Payment';
-
-        // Archive view is read-only — no edit or mark-paid buttons
-        const editBtnHtml = (!isArchiveView)
-            ? `<button class="btn-edit-inline" data-id="${item.id}" data-type="${item.type}" title="Edit entry">Edit</button>`
-            : '';
-
-        let paidBtnHtml = '';
-        if (!isArchiveView && item.type !== 'income' && item.type !== 'checkpoint') {
-            const isPastDue = (item.day || 1) <= currentDay;
-
-            if (itemPaid) {
-                paidBtnHtml = `<button class="btn-mark-paid btn-mark-paid-done" data-id="${item.id}" data-autopay="${item.autoPay ? '1' : '0'}" title="Mark as unpaid">✓ Paid</button>`;
-            } else if (item.autoPay) {
-                if (isPastDue) {
-                    paidBtnHtml = `<button class="btn-mark-paid" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.35);" data-id="${item.id}" data-autopay="1" title="Confirm auto-payment">⚡ Auto-Paid</button>`;
-                } else {
-                    paidBtnHtml = `<button disabled style="opacity: 0.5; cursor: not-allowed; background: transparent; border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); border-radius: 6px; padding: 0.25rem 0.6rem; font-size: 0.75rem; font-weight: 600;">⚡ Scheduled</button>`;
-                }
-            } else {
-                paidBtnHtml = `<button class="btn-mark-paid" data-id="${item.id}" data-autopay="0" title="Mark as paid">Mark Paid</button>`;
-            }
-        }
-
-        // Override badge + button (debt rows in current month only)
-        const overrideBadge = (!isArchiveView && item.type === 'debt' && item.hasOverride)
-            ? `<span class="schedule-badge schedule-badge-override" title="Min payment overridden this month">✏ Override</span>`
-            : '';
-
-        const overrideBtnHtml = (!isArchiveView && item.type === 'debt')
-            ? `<button class="btn-override-min" data-id="${item.id}" data-min="${item.minPayment}" data-current="${item.effMin}" title="${item.hasOverride ? 'Edit or clear override' : 'Override minimum payment'}">${item.hasOverride ? 'Override ✏' : 'Override'}</button>`
-            : '';
-
-        // Inline override form (rendered into row, shown/hidden via JS)
-        const overrideFormHtml = (!isArchiveView && item.type === 'debt') ? `
-            <div class="override-form" id="override-form-${item.id}" style="display:none;">
-                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-top:0.5rem; padding:0.5rem 0.75rem; background:rgba(91,127,255,0.07); border:1px solid rgba(91,127,255,0.25); border-radius:6px;">
-                    <span style="font-size:0.78rem; color:var(--text-secondary); white-space:nowrap;">Min payment <span style="color:var(--text-primary);">($${item.minPayment.toFixed(2)})</span> →</span>
-                    <input class="override-input" type="number" min="0" step="0.01" placeholder="${item.effMin.toFixed(2)}" value="${item.hasOverride ? item.effMin.toFixed(2) : ''}" style="width:90px; padding:0.2rem 0.4rem; border-radius:4px; border:1px solid rgba(91,127,255,0.4); background:rgba(7,6,26,0.6); color:var(--text-primary); font-size:0.85rem;">
-                    <button class="btn-override-save" data-id="${item.id}" style="padding:0.2rem 0.6rem; font-size:0.78rem; font-weight:600; border-radius:4px; border:1px solid rgba(91,127,255,0.5); background:rgba(91,127,255,0.15); color:#c4d0ff; cursor:pointer;">Save</button>
-                    ${item.hasOverride ? `<button class="btn-override-clear" data-id="${item.id}" style="padding:0.2rem 0.6rem; font-size:0.78rem; font-weight:600; border-radius:4px; border:1px solid rgba(239,68,68,0.4); background:rgba(239,68,68,0.1); color:#fca5a5; cursor:pointer;">Clear</button>` : ''}
-                    <button class="btn-override-cancel" data-id="${item.id}" style="padding:0.2rem 0.5rem; font-size:0.78rem; background:transparent; border:none; color:var(--text-secondary); cursor:pointer;">✕</button>
-                </div>
-            </div>` : '';
-
-        const detailText = item.type === 'debt' && item.isSnowballTarget ? 'Minimum + Snowball Extra'
-            : item.type === 'debt' ? 'Minimum Payment'
-            : item.type === 'recurring' && (item.isCard || item.paymentMethod === 'card') ? 'Charged to credit card'
-            : item.type === 'recurring' ? 'Paid from bank account'
-            : item.type === 'checkpoint' ? 'Resets the running balance for calculations below'
-            : '';
-
-        row.innerHTML = `
-            <div class="schedule-date-col"><span class="schedule-icon">${icon}</span><span class="schedule-day">${dayLabel}</span></div>
-            <div class="schedule-info-col">
-                <div class="schedule-name" style="margin-bottom:0.25rem;">${escHtml(item.name)}</div>
-                <div class="schedule-badges" style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.25rem;">
-                    ${typeBadge} ${statusBadges} ${paidBadge} ${overrideBadge}
-                </div>
-                <div class="schedule-detail">${detailText}</div>
-                ${overrideFormHtml}
-            </div>
-            <div class="schedule-right-col">
-                <div class="schedule-amount-col ${amountClass}"><span class="col-label">${amountLabel}</span>${sign}$${item.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                <div class="schedule-balance-col ${balClass}"><span class="col-label">Balance</span>$${item.balance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-            </div>
-
-            <div class="schedule-action-col" style="display:flex; flex-direction:column; gap:0.35rem; align-items:flex-end; justify-content:center;">
-                ${paidBtnHtml}
-                ${overrideBtnHtml}
-                ${editBtnHtml}
-            </div>`;
-
-        list.appendChild(row);
-    });
-
-    // If every item was before today (end-of-month edge case), append marker at the bottom
-    if (!todayMarkerInserted) {
-        const marker = document.createElement('div');
-        marker.className = 'schedule-today-marker';
-        marker.innerHTML = `<span class="schedule-today-label">Today — ${today.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</span>`;
-        list.appendChild(marker);
-    }
-
-    const totalIncEl  = _root.getElementById('payment-plan-total-income');
-    const totalExpEl  = _root.getElementById('payment-plan-total-expenses');
-    const nextMonthEl = _root.getElementById('payment-plan-next-month');
-
-    if (totalIncEl) totalIncEl.textContent = formatMoney(totalInc);
-    if (totalExpEl) totalExpEl.textContent = formatMoney(totalExpenses);
-    if (nextMonthEl) {
-        nextMonthEl.textContent = formatMoney(cashPool);
-        nextMonthEl.style.color = cashPool < 0 ? 'var(--danger-color)' : 'var(--text-primary)';
-    }
-    return isArchiveView ? null : schedule;
-}
-
-
-// ─── 82a-render-charts.js ─────────────────────────────────────────────────────────────────
-// ─── Chart Rendering ─────────────────────────────────────────────────────────
-// Focused module for Chart.js visualization: paydown chart and timeline.
-// Extracted from 82-render-payment.js to keep the payment module focused
-// on plan logic and visualization orchestration.
-
-const DEBT_COLORS = [
-    { border: 'rgba(59,130,246,1)',  bg: 'rgba(59,130,246,0.08)'  },
-    { border: 'rgba(16,185,129,1)',  bg: 'rgba(16,185,129,0.08)'  },
-    { border: 'rgba(245,158,11,1)',  bg: 'rgba(245,158,11,0.08)'  },
-    { border: 'rgba(239,68,68,1)',   bg: 'rgba(239,68,68,0.08)'   },
-    { border: 'rgba(168,85,247,1)',  bg: 'rgba(168,85,247,0.08)'  },
-    { border: 'rgba(236,72,153,1)',  bg: 'rgba(236,72,153,0.08)'  },
-    { border: 'rgba(20,184,166,1)',  bg: 'rgba(20,184,166,0.08)'  },
-    { border: 'rgba(249,115,22,1)',  bg: 'rgba(249,115,22,0.08)'  },
-];
-
-function renderPaydownChart(monthlyTotals, perDebtMonthly) {
-    const canvas = _root.getElementById('paydown-chart');
-    if (!canvas) return;
-
-    if (paydownChart) { try { paydownChart.destroy(); } catch(e) {} paydownChart = null; }
-
-    const maxLen = monthlyTotals.length;
-    if (maxLen === 0) { canvas.style.height = '0'; return; }
-    canvas.style.height = '300px';
-
-    const labels = monthlyTotals.map((_,i) => {
-        const d = new Date();
-        d.setMonth(d.getMonth() + i + 1);
-        return d.toLocaleDateString(undefined, { month:'short', year:'numeric' });
-    });
-
-    const datasets = [];
-    const orderedDebts = getStrategyOrder(debts, strategy);
-
-    orderedDebts.forEach((debt, idx) => {
-        const color  = DEBT_COLORS[idx % DEBT_COLORS.length];
-        const series = perDebtMonthly[debt.id] || [];
-        const data   = Array.from({ length: maxLen }, (_,i) => Number((series[i] ?? 0).toFixed(2)));
-        datasets.push({
-            label:           debt.name,
-            data,
-            borderColor:     color.border,
-            backgroundColor: color.bg,
-            fill:            true,
-            tension:         0.3,
-            pointRadius:     0,
-            borderWidth:     2,
-        });
-    });
-
-    // Dashed total line
-    datasets.push({
-        label:           'Total Remaining',
-        data:            monthlyTotals.map(v => Number(v.toFixed(2))),
-        borderColor:     'rgba(248,250,252,0.4)',
-        backgroundColor: 'transparent',
-        fill:            false,
-        tension:         0.3,
-        pointRadius:     0,
-        borderWidth:     1.5,
-        borderDash:      [5,4],
-    });
-
-    paydownChart = new Chart(canvas.getContext('2d'), {
-        type: 'line',
-        data: { labels, datasets },
-        options: {
-            responsive:          true,
-            maintainAspectRatio: false,
-            interaction:         { mode: 'index', intersect: false },
-            plugins: {
-                legend: { display: true, position: 'bottom',
-                    labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 16 }
-                },
-                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${formatMoney(ctx.raw)}` } }
-            },
-            scales: {
-                x: { display: true, ticks: { color: '#64748b', maxTicksLimit: 10 }, grid: { color: 'rgba(51,65,85,0.4)' } },
-                y: { display: true, ticks: { color: '#64748b', callback: v => '$'+Number(v).toLocaleString() }, grid: { color: 'rgba(51,65,85,0.4)' } }
-            }
-        }
-    });
-}
-
-function renderTimelineChart(payoffLog, totalMonths) {
-    const timelineChart = _root.getElementById('timeline-chart');
-    timelineChart.innerHTML = '';
-    const today = new Date();
-    payoffLog.sort((a,b) => a.payoffMonth - b.payoffMonth);
-
-    payoffLog.forEach((log, idx) => {
-        const d          = new Date(today.getFullYear(), today.getMonth() + log.payoffMonth, 1);
-        const dateString = d.toLocaleDateString(undefined, { month:'short', year:'numeric' });
-        const pct        = Math.min(100, Math.max(0, (log.payoffMonth / totalMonths) * 100));
-        const color      = DEBT_COLORS[idx % DEBT_COLORS.length];
-
-        const item = document.createElement('div');
-        item.className    = 'timeline-item';
-        item.style.animation = `fadeIn 0.5s ease backwards ${idx * 0.1}s`;
-        item.innerHTML = `
-            <div class="timeline-header">
-                <span class="timeline-name">${escHtml(log.name)}</span>
-                <span class="timeline-date">Paid off ${dateString} · ${log.payoffMonth} mo</span>
-            </div>
-            <div class="timeline-interest">Interest paid: ${formatMoney(log.interestPaid)}</div>
-            <div class="progress-track">
-                <div class="progress-fill" style="width:0%;background:${color.border};transition:width 1s cubic-bezier(0.4,0,0.2,1) ${0.2+idx*0.1}s;"></div>
-            </div>`;
-        timelineChart.appendChild(item);
-        setTimeout(() => { const f = item.querySelector('.progress-fill'); if(f) f.style.width=`${pct}%`; }, 50);
-    });
-}
-
-
-// ─── 83-render-support.js ─────────────────────────────────────────────────────────────────
-// ─── Countdown Timer ─────────────────────────────────────────────────────────
-function startCountdown(payoffDate) {
-    stopCountdown();
-    updateCountdownDisplay(payoffDate);
-    countdownInterval = setInterval(() => updateCountdownDisplay(payoffDate), 60000);
-}
-function stopCountdown() {
-    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-}
-
-function updateCountdownDisplay(payoffDate) {
-    const el = _root.getElementById('stat-countdown');
-    if (!el) return;
-    const now  = new Date();
-    const diff = payoffDate - now;
-    if (diff <= 0) { el.textContent = '🎉 Debt Free!'; return; }
-    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-    el.textContent = days.toLocaleString();
-}
-
-function autoCalcMinPaymentCC() {
-    const balance = parseFloat(_root.getElementById('debt-balance').value) || 0;
-    const rate    = parseFloat(_root.getElementById('debt-rate').value) || 0;
-    const min     = calcAutoMin(balance, rate);
-    if (min !== null) {
-        _root.getElementById('debt-min-payment').value = min.toFixed(2);
-        showAutoMinHint(min, balance, rate);
-    }
-}
-
-function updateAutoMinHint() {
-    // Only show hint when both fields have values, don't overwrite the field
-    const balance = parseFloat(_root.getElementById('debt-balance').value) || 0;
-    const rate    = parseFloat(_root.getElementById('debt-rate').value) || 0;
-    if (balance > 0 && rate >= 0) {
-        const min = calcAutoMin(balance, rate);
-        if (min !== null) showAutoMinHint(min, balance, rate);
-    } else {
-        const hint = _root.getElementById('auto-min-hint');
-        hint.style.display = 'none';
-    }
-}
-
-function showAutoMinHint(min, balance, rate) {
-    const hint = _root.getElementById('auto-min-hint');
-    hint.textContent  = `Suggested minimum: ${formatMoney(min)} (1% of balance + monthly interest, min $25)`;
-    hint.style.display = 'block';
-}
-
-// Override promo autoCalcMinPayment to also clear hint
-function autoCalcMinPayment() {
-    if (!_root.getElementById('debt-promo-toggle').checked) return;
-    const balance    = parseFloat(_root.getElementById('debt-balance').value) || 0;
-    const expiryDate = _root.getElementById('debt-promo-expiry').value;
-    if (!expiryDate || balance <= 0) return;
-    const now    = new Date();
-    const expiry = new Date(expiryDate + 'T00:00:00');
-    const diff   = (expiry.getFullYear() - now.getFullYear()) * 12 + (expiry.getMonth() - now.getMonth());
-    if (diff > 0) {
-        _root.getElementById('debt-min-payment').value = (Math.ceil((balance / diff) * 100) / 100).toFixed(2);
-    }
-    _root.getElementById('auto-min-hint').style.display = 'none';
-}
-
-// ─── Windfall Planner ────────────────────────────────────────────────────────
-function openWindfallModal() {
-    _root.getElementById('windfall-amount').value = '';
-    _root.getElementById('windfall-results').style.display = 'none';
-    windfallModal.style.display = 'flex';
-    void windfallModal.offsetWidth;
-    windfallModal.classList.add('active');
-    setTimeout(() => _root.getElementById('windfall-amount').focus(), 50);
-}
-
-function closeWindfallModal() {
-    windfallModal.classList.remove('active');
-    setTimeout(() => { windfallModal.style.display = 'none'; }, 300);
-}
-
-function calcWindfall() {
-    const amount = parseFloat(_root.getElementById('windfall-amount').value);
-    if (!amount || amount <= 0) { showNotificationToast('Enter a windfall amount first.', 'error'); return; }
-
-    const baseResult = runSimulation(strategy);
-    if (!baseResult.valid) { showNotificationToast('Fix your budget setup first.', 'error'); return; }
-
-    // Run simulation with windfall applied optimally:
-    // Distribute across debts in strategy order (strategy target gets it all first,
-    // cascading remainder to the next if fully paid off)
-    const windfallResult = runSimulationWithWindfall(amount, strategy);
-
-    const today = new Date();
-    const baseDateStr   = new Date(today.getFullYear(), today.getMonth() + baseResult.monthsElapsed, 1)
-        .toLocaleDateString(undefined, { month:'short', year:'numeric' });
-    const afterDateStr  = new Date(today.getFullYear(), today.getMonth() + windfallResult.monthsElapsed, 1)
-        .toLocaleDateString(undefined, { month:'short', year:'numeric' });
-
-    _root.getElementById('wf-before-date').textContent     = baseDateStr;
-    _root.getElementById('wf-before-interest').textContent = formatMoney(baseResult.totalInterestPaid);
-    _root.getElementById('wf-before-months').textContent   = baseResult.monthsElapsed;
-    _root.getElementById('wf-after-date').textContent      = afterDateStr;
-    _root.getElementById('wf-after-interest').textContent  = formatMoney(windfallResult.totalInterestPaid);
-    _root.getElementById('wf-after-months').textContent    = windfallResult.monthsElapsed;
-
-    const monthsSaved    = baseResult.monthsElapsed - windfallResult.monthsElapsed;
-    const interestSaved  = baseResult.totalInterestPaid - windfallResult.totalInterestPaid;
-    const banner         = _root.getElementById('windfall-savings-banner');
-
-    if (monthsSaved > 0 || interestSaved > 0.01) {
-        banner.className   = 'windfall-savings-banner windfall-savings-positive';
-        banner.innerHTML   = `🎉 You'd be debt-free <strong>${monthsSaved} month${monthsSaved !== 1 ? 's' : ''} sooner</strong> and save <strong>${formatMoney(interestSaved)}</strong> in interest!`;
-    } else {
-        banner.className   = 'windfall-savings-banner';
-        banner.innerHTML   = `This windfall would fully eliminate your debt — congratulations!`;
-    }
-
-    // Show per-debt allocation
-    const alloc = _root.getElementById('windfall-allocation');
-    alloc.innerHTML = '<div class="windfall-alloc-title">Optimal allocation:</div>';
-    windfallResult.allocation.forEach(a => {
-        const pct = Math.min(100, (a.applied / amount) * 100);
-        alloc.innerHTML += `
-            <div class="windfall-alloc-row">
-                <span class="windfall-alloc-name">${escHtml(a.name)}</span>
-                <span class="windfall-alloc-amount">${formatMoney(a.applied)}</span>
-                <div class="windfall-alloc-bar"><div class="windfall-alloc-fill" style="width:${pct}%"></div></div>
-            </div>`;
-    });
-
-    _root.getElementById('windfall-results').style.display = 'block';
-}
-
-function runSimulationWithWindfall(windfall, strat) {
-    // Clone debts and apply windfall in strategy order before simulating
-    let simDebts = debts.map(d => ({ ...d }));
-    const ordered = getStrategyOrder(simDebts, strat);
-    let remaining = windfall;
-    const allocation = [];
-
-    for (const debt of ordered) {
-        if (remaining <= 0) break;
-        const apply = Math.min(remaining, debt.balance);
-        const live  = simDebts.find(d => d.id === debt.id);
-        if (live) { live.balance = Math.max(0, live.balance - apply); }
-        allocation.push({ name: debt.name, applied: apply });
-        remaining -= apply;
-    }
-
-    // Now run the full simulation on the reduced balances
-    // Temporarily swap debts, run simulation, restore
-    const originalDebts = debts;
-    debts = simDebts.filter(d => d.balance > 0.01);
-    const result = runSimulation(strat);
-    debts = originalDebts;
-
-    result.allocation = allocation;
-    return result;
-}
-
-// ─── Monthly Check-In Prompt ──────────────────────────────────────────────────
-function maybeShowCheckin() {
-    if (debts.length === 0) return;
-    const dismissed  = localStorage.getItem('snowball_checkin_dismissed');
-    const thisMonth  = currentMonthKey();
-    if (dismissed === thisMonth) return;
-
-    // Populate debt list in the modal
-    const listEl = _root.getElementById('checkin-debt-list');
-    listEl.innerHTML = '';
-    debts.forEach(d => {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;justify-content:space-between;font-size:0.85rem;';
-        row.innerHTML = `<span style="color:var(--text-primary);font-weight:500;">${escHtml(d.name)}</span>
-                         <span style="color:var(--text-secondary);">Current: ${formatMoney(d.balance)}</span>`;
-        listEl.appendChild(row);
-    });
-
-    checkinModal.style.display = 'flex';
-    void checkinModal.offsetWidth;
-    checkinModal.classList.add('active');
-}
-
-// ─── Confetti ─────────────────────────────────────────────────────────────────
-function launchConfetti() {
-    const canvas  = _root.getElementById('confetti-canvas');
-    const ctx     = canvas.getContext('2d');
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight;
-    canvas.style.display = 'block';
-
-    const COLORS  = ['#3b82f6','#10b981','#f59e0b','#ef4444','#a855f7','#ec4899','#14b8a6','#f97316'];
-    const PIECES  = 140;
-    const particles = [];
-
-    for (let i = 0; i < PIECES; i++) {
-        particles.push({
-            x:    canvas.width  * Math.random(),
-            y:    -20 - Math.random() * canvas.height * 0.3,
-            w:    6  + Math.random() * 8,
-            h:    10 + Math.random() * 8,
-            color: COLORS[Math.floor(Math.random() * COLORS.length)],
-            rotation: Math.random() * Math.PI * 2,
-            vx:   (Math.random() - 0.5) * 4,
-            vy:   2.5 + Math.random() * 4,
-            vr:   (Math.random() - 0.5) * 0.25,
-            opacity: 1,
-        });
-    }
-
-    let frame = 0;
-    const MAX_FRAMES = 160;
-
-    function draw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        frame++;
-        const fadeStart = MAX_FRAMES * 0.6;
-
-        particles.forEach(p => {
-            p.x  += p.vx;
-            p.y  += p.vy;
-            p.vy += 0.12; // gravity
-            p.rotation += p.vr;
-            if (frame > fadeStart) p.opacity = Math.max(0, 1 - (frame - fadeStart) / (MAX_FRAMES - fadeStart));
-
-            ctx.save();
-            ctx.globalAlpha = p.opacity;
-            ctx.translate(p.x, p.y);
-            ctx.rotate(p.rotation);
-            ctx.fillStyle = p.color;
-            ctx.beginPath();
-            // Alternate between rect and circle shapes
-            if (p.w > 11) {
-                ctx.arc(0, 0, p.w / 2, 0, Math.PI * 2);
-            } else {
-                ctx.rect(-p.w / 2, -p.h / 2, p.w, p.h);
-            }
-            ctx.fill();
-            ctx.restore();
-        });
-
-        if (frame < MAX_FRAMES) {
-            requestAnimationFrame(draw);
-        } else {
-            canvas.style.display = 'none';
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
-    }
-
-    requestAnimationFrame(draw);
-}
-
-
-// ─── Tab Navigation ───────────────────────────────────────────────────────────
-function initTabs() {
-    const tabBtns   = _root.querySelectorAll('.tab-btn');
-    const tabPanels = _root.querySelectorAll('.tab-panel');
-
-    tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const target = btn.dataset.tab;
-
-            tabBtns.forEach(b => b.classList.remove('active'));
-            tabPanels.forEach(p => p.classList.remove('active'));
-
-            btn.classList.add('active');
-            const panel = _root.getElementById('tab-' + target);
-            if (panel) panel.classList.add('active');
-
-            // Persist active tab
-            localStorage.setItem('snowball_active_tab', target);
-        });
-    });
-
-    // Restore last active tab
-    const savedTab = localStorage.getItem('snowball_active_tab');
-    if (savedTab) {
-        const savedBtn = _root.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
-        if (savedBtn) savedBtn.click();
-    }
-}
-
-// ─── Bootstrap App ────────────────────────────────────────────────────────
-    setupEventListeners();
-
-    // Home Assistant pushes the 'hass' object asynchronously. 
-    // We wait a few milliseconds for it to arrive, then pull our data and render!
-    const waitForHass = setInterval(() => {
-        if (_root._hass) {
-            clearInterval(waitForHass);
-            loadBackendData();
-        }
-    }, 50);
-
-  } // <-- Closes _initApp()
-
-  // Lovelace Card API
-  setConfig(config) {
-    // No config needed for this card
-    this._config = config;
-  }
-
-  getCardSize() {
-    return 12; // Tall card - takes full height
-  }
-
-  static getConfigElement() {
-    return document.createElement('div');
-  }
-
-  static getStubConfig() {
-    return {};
-  }
-} // <-- Closes the DebtSnowballCard class
-
-customElements.define('debt-snowball-card', DebtSnowballCard);
-
-// This registers your card in the Home Assistant UI card picker!
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "debt-snowball-card",
-  name: "Debt Snowball Tracker",
-  description: "A full-screen interactive debt snowball and avalanche tracker. Add to a 'Panel' view for best experience.",
-  preview: false,
-  documentationURL: "https://github.com/raffenit/debt-snowball-tracker"
-});
-
-
+  };
+  customElements.define("debt-snowball-card", DebtSnowballCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "debt-snowball-card",
+    name: "Debt Snowball Tracker",
+    description: "Track debts, income, and costs with payoff simulation"
+  });
+})();
+//# sourceMappingURL=debt-snowball-card.js.map

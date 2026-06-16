@@ -1,7 +1,7 @@
-// Extended tests for debt-snowball-card.js (Lovelace card) logic
-// Tests pure functions from src/ modules - UI-independent
+// Extended tests for core simulation logic
+// Tests pure functions from src/core/ — UI-independent
 // Covers gaps not exercised by app.test.js:
-//   - card vs direct recurring cost budget separation
+//   - recurring cost budget separation
 //   - startingBalance accelerates first month payoff
 //   - promo debt that expires mid-simulation starts accruing interest
 //   - three-debt snowball cascade (extra rolls to next target)

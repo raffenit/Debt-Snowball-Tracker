@@ -1,10 +1,18 @@
+import { appState } from './state.js';
+import { addMonthsToKey, currentMonthKey, formatMonthLabel, generateRecurringIncomeForMonth, isCostDueInMonth, isCostDueThisMonth } from '../core/date-utils.js';
+import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
+import { getStrategyOrder } from '../core/simulation.js';
+import { getBudgetAmount } from './render-budgets.js';
+import { renderPaydownChart, renderTimelineChart } from './render-charts.js';
+import { startCountdown, stopCountdown } from './render-support.js';
+
 // ─── Core Simulation ─────────────────────────────────────────────────────────
 // Date-aware: income arrives on its specific day-of-month, payments are only
 // made after sufficient cash has arrived. Returns a rich result object used
 // for both the chart and the debt cards.
 function runSimulation(strat) {
-    const totalIncome         = incomeEntries.reduce((s,e) => s + e.amount, 0);
-    const activeCosts          = recurringCosts.filter(c => isCostDueThisMonth(c));
+    const totalIncome         = appState.incomeEntries.reduce((s,e) => s + e.amount, 0);
+    const activeCosts          = appState.recurringCosts.filter(c => isCostDueThisMonth(c));
     // Timeline projection uses recurring costs only; one-time costs are separate.
     const totalRecurringDirect = activeCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
     const totalRecurringCard   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
@@ -13,21 +21,21 @@ function runSimulation(strat) {
     // card-charged costs are already folded into the card's minimum payment.
     const effectiveBudget = totalIncome - totalRecurringDirect;
 
-    if (debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
+    if (appState.debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
         return { valid: false, totalIncome, totalRecurring, effectiveBudget };
     }
 
-    const totalMinPayments = debts.reduce((s,d) => s + d.minPayment, 0);
+    const totalMinPayments = appState.debts.reduce((s,d) => s + d.minPayment, 0);
     if (effectiveBudget < totalMinPayments) {
         return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
     }
 
     // Build income day schedule (sorted)
-    const incomeDays = [...incomeEntries
+    const incomeDays = [...appState.incomeEntries
         .map(e => ({ day: parseInt(e.date.split('-')[2]), amount: e.amount }))
         .sort((a,b) => a.day - b.day)];
 
-    let simDebts = debts.map(d => ({ ...d, interestPaid: 0 }));
+    let simDebts = appState.debts.map(d => ({ ...d, interestPaid: 0 }));
     const MAX_MONTHS = 1200;
     let monthsElapsed     = 0;
     let totalInterestPaid = 0;
@@ -38,7 +46,7 @@ function runSimulation(strat) {
     simDebts.forEach(d => { perDebtMonthly[d.id] = [d.balance]; });
 
     // Get day 1 checkpoint amount for initial cash
-    const day1Checkpoint = checkpoints.find(cp => cp.day === 1);
+    const day1Checkpoint = appState.checkpoints.find(cp => cp.day === 1);
     const day1Balance = day1Checkpoint ? day1Checkpoint.amount : 0;
 
     while (simDebts.some(d => d.balance > 0) && monthsElapsed < MAX_MONTHS) {
@@ -136,26 +144,26 @@ function runSimulation(strat) {
 
 // ─── Visualization ───────────────────────────────────────────────────────────
 function renderVisualization(simResults) {
-    const statTotalDebt     = _root.getElementById('stat-total-debt');
-    const statTotalInterest = _root.getElementById('stat-total-interest');
-    const statSavingsBox    = _root.getElementById('stat-savings-box');
-    const statSavings       = _root.getElementById('stat-savings');
-    const statSavingsLabel  = _root.getElementById('stat-savings-label');
-    const stratDesc         = _root.getElementById('strategy-desc');
-    const timelineChart     = _root.getElementById('timeline-chart');
-    const countdownBox      = _root.getElementById('stat-countdown-box');
-    const payoffBoxAlt      = _root.getElementById('stat-payoff-box');
-    const windfallBar       = _root.getElementById('windfall-bar');
+    const statTotalDebt     = appState._root.getElementById('stat-total-debt');
+    const statTotalInterest = appState._root.getElementById('stat-total-interest');
+    const statSavingsBox    = appState._root.getElementById('stat-savings-box');
+    const statSavings       = appState._root.getElementById('stat-savings');
+    const statSavingsLabel  = appState._root.getElementById('stat-savings-label');
+    const stratDesc         = appState._root.getElementById('strategy-desc');
+    const timelineChart     = appState._root.getElementById('timeline-chart');
+    const countdownBox      = appState._root.getElementById('stat-countdown-box');
+    const payoffBoxAlt      = appState._root.getElementById('stat-payoff-box');
+    const windfallBar       = appState._root.getElementById('windfall-bar');
 
     // Get archive data if in archive view
-    const isArchiveViewTimeline = viewingArchiveIndex !== null && !!monthlyArchives[viewingArchiveIndex];
-    const archiveDataForDebt = isArchiveViewTimeline ? monthlyArchives[viewingArchiveIndex] : null;
-    const debtsForCalc = archiveDataForDebt ? (archiveDataForDebt.debts || debts) : debts;
+    const isArchiveViewTimeline = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
+    const archiveDataForDebt = isArchiveViewTimeline ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
+    const debtsForCalc = archiveDataForDebt ? (archiveDataForDebt.debts || appState.debts) : appState.debts;
     
     const initialTotalDebt = debtsForCalc.reduce((s,d) => s + d.balance, 0);
     statTotalDebt.textContent = formatMoney(initialTotalDebt);
 
-    stratDesc.textContent = strategy === 'snowball'
+    stratDesc.textContent = appState.strategy === 'snowball'
         ? 'Snowball: paying the smallest balance first. Quick wins build momentum and keep you motivated.'
         : 'Avalanche: paying the highest interest rate first. Mathematically optimal — minimises total interest paid.';
 
@@ -163,7 +171,7 @@ function renderVisualization(simResults) {
     if (isArchiveViewTimeline) {
         countdownBox.style.display    = 'none';
         payoffBoxAlt.style.display    = 'block';
-        _root.getElementById('stat-payoff-date-alt').textContent = 'Historical Data';
+        appState._root.getElementById('stat-payoff-date-alt').textContent = 'Historical Data';
         statTotalInterest.textContent = '-';
         statSavingsBox.style.display  = 'none';
         windfallBar.style.display     = 'none';
@@ -189,10 +197,10 @@ function renderVisualization(simResults) {
         return;
     }
 
-    if (debts.length === 0) {
+    if (appState.debts.length === 0) {
         countdownBox.style.display    = 'none';
         payoffBoxAlt.style.display    = 'block';
-        _root.getElementById('stat-payoff-date-alt').textContent = '-';
+        appState._root.getElementById('stat-payoff-date-alt').textContent = '-';
         statTotalInterest.textContent = '$0.00';
         statSavingsBox.style.display  = 'none';
         windfallBar.style.display     = 'none';
@@ -214,7 +222,7 @@ function renderVisualization(simResults) {
         const { totalIncome, totalRecurring, effectiveBudget, totalMinPayments } = simResults;
         countdownBox.style.display    = 'none';
         payoffBoxAlt.style.display    = 'block';
-        _root.getElementById('stat-payoff-date-alt').textContent = 'Budget Too Low!';
+        appState._root.getElementById('stat-payoff-date-alt').textContent = 'Budget Too Low!';
         statTotalInterest.textContent = 'N/A';
         statSavingsBox.style.display  = 'none';
         windfallBar.style.display     = 'none';
@@ -232,7 +240,7 @@ function renderVisualization(simResults) {
             message = 'You need to add income entries before we can calculate your payoff timeline. Tell us about your paychecks, deposits, or any other monthly income.';
             primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click(); setTimeout(() => document.getElementById('add-income-btn').click(), 100)">➕ Add Income</button>`;
         } else if ((effectiveBudget || 0) <= 0) {
-            const _active              = recurringCosts.filter(c => isCostDueThisMonth(c));
+            const _active              = appState.recurringCosts.filter(c => isCostDueThisMonth(c));
             const totalRecurringDirect = _active.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
             const totalRecurringCard   = _active.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
             icon = '📉';
@@ -265,7 +273,7 @@ function renderVisualization(simResults) {
     if (simResults.monthsElapsed >= 1200) {
         countdownBox.style.display    = 'none';
         payoffBoxAlt.style.display    = 'block';
-        _root.getElementById('stat-payoff-date-alt').textContent = '> 100 Years';
+        appState._root.getElementById('stat-payoff-date-alt').textContent = '> 100 Years';
         statTotalInterest.textContent = 'Too High';
         statSavingsBox.style.display  = 'none';
         windfallBar.style.display     = 'none';
@@ -285,19 +293,19 @@ function renderVisualization(simResults) {
 
     const today      = new Date();
     const payoffDate = new Date(today.getFullYear(), today.getMonth() + simResults.monthsElapsed, 1);
-    lastSimPayoffDate = payoffDate;
+    appState.lastSimPayoffDate = payoffDate;
     statTotalInterest.textContent = formatMoney(simResults.totalInterestPaid);
 
     // Countdown box
     countdownBox.style.display = 'block';
     payoffBoxAlt.style.display = 'none';
     windfallBar.style.display  = 'flex';
-    _root.getElementById('stat-payoff-date').textContent =
+    appState._root.getElementById('stat-payoff-date').textContent =
         payoffDate.toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' });
     startCountdown(payoffDate);
 
-    // Compare against the other strategy
-    const otherStrat  = strategy === 'snowball' ? 'avalanche' : 'snowball';
+    // Compare against the other appState.strategy
+    const otherStrat  = appState.strategy === 'snowball' ? 'avalanche' : 'snowball';
     const otherLabel  = otherStrat.charAt(0).toUpperCase() + otherStrat.slice(1);
     const otherResult = runSimulation(otherStrat);
     if (otherResult.valid) {
@@ -323,32 +331,32 @@ function renderVisualization(simResults) {
 }
 // ─── Payment Plan ─────────────────────────────────────────────────────────────
 function renderPaymentPlan() {
-    const section = _root.getElementById('payment-plan-section');
-    const list    = _root.getElementById('payment-plan-list');
+    const section = appState._root.getElementById('payment-plan-section');
+    const list    = appState._root.getElementById('payment-plan-list');
 
     // ── Archive-view wiring ────────────────────────────────────────────────────
-    const isArchiveView = viewingArchiveIndex !== null && !!monthlyArchives[viewingArchiveIndex];
-    const archiveData   = isArchiveView ? monthlyArchives[viewingArchiveIndex] : null;
-    const _income       = archiveData ? (archiveData.incomeEntries  || []) : incomeEntries;
-    const _costs        = archiveData ? (archiveData.recurringCosts || []) : recurringCosts;
-    const _oneTimeCosts = archiveData ? (archiveData.oneTimeCosts   || []) : oneTimeCosts;
-    const _checkpoints  = archiveData ? (archiveData.checkpoints    || []) : checkpoints;
-    const _debts        = archiveData ? (archiveData.debts           || debts) : debts;
-    const _startBal     = archiveData ? (archiveData.startingBalance || 0)  : startingBalance;
-    const _paidStatus   = archiveData ? (archiveData.paidStatus      || {}) : paidStatus;
-    const _monthKey     = archiveData ? archiveData.month : (workingMonthKey || currentMonthKey());
+    const isArchiveView = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
+    const archiveData   = isArchiveView ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
+    const _income       = archiveData ? (archiveData.incomeEntries  || []) : appState.incomeEntries;
+    const _costs        = archiveData ? (archiveData.recurringCosts || []) : appState.recurringCosts;
+    const _oneTimeCosts = archiveData ? (archiveData.oneTimeCosts   || []) : appState.oneTimeCosts;
+    const _checkpoints  = archiveData ? (archiveData.checkpoints    || []) : appState.checkpoints;
+    const _debts        = archiveData ? (archiveData.debts           || appState.debts) : appState.debts;
+    const _startBal     = archiveData ? (archiveData.startingBalance || 0)  : appState.startingBalance;
+    const _paidStatus   = archiveData ? (archiveData.paidStatus      || {}) : appState.paidStatus;
+    const _monthKey     = archiveData ? archiveData.month : (appState.workingMonthKey || currentMonthKey());
 
     // ── Month title & navigation ───────────────────────────────────────────────
-    const monthTitleEl = _root.getElementById('global-month-title');
-    const prevBtn      = _root.getElementById('plan-prev-month-btn');
-    const nextBtn      = _root.getElementById('plan-next-month-btn');
+    const monthTitleEl = appState._root.getElementById('global-month-title');
+    const prevBtn      = appState._root.getElementById('plan-prev-month-btn');
+    const nextBtn      = appState._root.getElementById('plan-next-month-btn');
 
     const monthDisplay = formatMonthLabel(_monthKey);
     if (monthTitleEl) monthTitleEl.textContent = monthDisplay;
 
     if (prevBtn) {
-        const prevIdx = isArchiveView ? viewingArchiveIndex + 1 : 0;
-        if (prevIdx < monthlyArchives.length) {
+        const prevIdx = isArchiveView ? appState.viewingArchiveIndex + 1 : 0;
+        if (prevIdx < appState.monthlyArchives.length) {
             prevBtn.style.visibility = 'visible';
             prevBtn.dataset.archiveIdx = prevIdx;
         } else {
@@ -371,7 +379,7 @@ function renderPaymentPlan() {
     });
 
     _checkpoints.forEach(cp => {
-        // Sortkey +0.5 ensures checkpoints happen AFTER standard income on that day, but BEFORE bills are paid.
+        // Sortkey +0.5 ensures appState.checkpoints happen AFTER standard income on that day, but BEFORE bills are paid.
         events.push({ type: 'checkpoint', id: cp.id, name: 'Bank Balance Sync', day: cp.day, amount: cp.amount, sortKey: cp.day * 1000 + 0.5 });
     });
 
@@ -405,13 +413,13 @@ function renderPaymentPlan() {
         });
     });
 
-    const sortedDebts   = getStrategyOrder(_debts.filter(d => d.balance > 0), strategy);
-    const _overrides    = isArchiveView ? {} : minPayOverrides;
+    const sortedDebts   = getStrategyOrder(_debts.filter(d => d.balance > 0), appState.strategy);
+    const _overrides    = isArchiveView ? {} : appState.minPayOverrides;
     const totalMinPay   = sortedDebts.reduce((s,d) => s + (_overrides[d.id] ?? d.minPayment), 0);
     const totalInc      = _income.reduce((s,e) => s + e.amount, 0);
     const totalRec      = [
         ..._costs.filter(c => isCostDueInMonth(c, _monthKey)),
-        ..._oneTimeCosts,
+        ..._appState.oneTimeCosts,
     ].reduce((s,c) => s + c.amount, 0);
     const extra         = Math.max(0, totalInc - totalRec - totalMinPay);
     const targetId      = sortedDebts[0]?.id;
@@ -527,9 +535,9 @@ function renderPaymentPlan() {
     });
 
     // Update the visual dashboard boxes
-    const summaryNext   = _root.getElementById('runway-next-paycheck');
-    const summaryMin    = _root.getElementById('runway-min-project');
-    const summaryStatus = _root.getElementById('runway-status');
+    const summaryNext   = appState._root.getElementById('runway-next-paycheck');
+    const summaryMin    = appState._root.getElementById('runway-min-project');
+    const summaryStatus = appState._root.getElementById('runway-status');
 
     if (summaryNext)   summaryNext.textContent   = nextIncome ? `${nextIncome.label} (${nextIncome.date.toLocaleDateString(undefined,{month:'short',day:'numeric'})})` : 'None';
     if (summaryMin)    summaryMin.textContent    = formatMoney(minProjected);
@@ -556,7 +564,7 @@ function renderPaymentPlan() {
     const totalExpensesVal = totalDirectCosts + totalDebtPayments;
 
     // Next month start = Day 1 balance + all income - all cash expenses
-    // If there are checkpoints, use the last checkpoint's balance as the base
+    // If there are appState.checkpoints, use the last checkpoint's balance as the base
     const lastCheckpoint = _checkpoints.length > 0
         ? [..._checkpoints].sort((a, b) => b.day - a.day)[0]
         : null;
@@ -581,11 +589,11 @@ function renderPaymentPlan() {
     const bufferAmount = finalBalance;
 
     // Populate Month Overview
-    const ovStart = _root.getElementById('month-overview-start');
-    const ovIncome = _root.getElementById('month-overview-income');
-    const ovExpenses = _root.getElementById('month-overview-expenses');
-    const ovNextStart = _root.getElementById('month-overview-next-start');
-    const ovBuffer = _root.getElementById('month-overview-buffer');
+    const ovStart = appState._root.getElementById('month-overview-start');
+    const ovIncome = appState._root.getElementById('month-overview-income');
+    const ovExpenses = appState._root.getElementById('month-overview-expenses');
+    const ovNextStart = appState._root.getElementById('month-overview-next-start');
+    const ovBuffer = appState._root.getElementById('month-overview-buffer');
 
     // Get day 1 checkpoint amount (or 0 if none)
     const day1Cp = _checkpoints.find(cp => cp.day === 1);
@@ -610,14 +618,14 @@ function renderPaymentPlan() {
     }
 
     // --- Spending Budgets Summary ---
-    const ovBudgetsContainer = _root.getElementById('month-overview-budgets');
-    const ovBudgetsGrid = _root.getElementById('month-overview-budgets-grid');
+    const ovBudgetsContainer = appState._root.getElementById('month-overview-budgets');
+    const ovBudgetsGrid = appState._root.getElementById('month-overview-budgets-grid');
 
-    if (ovBudgetsContainer && ovBudgetsGrid && spendingBudgets.length > 0) {
+    if (ovBudgetsContainer && ovBudgetsGrid && appState.spendingBudgets.length > 0) {
         ovBudgetsContainer.style.display = 'block';
 
         // Calculate budget status for each
-        const budgetSummaries = spendingBudgets.map(budget => {
+        const budgetSummaries = appState.spendingBudgets.map(budget => {
             const budgeted = getBudgetAmount(budget);
             const spent = (budget.expenses || []).reduce((s, e) => s + e.amount, 0);
             const remaining = budgeted - spent;
@@ -719,7 +727,7 @@ function renderPaymentPlan() {
             icon        = '🧾';
             const directBadge = '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🏦 Direct</span>';
             const targetBadge = item.isSnowballTarget
-                ? `<span class="snowball-badge">${strategy==='snowball'?'❄️':'🌊'} ${strategy==='snowball'?'Snowball':'Avalanche'} Target</span>`
+                ? `<span class="snowball-badge">${appState.strategy==='snowball'?'❄️':'🌊'} ${appState.strategy==='snowball'?'Snowball':'Avalanche'} Target</span>`
                 : '';
 
             typeBadge = directBadge + targetBadge;
@@ -835,9 +843,9 @@ function renderPaymentPlan() {
         list.appendChild(marker);
     }
 
-    const totalIncEl  = _root.getElementById('payment-plan-total-income');
-    const totalExpEl  = _root.getElementById('payment-plan-total-expenses');
-    const nextMonthEl = _root.getElementById('payment-plan-next-month');
+    const totalIncEl  = appState._root.getElementById('payment-plan-total-income');
+    const totalExpEl  = appState._root.getElementById('payment-plan-total-expenses');
+    const nextMonthEl = appState._root.getElementById('payment-plan-next-month');
 
     if (totalIncEl) totalIncEl.textContent = formatMoney(totalInc);
     if (totalExpEl) totalExpEl.textContent = formatMoney(totalExpenses);
@@ -847,3 +855,5 @@ function renderPaymentPlan() {
     }
     return isArchiveView ? null : schedule;
 }
+
+export { renderPaymentPlan, renderVisualization, runSimulation };

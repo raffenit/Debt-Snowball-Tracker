@@ -1,8 +1,21 @@
+import { appState } from './state.js';
+import { currentMonthKey } from '../core/date-utils.js';
+import { advanceToNextMonth } from './advance.js';
+import { closeArchiveModal, openArchiveModal, updateCostModalIntervalVisibility } from './modals.js';
+import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSavedToast, togglePaid, updateIncomeScheduleHint } from './render-modals.js';
+import { closeCheckpointModal, openCheckpointModal, renderCheckpointsList, saveCheckpoint } from './render-checkpoints.js';
+import { closeBudgetModal, closeExpenseModal, deleteBudget, deleteExpense, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
+import { renderRecurringCostsList } from './render-lists.js';
+import { exportData, importData } from './render-export.js';
+import { saveData } from './storage.js';
+import { renderPaymentPlan } from './render-payment.js';
+import { autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, openWindfallModal, updateAutoMinHint } from './render-support.js';
+
 // ─── Event Listeners ─────────────────────────────────────────────────────────
 function setupEventListeners() {
 
     // ── Global ripple effect on all .btn clicks ───────────────────────────────
-    _root.addEventListener('click', e => {
+    appState._root.addEventListener('click', e => {
         const btn = e.target.closest('.btn');
         if (!btn || btn.disabled) return;
         const ripple = document.createElement('span');
@@ -19,44 +32,44 @@ function setupEventListeners() {
         ripple.addEventListener('animationend', () => ripple.remove());
     }, true);
 
-    addDebtBtn.addEventListener('click',   () => openDebtModal());
-    addCostBtn.addEventListener('click',   () => openCostModal());
-    addIncomeBtn.addEventListener('click', () => openIncomeModal());
-    _root.getElementById('advance-month-btn').addEventListener('click', advanceToNextMonth);
-    _root.getElementById('add-budget-btn').addEventListener('click', () => openBudgetModal());
+    appState.addDebtBtn.addEventListener('click',   () => openDebtModal());
+    appState.addCostBtn.addEventListener('click',   () => openCostModal());
+    appState.addIncomeBtn.addEventListener('click', () => openIncomeModal());
+    appState._root.getElementById('advance-month-btn').addEventListener('click', advanceToNextMonth);
+    appState._root.getElementById('add-budget-btn').addEventListener('click', () => openBudgetModal());
 
     // Delegated toggle for collapsible cost sections (utility / subscription)
-    costsListContainer.addEventListener('click', e => {
+    appState.costsListContainer.addEventListener('click', e => {
         const toggle = e.target.closest('[data-toggle-section]');
         if (!toggle) return;
         const key = toggle.dataset.toggleSection;
-        if (expandedCostSections.has(key)) expandedCostSections.delete(key);
-        else expandedCostSections.add(key);
+        if (appState.expandedCostSections.has(key)) appState.expandedCostSections.delete(key);
+        else appState.expandedCostSections.add(key);
         renderRecurringCostsList();
     });
 
-    _root.querySelectorAll('.close-budget-modal').forEach(b  => b.addEventListener('click', closeBudgetModal));
-    _root.querySelectorAll('.close-expense-modal').forEach(b => b.addEventListener('click', closeExpenseModal));
+    appState._root.querySelectorAll('.close-budget-modal').forEach(b  => b.addEventListener('click', closeBudgetModal));
+    appState._root.querySelectorAll('.close-expense-modal').forEach(b => b.addEventListener('click', closeExpenseModal));
 
-    budgetForm.addEventListener('submit',  e => { e.preventDefault(); saveBudget(); });
-    expenseForm.addEventListener('submit', e => { e.preventDefault(); saveExpense(); });
+    appState.budgetForm.addEventListener('submit',  e => { e.preventDefault(); saveBudget(); });
+    appState.expenseForm.addEventListener('submit', e => { e.preventDefault(); saveExpense(); });
 
-    _root.getElementById('budget-exception-toggle').addEventListener('change', () => {
-        const show = _root.getElementById('budget-exception-toggle').checked;
-        _root.getElementById('budget-exception-amount-group').style.display = show ? '' : 'none';
+    appState._root.getElementById('budget-exception-toggle').addEventListener('change', () => {
+        const show = appState._root.getElementById('budget-exception-toggle').checked;
+        appState._root.getElementById('budget-exception-amount-group').style.display = show ? '' : 'none';
     });
 
     // Delegated click handler for all budget card interactions
-    _root.getElementById('budgets-list').addEventListener('click', e => {
+    appState._root.getElementById('budgets-list').addEventListener('click', e => {
         const toggle = e.target.closest('[data-toggle-budget]');
         if (toggle) {
             const bid = toggle.dataset.toggleBudget;
-            if (expandedBudgets.has(bid)) {
-                expandedBudgets.delete(bid);
+            if (appState.expandedBudgets.has(bid)) {
+                appState.expandedBudgets.delete(bid);
                 // Close inline form too when collapsing
-                if (inlineExpenseBudget === bid) inlineExpenseBudget = null;
+                if (appState.inlineExpenseBudget === bid) appState.inlineExpenseBudget = null;
             } else {
-                expandedBudgets.add(bid);
+                appState.expandedBudgets.add(bid);
             }
             renderSpendingBudgets();
             return;
@@ -66,8 +79,8 @@ function setupEventListeners() {
         const inlineToggle = e.target.closest('.btn-toggle-inline-expense');
         if (inlineToggle) {
             const bid = inlineToggle.dataset.budgetId;
-            inlineExpenseBudget = (inlineExpenseBudget === bid) ? null : bid;
-            expandedBudgets.add(bid); // Ensure card is expanded
+            appState.inlineExpenseBudget = (appState.inlineExpenseBudget === bid) ? null : bid;
+            appState.expandedBudgets.add(bid); // Ensure card is expanded
             renderSpendingBudgets();
             return;
         }
@@ -83,12 +96,12 @@ function setupEventListeners() {
             const date   = form.querySelector('.inline-date').value;
             if (!desc)              { showErrorToast('Please enter a description.'); return; }
             if (isNaN(amount) || amount < 0) { showErrorToast('Please enter a valid amount.'); return; }
-            const budget = spendingBudgets.find(b => b.id === bid);
+            const budget = appState.spendingBudgets.find(b => b.id === bid);
             if (!budget) return;
             if (!budget.expenses) budget.expenses = [];
             budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date });
-            inlineExpenseBudget = null;
-            expandedBudgets.add(bid);
+            appState.inlineExpenseBudget = null;
+            appState.expandedBudgets.add(bid);
             saveData().catch(err => console.error('Debt Snowball: save failed —', err));
             renderSpendingBudgets();
             showSavedToast('Expense added ✓');
@@ -98,7 +111,7 @@ function setupEventListeners() {
         // Inline cancel button
         const inlineCancel = e.target.closest('.btn-inline-cancel');
         if (inlineCancel) {
-            inlineExpenseBudget = null;
+            appState.inlineExpenseBudget = null;
             renderSpendingBudgets();
             return;
         }
@@ -131,7 +144,7 @@ function setupEventListeners() {
     });
 
     // Inline expense form — keyboard handling
-    _root.getElementById('budgets-list').addEventListener('keydown', e => {
+    appState._root.getElementById('budgets-list').addEventListener('keydown', e => {
         const form = e.target.closest('.inline-expense-form');
         if (!form) return;
         if (e.key === 'Enter') {
@@ -144,23 +157,23 @@ function setupEventListeners() {
         }
     });
 
-    _root.querySelectorAll('.close-debt-modal').forEach(b       => b.addEventListener('click', closeDebtModal));
-    _root.querySelectorAll('.close-cost-modal').forEach(b       => b.addEventListener('click', closeCostModal));
-    _root.querySelectorAll('.close-income-modal').forEach(b     => b.addEventListener('click', closeIncomeModal));
-    _root.querySelectorAll('.close-checkpoint-modal').forEach(b  => b.addEventListener('click', closeCheckpointModal));
+    appState._root.querySelectorAll('.close-debt-modal').forEach(b       => b.addEventListener('click', closeDebtModal));
+    appState._root.querySelectorAll('.close-cost-modal').forEach(b       => b.addEventListener('click', closeCostModal));
+    appState._root.querySelectorAll('.close-income-modal').forEach(b     => b.addEventListener('click', closeIncomeModal));
+    appState._root.querySelectorAll('.close-checkpoint-modal').forEach(b  => b.addEventListener('click', closeCheckpointModal));
 
-    debtForm.addEventListener('submit',       e => { e.preventDefault(); saveDebt(); });
-    checkpointForm.addEventListener('submit', e => { e.preventDefault(); saveCheckpoint(); });
-    costForm.addEventListener('submit',       e => { e.preventDefault(); saveCost(); });
-    incomeForm.addEventListener('submit',     e => { e.preventDefault(); saveIncome(); });
+    appState.debtForm.addEventListener('submit',       e => { e.preventDefault(); saveDebt(); });
+    appState.checkpointForm.addEventListener('submit', e => { e.preventDefault(); saveCheckpoint(); });
+    appState.costForm.addEventListener('submit',       e => { e.preventDefault(); saveCost(); });
+    appState.incomeForm.addEventListener('submit',     e => { e.preventDefault(); saveIncome(); });
 
-    exportBtn.addEventListener('click', exportData);
-    importFileInput.addEventListener('change', importData);
+    appState.exportBtn.addEventListener('click', exportData);
+    appState.importFileInput.addEventListener('change', importData);
 
     // Add new checkpoint inline form
-    _root.getElementById('add-checkpoint-btn').addEventListener('click', () => {
-        const dayInput = _root.getElementById('new-checkpoint-day');
-        const amountInput = _root.getElementById('new-checkpoint-amount');
+    appState._root.getElementById('add-checkpoint-btn').addEventListener('click', () => {
+        const dayInput = appState._root.getElementById('new-checkpoint-day');
+        const amountInput = appState._root.getElementById('new-checkpoint-amount');
         const day = parseInt(dayInput.value);
         const amount = parseFloat(amountInput.value);
 
@@ -170,7 +183,7 @@ function setupEventListeners() {
         }
 
         // Check for duplicate day
-        if (checkpoints.some(cp => cp.day === day)) {
+        if (appState.checkpoints.some(cp => cp.day === day)) {
             showErrorToast(`A checkpoint for day ${day} already exists`);
             return;
         }
@@ -180,8 +193,8 @@ function setupEventListeners() {
             day,
             amount
         };
-        checkpoints.push(newCheckpoint);
-        checkpoints.sort((a, b) => a.day - b.day);
+        appState.checkpoints.push(newCheckpoint);
+        appState.checkpoints.sort((a, b) => a.day - b.day);
 
         saveData().then(() => {
             renderCheckpointsList();
@@ -192,11 +205,11 @@ function setupEventListeners() {
     });
 
     // Delete checkpoint handler (delegated)
-    _root.getElementById('checkpoints-list').addEventListener('click', (e) => {
+    appState._root.getElementById('checkpoints-list').addEventListener('click', (e) => {
         const deleteBtn = e.target.closest('.delete-checkpoint-btn');
         if (deleteBtn) {
             const id = deleteBtn.dataset.id;
-            checkpoints = checkpoints.filter(c => c.id !== id);
+            appState.checkpoints = appState.checkpoints.filter(c => c.id !== id);
             saveData().then(() => {
                 renderCheckpointsList();
                 renderUI();
@@ -206,71 +219,71 @@ function setupEventListeners() {
     });
 
     // Payment plan month navigation
-    _root.getElementById('plan-prev-month-btn').addEventListener('click', () => {
-        const btn = _root.getElementById('plan-prev-month-btn');
+    appState._root.getElementById('plan-prev-month-btn').addEventListener('click', () => {
+        const btn = appState._root.getElementById('plan-prev-month-btn');
         const idx = parseInt(btn.dataset.archiveIdx ?? '0');
-        if (idx < monthlyArchives.length) { viewingArchiveIndex = idx; renderUI(); }
+        if (idx < appState.monthlyArchives.length) { appState.viewingArchiveIndex = idx; renderUI(); }
     });
-    _root.getElementById('plan-next-month-btn').addEventListener('click', () => {
-        viewingArchiveIndex = null;
+    appState._root.getElementById('plan-next-month-btn').addEventListener('click', () => {
+        appState.viewingArchiveIndex = null;
         renderUI();
     });
 
     // Income schedule type hint
-    _root.getElementById('income-schedule').addEventListener('change', updateIncomeScheduleHint);
+    appState._root.getElementById('income-schedule').addEventListener('change', updateIncomeScheduleHint);
 
     // Archive / History
-    _root.getElementById('history-btn').addEventListener('click', openArchiveModal);
-    _root.getElementById('close-archive-modal').addEventListener('click', closeArchiveModal);
-    _root.getElementById('archive-modal').addEventListener('click', e => {
-        if (e.target === _root.getElementById('archive-modal')) closeArchiveModal();
+    appState._root.getElementById('history-btn').addEventListener('click', openArchiveModal);
+    appState._root.getElementById('close-archive-modal').addEventListener('click', closeArchiveModal);
+    appState._root.getElementById('archive-modal').addEventListener('click', e => {
+        if (e.target === appState._root.getElementById('archive-modal')) closeArchiveModal();
     });
 
     // Windfall planner
-    _root.getElementById('windfall-btn').addEventListener('click', openWindfallModal);
-    _root.getElementById('close-windfall-modal').addEventListener('click', closeWindfallModal);
-    _root.getElementById('windfall-calc-btn').addEventListener('click', calcWindfall);
-    windfallModal.addEventListener('click', e => { if (e.target === windfallModal) closeWindfallModal(); });
+    appState._root.getElementById('windfall-btn').addEventListener('click', openWindfallModal);
+    appState._root.getElementById('close-windfall-modal').addEventListener('click', closeWindfallModal);
+    appState._root.getElementById('windfall-calc-btn').addEventListener('click', calcWindfall);
+    appState.windfallModal.addEventListener('click', e => { if (e.target === appState.windfallModal) closeWindfallModal(); });
 
     // Check-in modal
-    _root.getElementById('checkin-later-btn').addEventListener('click', () => {
+    appState._root.getElementById('checkin-later-btn').addEventListener('click', () => {
         localStorage.setItem('snowball_checkin_dismissed', currentMonthKey());
-        checkinModal.classList.remove('active');
-        setTimeout(() => { checkinModal.style.display = 'none'; }, 300);
+        appState.checkinModal.classList.remove('active');
+        setTimeout(() => { appState.checkinModal.style.display = 'none'; }, 300);
     });
-    _root.getElementById('checkin-done-btn').addEventListener('click', () => {
+    appState._root.getElementById('checkin-done-btn').addEventListener('click', () => {
         localStorage.setItem('snowball_checkin_dismissed', currentMonthKey());
-        checkinModal.classList.remove('active');
-        setTimeout(() => { checkinModal.style.display = 'none'; }, 300);
+        appState.checkinModal.classList.remove('active');
+        setTimeout(() => { appState.checkinModal.style.display = 'none'; }, 300);
     });
 
     // Cost modal: show/hide interval fields based on category and interval select
-    _root.getElementById('cost-category').addEventListener('change', updateCostModalIntervalVisibility);
-    _root.getElementById('cost-interval').addEventListener('change', updateCostModalIntervalVisibility);
+    appState._root.getElementById('cost-category').addEventListener('change', updateCostModalIntervalVisibility);
+    appState._root.getElementById('cost-interval').addEventListener('change', updateCostModalIntervalVisibility);
 
     // Auto min-payment calc
-    _root.getElementById('auto-min-btn').addEventListener('click', autoCalcMinPaymentCC);
-    _root.getElementById('debt-balance').addEventListener('input', updateAutoMinHint);
-    _root.getElementById('debt-rate').addEventListener('input', updateAutoMinHint);
+    appState._root.getElementById('auto-min-btn').addEventListener('click', autoCalcMinPaymentCC);
+    appState._root.getElementById('debt-balance').addEventListener('input', updateAutoMinHint);
+    appState._root.getElementById('debt-rate').addEventListener('input', updateAutoMinHint);
 
     // Mortgage toggle
-    _root.getElementById('mortgage-toggle-btn').addEventListener('click', () => {
-        showMortgage = !showMortgage;
+    appState._root.getElementById('mortgage-toggle-btn').addEventListener('click', () => {
+        appState.showMortgage = !appState.showMortgage;
         saveData().then(() => renderUI()).catch(err => console.error("Debt Snowball: save failed —", err));
     });
 
     // Strategy toggle
-    _root.querySelectorAll('.strategy-btn').forEach(btn => {
+    appState._root.querySelectorAll('.strategy-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            strategy = btn.dataset.strategy;
-            _root.querySelectorAll('.strategy-btn').forEach(b => b.classList.remove('active'));
+            appState.strategy = btn.dataset.strategy;
+            appState._root.querySelectorAll('.strategy-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             saveData().then(() => renderUI()).catch(err => console.error("Debt Snowball: save failed —", err));
         });
     });
 
     // Payment plan "Mark as Paid" and inline "Edit" buttons
-    _root.getElementById('payment-plan-list').addEventListener('click', e => {
+    appState._root.getElementById('payment-plan-list').addEventListener('click', e => {
         const paidBtn = e.target.closest('.btn-mark-paid');
         if (paidBtn) {
             togglePaid(paidBtn.dataset.id, paidBtn.dataset.autopay === '1');
@@ -289,30 +302,30 @@ function setupEventListeners() {
         // Override min payment — toggle inline form
         const overrideBtn = e.target.closest('.btn-override-min');
         if (overrideBtn) {
-            const form = _root.getElementById(`override-form-${overrideBtn.dataset.id}`);
+            const form = appState._root.getElementById(`override-form-${overrideBtn.dataset.id}`);
             if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
             return;
         }
         const cancelBtn = e.target.closest('.btn-override-cancel');
         if (cancelBtn) {
-            const form = _root.getElementById(`override-form-${cancelBtn.dataset.id}`);
+            const form = appState._root.getElementById(`override-form-${cancelBtn.dataset.id}`);
             if (form) form.style.display = 'none';
             return;
         }
         const saveBtn = e.target.closest('.btn-override-save');
         if (saveBtn) {
             const id  = saveBtn.dataset.id;
-            const form = _root.getElementById(`override-form-${id}`);
+            const form = appState._root.getElementById(`override-form-${id}`);
             const val  = parseFloat(form?.querySelector('.override-input')?.value);
             if (isNaN(val) || val < 0) { showErrorToast('Enter a valid amount.'); return; }
-            minPayOverrides[id] = val;
+            appState.minPayOverrides[id] = val;
             saveData().catch(err => console.error('Debt Snowball: save failed —', err));
             renderPaymentPlan();
             return;
         }
         const clearBtn = e.target.closest('.btn-override-clear');
         if (clearBtn) {
-            delete minPayOverrides[clearBtn.dataset.id];
+            delete appState.minPayOverrides[clearBtn.dataset.id];
             saveData().catch(err => console.error('Debt Snowball: save failed —', err));
             renderPaymentPlan();
             return;
@@ -320,26 +333,26 @@ function setupEventListeners() {
     });
 
     // Backdrop + Escape
-    [debtModal, costModal, incomeModal, checkpointModal].forEach(modal => {
+    [appState.debtModal, appState.costModal, appState.incomeModal, appState.checkpointModal].forEach(modal => {
         modal.addEventListener('click', e => {
             if (e.target === modal) {
-                if (modal === debtModal)      closeDebtModal();
-                else if (modal === costModal) closeCostModal();
-                else if (modal === incomeModal) closeIncomeModal();
-                else if (modal === checkpointModal) closeCheckpointModal();
+                if (modal === appState.debtModal)      closeDebtModal();
+                else if (modal === appState.costModal) closeCostModal();
+                else if (modal === appState.incomeModal) closeIncomeModal();
+                else if (modal === appState.checkpointModal) closeCheckpointModal();
             }
         });
     });
 
-    _root.addEventListener('keydown', e => {
+    appState._root.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
-            if (debtModal.classList.contains('active'))    closeDebtModal();
-            else if (costModal.classList.contains('active'))   closeCostModal();
-            else if (incomeModal.classList.contains('active')) closeIncomeModal();
-            else if (checkpointModal.classList.contains('active')) closeCheckpointModal();
+            if (appState.debtModal.classList.contains('active'))    closeDebtModal();
+            else if (appState.costModal.classList.contains('active'))   closeCostModal();
+            else if (appState.incomeModal.classList.contains('active')) closeIncomeModal();
+            else if (appState.checkpointModal.classList.contains('active')) closeCheckpointModal();
         }
         if (e.key === 'Tab') {
-            const active = [debtModal, costModal, incomeModal, checkpointModal].find(m => m.classList.contains('active'));
+            const active = [appState.debtModal, appState.costModal, appState.incomeModal, appState.checkpointModal].find(m => m.classList.contains('active'));
             if (!active) return;
             const focusable = active.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1")');
             if(focusable.length > 0) {
@@ -351,9 +364,9 @@ function setupEventListeners() {
     });
 
     // Promo toggle
-    const promoToggle      = _root.getElementById('debt-promo-toggle');
-    const promoExpiryGroup = _root.getElementById('promo-expiry-group');
-    const rateInput        = _root.getElementById('debt-rate');
+    const promoToggle      = appState._root.getElementById('debt-promo-toggle');
+    const promoExpiryGroup = appState._root.getElementById('promo-expiry-group');
+    const rateInput        = appState._root.getElementById('debt-rate');
     const rateGroup        = rateInput.closest('.input-group');
 
     promoToggle.addEventListener('change', () => {
@@ -362,33 +375,23 @@ function setupEventListeners() {
             rateGroup.classList.add('input-disabled');
             rateInput.value = '0';
             rateInput.disabled = true;
-            _root.getElementById('debt-promo-expiry').required = true;
+            appState._root.getElementById('debt-promo-expiry').required = true;
             autoCalcMinPayment();
         } else {
             promoExpiryGroup.style.display = 'none';
             rateGroup.classList.remove('input-disabled');
             rateInput.value = '';
             rateInput.disabled = false;
-            _root.getElementById('debt-promo-expiry').required = false;
-            _root.getElementById('debt-promo-expiry').value = '';
+            appState._root.getElementById('debt-promo-expiry').required = false;
+            appState._root.getElementById('debt-promo-expiry').value = '';
         }
     });
 
-    _root.getElementById('debt-promo-expiry').addEventListener('change', autoCalcMinPayment);
-    _root.getElementById('debt-balance').addEventListener('input', () => {
-        if (_root.getElementById('debt-promo-toggle').checked) autoCalcMinPayment();
+    appState._root.getElementById('debt-promo-expiry').addEventListener('change', autoCalcMinPayment);
+    appState._root.getElementById('debt-balance').addEventListener('input', () => {
+        if (appState._root.getElementById('debt-promo-toggle').checked) autoCalcMinPayment();
     });
 }
 
-function autoCalcMinPayment() {
-    if (!_root.getElementById('debt-promo-toggle').checked) return;
-    const balance    = parseFloat(_root.getElementById('debt-balance').value) || 0;
-    const expiryDate = _root.getElementById('debt-promo-expiry').value;
-    if (!expiryDate || balance <= 0) return;
-    const now    = new Date();
-    const expiry = new Date(expiryDate + 'T00:00:00');
-    const diff   = (expiry.getFullYear() - now.getFullYear()) * 12 + (expiry.getMonth() - now.getMonth());
-    if (diff > 0) {
-        _root.getElementById('debt-min-payment').value = (Math.ceil((balance / diff) * 100) / 100).toFixed(2);
-    }
-}
+
+export { setupEventListeners };

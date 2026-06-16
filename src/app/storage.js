@@ -1,3 +1,8 @@
+import { appState } from './state.js';
+import { monthKeyToIndex } from '../core/date-utils.js';
+import { calculateMonthRollover } from '../core/rollover.js';
+import { renderUI } from './render-modals.js';
+import { initTabs } from './render-support.js';
 
 // ─── HA Backend Data Storage ─────────────────────────────────────────────────
 // Storage mechanism: a dedicated hidden Lovelace dashboard used purely as a
@@ -18,7 +23,7 @@ const STORE_URL_PATH = 'snowball-store';
 
 // Ensure the hidden storage dashboard exists (idempotent — safe to call every time).
 async function ensureStoreDashboard() {
-    const conn = _root._hass.connection;
+    const conn = appState._root._hass.connection;
 
     // Check if it already exists by attempting to list dashboards
     try {
@@ -50,31 +55,31 @@ async function ensureStoreDashboard() {
 // ─── 1. Load ─────────────────────────────────────────────────────────────────
 async function loadBackendData() {
     try {
-        const result = await _root._hass.connection.sendMessagePromise({
+        const result = await appState._root._hass.connection.sendMessagePromise({
             type:      'lovelace/config',
             url_path:  STORE_URL_PATH,
             force:     true,
         });
 
         if (result) {
-            debts           = result.debts          || [];
-            recurringCosts  = result.recurringCosts  || [];
-            incomeEntries   = result.incomeEntries   || [];
-            checkpoints     = result.checkpoints     || [];
-            strategy        = result.strategy        || 'snowball';
-            showMortgage    = result.showMortgage !== false;
-            startingBalance = result.startingBalance || 0;
-            monthlyArchives  = result.monthlyArchives  || [];
-            spendingBudgets  = result.spendingBudgets  || [];
-            minPayOverrides  = result.minPayOverrides  || {};
+            appState.debts           = result.debts          || [];
+            appState.recurringCosts  = result.recurringCosts  || [];
+            appState.incomeEntries   = result.incomeEntries   || [];
+            appState.checkpoints     = result.checkpoints     || [];
+            appState.strategy        = result.strategy        || 'snowball';
+            appState.showMortgage    = result.showMortgage !== false;
+            appState.startingBalance = result.startingBalance || 0;
+            appState.monthlyArchives  = result.monthlyArchives  || [];
+            appState.spendingBudgets  = result.spendingBudgets  || [];
+            appState.minPayOverrides  = result.minPayOverrides  || {};
 
             // Backward-compat: oneTimeCosts may not exist in older saved data.
             // If missing, migrate any one-time entries from recurringCosts.
             if (result.oneTimeCosts) {
-                oneTimeCosts = result.oneTimeCosts;
+                appState.oneTimeCosts = result.oneTimeCosts;
             } else {
-                oneTimeCosts = recurringCosts.filter(c => (c.category || 'other') === 'one-time');
-                recurringCosts = recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
+                appState.oneTimeCosts = appState.recurringCosts.filter(c => (c.category || 'other') === 'one-time');
+                appState.recurringCosts = appState.recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
             }
 
             const prevMonth = result.paidMonth;
@@ -82,34 +87,40 @@ async function loadBackendData() {
 
             // workingMonthKey is whichever is later: the stored month or the calendar month.
             // This means if the user advanced early, workingMonthKey stays at the advanced month.
-            workingMonthKey = (prevMonth && monthKeyToIndex(prevMonth) > monthKeyToIndex(thisMonth))
+            appState.workingMonthKey = (prevMonth && monthKeyToIndex(prevMonth) > monthKeyToIndex(thisMonth))
                 ? prevMonth
                 : thisMonth;
 
             // Only archive if the calendar has moved *past* the stored month (not when user advanced ahead).
             if (prevMonth && monthKeyToIndex(thisMonth) > monthKeyToIndex(prevMonth)) {
                 const rollover = calculateMonthRollover({
-                    debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
-                    startingBalance, paidStatus, spendingBudgets,
+                    debts:          appState.debts,
+                    recurringCosts: appState.recurringCosts,
+                    oneTimeCosts:   appState.oneTimeCosts,
+                    incomeEntries:  appState.incomeEntries,
+                    checkpoints:    appState.checkpoints,
+                    startingBalance: appState.startingBalance,
+                    paidStatus:     appState.paidStatus,
+                    spendingBudgets: appState.spendingBudgets,
                 }, prevMonth, thisMonth);
 
-                monthlyArchives.unshift(rollover.archive);
-                if (monthlyArchives.length > 24) monthlyArchives.pop();
+                appState.monthlyArchives.unshift(rollover.archive);
+                if (appState.monthlyArchives.length > 24) appState.monthlyArchives.pop();
 
-                incomeEntries   = rollover.nextState.incomeEntries;
-                checkpoints     = rollover.nextState.checkpoints;
-                recurringCosts  = rollover.nextState.recurringCosts;
-                oneTimeCosts    = rollover.nextState.oneTimeCosts;
-                paidStatus      = rollover.nextState.paidStatus;
-                minPayOverrides = rollover.nextState.minPayOverrides;
-                spendingBudgets = rollover.nextState.spendingBudgets;
+                appState.incomeEntries   = rollover.nextState.incomeEntries;
+                appState.checkpoints     = rollover.nextState.checkpoints;
+                appState.recurringCosts  = rollover.nextState.recurringCosts;
+                appState.oneTimeCosts    = rollover.nextState.oneTimeCosts;
+                appState.paidStatus      = rollover.nextState.paidStatus;
+                appState.minPayOverrides = rollover.nextState.minPayOverrides;
+                appState.spendingBudgets = rollover.nextState.spendingBudgets;
 
                 saveData().catch(err => console.error('Debt Snowball: rollover save failed —', err));
             } else if (result.paidStatus) {
                 // Covers: stored month == calendar month, OR stored month is ahead (user advanced early)
-                paidStatus = result.paidStatus;
+                appState.paidStatus = result.paidStatus;
             } else {
-                paidStatus = {};
+                appState.paidStatus = {};
             }
         }
     } catch (err) {
@@ -124,7 +135,7 @@ async function loadBackendData() {
     // Active tab is the one genuine per-browser preference
     const savedTab = localStorage.getItem('snowball_active_tab');
     if (savedTab) {
-        const savedBtn = _root.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
+        const savedBtn = appState._root.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
         if (savedBtn) savedBtn.click();
     }
 
@@ -134,22 +145,31 @@ async function loadBackendData() {
 
 // ─── 2. Save ─────────────────────────────────────────────────────────────────
 async function saveData() {
-    if (!_root._hass) return;
+    if (!appState._root._hass) return;
 
     // Active tab stays in the browser
-    const activeTabEl = _root.querySelector('.tab-btn.active');
+    const activeTabEl = appState._root.querySelector('.tab-btn.active');
     if (activeTabEl) localStorage.setItem('snowball_active_tab', activeTabEl.dataset.tab);
 
     await ensureStoreDashboard();
 
-    await _root._hass.connection.sendMessagePromise({
+    await appState._root._hass.connection.sendMessagePromise({
         type:      'lovelace/config/save',
         url_path:  STORE_URL_PATH,
         config:    {
-            debts, recurringCosts, oneTimeCosts, incomeEntries, checkpoints,
-            strategy, startingBalance, showMortgage,
-            paidStatus, paidMonth: workingMonthKey || currentMonthKey(),
-            monthlyArchives, spendingBudgets, minPayOverrides,
+            debts:          appState.debts,
+            recurringCosts: appState.recurringCosts,
+            oneTimeCosts:   appState.oneTimeCosts,
+            incomeEntries:  appState.incomeEntries,
+            checkpoints:    appState.checkpoints,
+            strategy:       appState.strategy,
+            startingBalance: appState.startingBalance,
+            showMortgage:   appState.showMortgage,
+            paidStatus:     appState.paidStatus,
+            paidMonth:      appState.workingMonthKey || currentMonthKey(),
+            monthlyArchives: appState.monthlyArchives,
+            spendingBudgets: appState.spendingBudgets,
+            minPayOverrides: appState.minPayOverrides,
         },
     });
 }
@@ -160,3 +180,5 @@ function currentMonthKey() {
 }
 
 // ─── Manual Month Advance ─────────────────────────────────────────────────────
+
+export { STORE_URL_PATH, ensureStoreDashboard, loadBackendData, saveData, currentMonthKey };

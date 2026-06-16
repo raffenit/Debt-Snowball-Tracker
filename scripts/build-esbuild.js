@@ -2,8 +2,9 @@
 /**
  * ESBuild-based bundler for debt-snowball-card.js
  *
- * Replaces the naive concatenation build with proper ES module bundling.
- * Imports shared logic from src/*.js (tests) instead of duplicating in src/app/.
+ * Bundles the ES module graph in src/app/ into a single IIFE for Home Assistant.
+ * App modules import shared logic directly from src/*.js (date-utils, pure-utils,
+ * simulation, rollover, constants) instead of duplicating implementations.
  *
  * Usage: node scripts/build-esbuild.js
  * Output: dist/debt-snowball-card.js
@@ -21,11 +22,6 @@ const OUT_FILE = path.join(ROOT, 'dist', 'debt-snowball-card.js');
 
 async function build() {
     console.log('Building debt-snowball-card.js with esbuild...');
-
-    // Regenerate the ESM entry point so new/updated src/app/*.js modules are included
-    const preparePath = path.join(ROOT, 'scripts', 'prepare-esm.js');
-    const { execSync } = await import('child_process');
-    execSync(`node "${preparePath}"`, { cwd: ROOT, stdio: 'inherit' });
 
     const result = await esbuild.build({
         entryPoints: [path.join(ROOT, 'src', 'app', 'index.js')],

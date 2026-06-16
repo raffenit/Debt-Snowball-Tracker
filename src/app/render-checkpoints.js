@@ -1,23 +1,27 @@
+import { appState } from './state.js';
+import { renderUI, showErrorToast, showSavedToast } from './render-modals.js';
+import { saveData } from './storage.js';
+
 // ─── Checkpoints ─────────────────────────────────────────────────────────────
 // Focused module for checkpoint list rendering and CRUD modal.
-// Extracted from 80-render-modals.js to keep the modals module focused on
+// Extracted from render-modals.js to keep the modals module focused on
 // debt, cost, income, budget, and expense modals.
 
 function renderCheckpointsList() {
-    const container = _root.getElementById('checkpoints-list');
+    const container = appState._root.getElementById('checkpoints-list');
     if (!container) return;
 
-    if (checkpoints.length === 0) {
+    if (appState.checkpoints.length === 0) {
         container.innerHTML = '';
         return;
     }
 
     // Sort by day
-    const sorted = [...checkpoints].sort((a, b) => a.day - b.day);
+    const sorted = [...appState.checkpoints].sort((a, b) => a.day - b.day);
 
     const formatMoneyLocal = (n) => {
-        const currency = _root._currency || 'USD';
-        const locale = _root._locale || 'en-US';
+        const currency = appState._root._currency || 'USD';
+        const locale = appState._root._locale || 'en-US';
         return new Intl.NumberFormat(locale, {
             style: 'currency',
             currency: currency,
@@ -45,49 +49,49 @@ function renderCheckpointsList() {
 }
 
 function openCheckpointModal(cpId = null) {
-    checkpointForm.reset();
-    _root.getElementById('checkpoint-id').value = '';
+    appState.checkpointForm.reset();
+    appState._root.getElementById('checkpoint-id').value = '';
 
     if (cpId) {
-        _root.getElementById('checkpoint-modal-title').textContent = 'Edit Checkpoint';
-        const cp = checkpoints.find(c => c.id === cpId);
+        appState._root.getElementById('checkpoint-modal-title').textContent = 'Edit Checkpoint';
+        const cp = appState.checkpoints.find(c => c.id === cpId);
         if (cp) {
-            _root.getElementById('checkpoint-id').value = cp.id;
-            _root.getElementById('checkpoint-day').value = cp.day;
-            _root.getElementById('checkpoint-amount').value = cp.amount.toFixed(2);
+            appState._root.getElementById('checkpoint-id').value = cp.id;
+            appState._root.getElementById('checkpoint-day').value = cp.day;
+            appState._root.getElementById('checkpoint-amount').value = cp.amount.toFixed(2);
         }
     } else {
-        _root.getElementById('checkpoint-modal-title').textContent = 'Add Checkpoint';
+        appState._root.getElementById('checkpoint-modal-title').textContent = 'Add Checkpoint';
     }
 
-    checkpointModal.style.display = 'flex';
-    setTimeout(() => checkpointModal.classList.add('active'), 10);
-    setTimeout(() => _root.getElementById('checkpoint-amount').focus(), 50);
+    appState.checkpointModal.style.display = 'flex';
+    setTimeout(() => appState.checkpointModal.classList.add('active'), 10);
+    setTimeout(() => appState._root.getElementById('checkpoint-amount').focus(), 50);
 }
 
 function closeCheckpointModal() {
-    checkpointModal.classList.remove('active');
-    setTimeout(() => { checkpointModal.style.display = 'none'; }, 300);
+    appState.checkpointModal.classList.remove('active');
+    setTimeout(() => { appState.checkpointModal.style.display = 'none'; }, 300);
 }
 
 function saveCheckpoint() {
     try {
-        const id      = _root.getElementById('checkpoint-id').value;
-        const day     = parseInt(_root.getElementById('checkpoint-day').value);
-        const amount  = parseFloat(_root.getElementById('checkpoint-amount').value);
+        const id      = appState._root.getElementById('checkpoint-id').value;
+        const day     = parseInt(appState._root.getElementById('checkpoint-day').value);
+        const amount  = parseFloat(appState._root.getElementById('checkpoint-amount').value);
 
         if (!day || day < 1 || day > 31) throw new Error('Please select a valid day (1-31).');
         if (!Number.isFinite(amount) || amount < 0) throw new Error('Please enter a valid amount.');
 
         // Check for duplicate day (if adding new or changing day)
-        const existingSameDay = checkpoints.find(cp => cp.day === day && cp.id !== id);
+        const existingSameDay = appState.checkpoints.find(cp => cp.day === day && cp.id !== id);
         if (existingSameDay) throw new Error(`A checkpoint for day ${day} already exists.`);
 
         if (id) {
             // Edit existing
-            const idx = checkpoints.findIndex(cp => cp.id === id);
+            const idx = appState.checkpoints.findIndex(cp => cp.id === id);
             if (idx !== -1) {
-                checkpoints[idx] = { id, day, amount };
+                appState.checkpoints[idx] = { id, day, amount };
             }
         } else {
             // Add new
@@ -96,10 +100,10 @@ function saveCheckpoint() {
                 day,
                 amount
             };
-            checkpoints.push(newCp);
+            appState.checkpoints.push(newCp);
         }
 
-        checkpoints.sort((a, b) => a.day - b.day);
+        appState.checkpoints.sort((a, b) => a.day - b.day);
 
         saveData().then(() => {
             renderCheckpointsList();
@@ -111,3 +115,5 @@ function saveCheckpoint() {
         showErrorToast(err.message || 'Failed to save checkpoint.');
     }
 }
+
+export { closeCheckpointModal, openCheckpointModal, renderCheckpointsList, saveCheckpoint };

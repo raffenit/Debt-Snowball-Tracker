@@ -1,9 +1,20 @@
+import { appState } from './state.js';
+import { dismissToast } from './render-modals.js';
+import { saveData } from './storage.js';
+
 // ─── Export / Import ─────────────────────────────────────────────────────────
 // Focused module for data backup/restore and notification toasts.
-// Extracted from 80-render-modals.js.
+// Extracted from render-modals.js.
 
 function exportData() {
-    const dataStr = JSON.stringify({ debts, incomeEntries, recurringCosts, oneTimeCosts, checkpoints, strategy }, null, 2);
+    const dataStr = JSON.stringify({
+        debts:          appState.debts,
+        incomeEntries:  appState.incomeEntries,
+        recurringCosts: appState.recurringCosts,
+        oneTimeCosts:   appState.oneTimeCosts,
+        checkpoints:    appState.checkpoints,
+        strategy:       appState.strategy
+    }, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
     const link    = document.createElement('a');
     link.setAttribute('href', dataUri);
@@ -14,7 +25,7 @@ function exportData() {
 function importData(e) {
     const file    = e.target.files[0];
     if (!file) return;
-    const hasData = debts.length > 0 || recurringCosts.length > 0 || incomeEntries.length > 0;
+    const hasData = appState.debts.length > 0 || appState.recurringCosts.length > 0 || appState.incomeEntries.length > 0;
 
     const doImport = () => {
         const reader = new FileReader();
@@ -27,15 +38,15 @@ function importData(e) {
                 return;
             }
             try {
-                if (data.debts)          debts          = data.debts;
-                if (data.recurringCosts) recurringCosts = data.recurringCosts;
-                if (data.oneTimeCosts)   oneTimeCosts   = data.oneTimeCosts;
-                if (data.incomeEntries)  incomeEntries  = data.incomeEntries;
-                if (data.checkpoints)    checkpoints    = data.checkpoints;
-                if (data.strategy)       strategy       = data.strategy;
+                if (data.debts)          appState.debts          = data.debts;
+                if (data.recurringCosts) appState.recurringCosts = data.recurringCosts;
+                if (data.oneTimeCosts)   appState.oneTimeCosts   = data.oneTimeCosts;
+                if (data.incomeEntries)  appState.incomeEntries  = data.incomeEntries;
+                if (data.checkpoints)    appState.checkpoints    = data.checkpoints;
+                if (data.strategy)       appState.strategy       = data.strategy;
                 if (data.monthlyBudget !== undefined && !data.incomeEntries) {
                     const now = new Date();
-                    incomeEntries = [{ id: Date.now().toString(), label: 'Monthly Budget (migrated)',
+                    appState.incomeEntries = [{ id: Date.now().toString(), label: 'Monthly Budget (migrated)',
                         date: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`,
                         amount: data.monthlyBudget }];
                 }
@@ -69,7 +80,7 @@ function showImportConfirmModal(onConfirm, onCancel) {
                 <button class="btn btn-danger"    id="import-confirm-btn">Replace Anyway</button>
             </div>
         </div>`;
-    _root.appendChild(overlay);
+    appState._root.appendChild(overlay);
     overlay.querySelector('#import-cancel-btn').addEventListener('click',       () => { overlay.remove(); onCancel(); });
     overlay.querySelector('#import-export-first-btn').addEventListener('click', () => { exportData(); overlay.remove(); onConfirm(); });
     overlay.querySelector('#import-confirm-btn').addEventListener('click',      () => { overlay.remove(); onConfirm(); });
@@ -77,13 +88,15 @@ function showImportConfirmModal(onConfirm, onCancel) {
 }
 
 function showNotificationToast(message, type = 'info') {
-    const existing = _root.getElementById('notif-toast');
+    const existing = appState._root.getElementById('notif-toast');
     if (existing) existing.remove();
     const toast     = document.createElement('div');
     toast.id        = 'notif-toast';
     toast.className = `undo-toast undo-toast-${type}`;
     toast.innerHTML = `<span class="undo-toast-msg">${message}</span>`;
-    _root.appendChild(toast);
+    appState._root.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add('undo-toast-visible'));
     setTimeout(() => dismissToast(toast), 4000);
 }
+
+export { exportData, importData, showImportConfirmModal, showNotificationToast };

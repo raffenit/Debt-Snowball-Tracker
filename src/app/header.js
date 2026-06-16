@@ -26,3 +26,5 @@ const installType = scriptSrc.includes('hacsfiles') ? 'HACS' :
                     scriptSrc.includes('community') ? 'HACS (community)' : 'Unknown';
 console.info(`📊 Debt Snowball Tracker v${PANEL_VERSION} (${PANEL_BUILD_DATE})`);
 console.info(`   Loaded from: ${installType} (${scriptSrc})`);
+
+export { PANEL_BUILD_DATE, PANEL_VERSION, currentScript, installType, scriptSrc };

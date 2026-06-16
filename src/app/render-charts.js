@@ -1,6 +1,10 @@
+import { appState } from './state.js';
+import { escHtml, formatMoney } from '../core/pure-utils.js';
+import { getStrategyOrder } from '../core/simulation.js';
+
 // ─── Chart Rendering ─────────────────────────────────────────────────────────
 // Focused module for Chart.js visualization: paydown chart and timeline.
-// Extracted from 82-render-payment.js to keep the payment module focused
+// Extracted from render-payment.js to keep the payment module focused
 // on plan logic and visualization orchestration.
 
 const DEBT_COLORS = [
@@ -15,10 +19,10 @@ const DEBT_COLORS = [
 ];
 
 function renderPaydownChart(monthlyTotals, perDebtMonthly) {
-    const canvas = _root.getElementById('paydown-chart');
+    const canvas = appState._root.getElementById('paydown-chart');
     if (!canvas) return;
 
-    if (paydownChart) { try { paydownChart.destroy(); } catch(e) {} paydownChart = null; }
+    if (appState.paydownChart) { try { appState.paydownChart.destroy(); } catch(e) {} appState.paydownChart = null; }
 
     const maxLen = monthlyTotals.length;
     if (maxLen === 0) { canvas.style.height = '0'; return; }
@@ -31,7 +35,7 @@ function renderPaydownChart(monthlyTotals, perDebtMonthly) {
     });
 
     const datasets = [];
-    const orderedDebts = getStrategyOrder(debts, strategy);
+    const orderedDebts = getStrategyOrder(appState.debts, appState.strategy);
 
     orderedDebts.forEach((debt, idx) => {
         const color  = DEBT_COLORS[idx % DEBT_COLORS.length];
@@ -62,7 +66,7 @@ function renderPaydownChart(monthlyTotals, perDebtMonthly) {
         borderDash:      [5,4],
     });
 
-    paydownChart = new Chart(canvas.getContext('2d'), {
+    appState.paydownChart = new Chart(canvas.getContext('2d'), {
         type: 'line',
         data: { labels, datasets },
         options: {
@@ -84,7 +88,7 @@ function renderPaydownChart(monthlyTotals, perDebtMonthly) {
 }
 
 function renderTimelineChart(payoffLog, totalMonths) {
-    const timelineChart = _root.getElementById('timeline-chart');
+    const timelineChart = appState._root.getElementById('timeline-chart');
     timelineChart.innerHTML = '';
     const today = new Date();
     payoffLog.sort((a,b) => a.payoffMonth - b.payoffMonth);
@@ -111,3 +115,5 @@ function renderTimelineChart(payoffLog, totalMonths) {
         setTimeout(() => { const f = item.querySelector('.progress-fill'); if(f) f.style.width=`${pct}%`; }, 50);
     });
 }
+
+export { DEBT_COLORS, renderPaydownChart, renderTimelineChart };

@@ -1,23 +1,29 @@
+import { appState } from './state.js';
+import { formatMonthLabel, intervalLabel, isCostDueThisMonth } from '../core/date-utils.js';
+import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
+import { getStrategyOrder } from '../core/simulation.js';
+import { deleteCost, deleteDebt, deleteIncome, openCostModal, openDebtModal, openIncomeModal, togglePaid } from './render-modals.js';
+
 // ─── Income List ─────────────────────────────────────────────────────────────
 function renderIncomeList() {
-    incomeListContainer.innerHTML = '';
-    const summaryEl = _root.getElementById('income-summary');
+    appState.incomeListContainer.innerHTML = '';
+    const summaryEl = appState._root.getElementById('income-summary');
 
-    if (incomeEntries.length === 0) {
-        incomeListContainer.innerHTML = `
+    if (appState.incomeEntries.length === 0) {
+        appState.incomeListContainer.innerHTML = `
             <div class="empty-state">
                 No income entries yet.<br>Add your paychecks and other income for this month.
                 <br><button class="empty-cta-btn" id="empty-add-income-btn">+ Add Income</button>
             </div>`;
-        incomeListContainer.style.display = 'block';
+        appState.incomeListContainer.style.display = 'block';
         summaryEl.style.display = 'none';
-        const emptyBtn = incomeListContainer.querySelector('#empty-add-income-btn');
+        const emptyBtn = appState.incomeListContainer.querySelector('#empty-add-income-btn');
         if (emptyBtn) emptyBtn.addEventListener('click', () => openIncomeModal());
         return;
     }
 
-    incomeListContainer.style.display = 'grid';
-    const sorted = [...incomeEntries.sort((a,b) => a.date.localeCompare(b.date))];
+    appState.incomeListContainer.style.display = 'grid';
+    const sorted = [...appState.incomeEntries.sort((a,b) => a.date.localeCompare(b.date))];
 
     sorted.forEach((entry, idx) => {
         const dateStr = new Date(entry.date+'T00:00:00').toLocaleDateString(undefined, { month:'short', day:'numeric' });
@@ -36,28 +42,28 @@ function renderIncomeList() {
                     <button class="btn btn-xs btn-danger btn-delete-income" data-id="${entry.id}">Delete</button>
                 </div>
             </div>`;
-        incomeListContainer.appendChild(el);
+        appState.incomeListContainer.appendChild(el);
     });
 
-    incomeListContainer.querySelectorAll('.btn-edit-income').forEach(b   => b.addEventListener('click', e => openIncomeModal(e.target.dataset.id)));
-    incomeListContainer.querySelectorAll('.btn-delete-income').forEach(b => b.addEventListener('click', e => deleteIncome(e.target.dataset.id)));
+    appState.incomeListContainer.querySelectorAll('.btn-edit-income').forEach(b   => b.addEventListener('click', e => openIncomeModal(e.target.dataset.id)));
+    appState.incomeListContainer.querySelectorAll('.btn-delete-income').forEach(b => b.addEventListener('click', e => deleteIncome(e.target.dataset.id)));
 
-    const total = incomeEntries.reduce((s,e) => s + e.amount, 0);
+    const total = appState.incomeEntries.reduce((s,e) => s + e.amount, 0);
     summaryEl.style.display = 'block';
     summaryEl.innerHTML = `<span class="income-summary-label">Total Monthly Income:</span><span class="income-summary-value">${formatMoney(total)}</span>`;
 }
 
 // ─── Recurring Costs List ────────────────────────────────────────────────────
 function renderRecurringCostsList() {
-    costsListContainer.innerHTML = '';
-    const recurringSummaryEl = _root.getElementById('recurring-summary');
+    appState.costsListContainer.innerHTML = '';
+    const recurringSummaryEl = appState._root.getElementById('recurring-summary');
 
     // Recurring costs only (one-time costs are rendered separately)
-    const visibleRecurring = recurringCosts.filter(c => isCostDueThisMonth(c));
+    const visibleRecurring = appState.recurringCosts.filter(c => isCostDueThisMonth(c));
     const totalRecurring   = visibleRecurring.reduce((sum, c) => sum + c.amount, 0);
     const directRecurring  = visibleRecurring.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
     const cardRecurring    = visibleRecurring.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
-    const totalOneTime     = oneTimeCosts.reduce((sum, c) => sum + c.amount, 0);
+    const totalOneTime     = appState.oneTimeCosts.reduce((sum, c) => sum + c.amount, 0);
     const grandTotal       = totalRecurring + totalOneTime;
 
     if (recurringSummaryEl) {
@@ -65,20 +71,20 @@ function renderRecurringCostsList() {
         recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span><span class="recurring-due-breakdown">🏦 Direct ${formatMoney(directRecurring)} &nbsp;·&nbsp; 💳 Card ${formatMoney(cardRecurring)}${otLabel}</span>`;
     }
 
-    const hasAnyCosts = visibleRecurring.length > 0 || oneTimeCosts.length > 0;
+    const hasAnyCosts = visibleRecurring.length > 0 || appState.oneTimeCosts.length > 0;
     if (!hasAnyCosts) {
-        costsListContainer.innerHTML = `
+        appState.costsListContainer.innerHTML = `
             <div class="empty-state">
                 No costs yet.<br>Add your bills, subscriptions, and one-time expenses.
                 <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Cost</button>
             </div>`;
-        costsListContainer.style.display = 'block';
-        const emptyBtn = costsListContainer.querySelector('#empty-add-cost-btn');
+        appState.costsListContainer.style.display = 'block';
+        const emptyBtn = appState.costsListContainer.querySelector('#empty-add-cost-btn');
         if (emptyBtn) emptyBtn.addEventListener('click', () => openCostModal());
         return;
     }
 
-    costsListContainer.style.display = 'block';
+    appState.costsListContainer.style.display = 'block';
     const currentDay = new Date().getDate();
     let cardIndex = 0;
 
@@ -99,7 +105,7 @@ function renderRecurringCostsList() {
 
         const isCompact     = key === 'utility' || key === 'subscription';
         const isCollapsible = isCompact;
-        const isExpanded    = expandedCostSections.has(key);
+        const isExpanded    = appState.expandedCostSections.has(key);
         const groupTotal    = group.reduce((s, c) => s + c.amount, 0);
 
         const header = document.createElement('div');
@@ -123,14 +129,14 @@ function renderRecurringCostsList() {
             group.forEach(cost => renderCostCard(cost, grid, false, currentDay));
             section.appendChild(grid);
         }
-        costsListContainer.appendChild(section);
+        appState.costsListContainer.appendChild(section);
     });
 
     // ── One-time section ────────────────────────────────────────────────────
-    if (oneTimeCosts.length > 0) {
+    if (appState.oneTimeCosts.length > 0) {
         const otSection = document.createElement('div');
         otSection.className = 'cost-subsection cost-subsection-onetime';
-        const otTotal = oneTimeCosts.reduce((s, c) => s + c.amount, 0);
+        const otTotal = appState.oneTimeCosts.reduce((s, c) => s + c.amount, 0);
 
         const otHeader = document.createElement('div');
         otHeader.className = 'cost-subsection-header';
@@ -140,14 +146,14 @@ function renderRecurringCostsList() {
         const otGrid = document.createElement('div');
         otGrid.className = 'debts-list';
         otGrid.style.display = 'grid';
-        oneTimeCosts.forEach(cost => renderCostCard(cost, otGrid, true, currentDay));
+        appState.oneTimeCosts.forEach(cost => renderCostCard(cost, otGrid, true, currentDay));
         otSection.appendChild(otGrid);
-        costsListContainer.appendChild(otSection);
+        appState.costsListContainer.appendChild(otSection);
     }
 
-    costsListContainer.querySelectorAll('.btn-edit-cost').forEach(b   => b.addEventListener('click', e => openCostModal(e.target.dataset.id)));
-    costsListContainer.querySelectorAll('.btn-delete-cost').forEach(b => b.addEventListener('click', e => deleteCost(e.target.dataset.id)));
-    costsListContainer.querySelectorAll('.btn-mark-paid').forEach(b   => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === 'true')));
+    appState.costsListContainer.querySelectorAll('.btn-edit-cost').forEach(b   => b.addEventListener('click', e => openCostModal(e.target.dataset.id)));
+    appState.costsListContainer.querySelectorAll('.btn-delete-cost').forEach(b => b.addEventListener('click', e => deleteCost(e.target.dataset.id)));
+    appState.costsListContainer.querySelectorAll('.btn-mark-paid').forEach(b   => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === 'true')));
 }
 
 function renderCostCard(cost, grid, isOneTime, currentDay) {
@@ -155,7 +161,7 @@ function renderCostCard(cost, grid, isOneTime, currentDay) {
     const isCard    = cost.paymentMethod === 'card';
     const isDue     = isOneTime || isCostDueThisMonth(cost);
     const intN      = cost.intervalMonths || 1;
-    const paidState = paidStatus[cost.id];
+    const paidState = appState.paidStatus[cost.id];
 
     const paymentMethodBadge = isCard
         ? '<span class="debt-type-badge card-badge">💳 Card</span>'
@@ -245,31 +251,31 @@ function renderCostCard(cost, grid, isOneTime, currentDay) {
 
 // ─── Debts List ──────────────────────────────────────────────────────────────
 function renderDebtsList(simResults) {
-    debtsListContainer.innerHTML = '';
-    const debtsSummaryEl    = _root.getElementById('debts-summary');
-    const mortgageToggleBtn = _root.getElementById('mortgage-toggle-btn');
+    appState.debtsListContainer.innerHTML = '';
+    const debtsSummaryEl    = appState._root.getElementById('debts-summary');
+    const mortgageToggleBtn = appState._root.getElementById('mortgage-toggle-btn');
 
     // ── Archive-view wiring ────────────────────────────────────────────────────
-    const isArchiveView = viewingArchiveIndex !== null && !!monthlyArchives[viewingArchiveIndex];
-    const archiveData   = isArchiveView ? monthlyArchives[viewingArchiveIndex] : null;
-    const _debts        = archiveData ? (archiveData.debts || debts) : debts;
-    const _paidStatus   = archiveData ? (archiveData.paidStatus || {}) : paidStatus;
+    const isArchiveView = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
+    const archiveData   = isArchiveView ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
+    const _debts        = archiveData ? (archiveData.debts || appState.debts) : appState.debts;
+    const _paidStatus   = archiveData ? (archiveData.paidStatus || {}) : appState.paidStatus;
 
     const hasMortgage = _debts.some(d => d.type === 'mortgage');
     if (mortgageToggleBtn) {
         mortgageToggleBtn.style.display = hasMortgage ? '' : 'none';
-        mortgageToggleBtn.textContent   = showMortgage ? 'Hide Mortgage' : 'Show Mortgage';
+        mortgageToggleBtn.textContent   = appState.showMortgage ? 'Hide Mortgage' : 'Show Mortgage';
     }
 
     if (_debts.length === 0) {
         if (debtsSummaryEl) debtsSummaryEl.textContent = 'Total Debt: $0.00';
-        debtsListContainer.innerHTML = `
+        appState.debtsListContainer.innerHTML = `
             <div class="empty-state">
                 No debts added yet.<br>Add your credit cards, loans, and other debts to start your payoff plan.
                 <br><button class="empty-cta-btn" id="empty-add-debt-btn">+ Add Debt</button>
             </div>`;
-        debtsListContainer.style.display = 'block';
-        const emptyBtn = debtsListContainer.querySelector('#empty-add-debt-btn');
+        appState.debtsListContainer.style.display = 'block';
+        const emptyBtn = appState.debtsListContainer.querySelector('#empty-add-debt-btn');
         if (emptyBtn) emptyBtn.addEventListener('click', () => openDebtModal());
         return;
     }
@@ -279,12 +285,12 @@ function renderDebtsList(simResults) {
         debtsSummaryEl.textContent = `Total Debt: $${totalDebt.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     }
 
-    debtsListContainer.style.display = 'block';
-    const ordered    = getStrategyOrder(_debts, strategy);
+    appState.debtsListContainer.style.display = 'block';
+    const ordered    = getStrategyOrder(_debts, appState.strategy);
     const currentDay = new Date().getDate();
 
     // Apply mortgage filter; keep global order index for order badge numbers
-    const visible = showMortgage ? ordered : ordered.filter(d => d.type !== 'mortgage');
+    const visible = appState.showMortgage ? ordered : ordered.filter(d => d.type !== 'mortgage');
 
     const promoDebts   = visible.filter(d => d.promoZeroInterest);
     const regularDebts = visible.filter(d => !d.promoZeroInterest);
@@ -341,7 +347,7 @@ function renderDebtsList(simResults) {
             : '';
 
         const targetBadge = isTarget
-            ? `<div class="snowball-target-banner">${strategy === 'snowball' ? '❄️' : '🌊'} ${strategy === 'snowball' ? 'Snowball' : 'Avalanche'} Target — extra payments go here</div>`
+            ? `<div class="snowball-target-banner">${appState.strategy === 'snowball' ? '❄️' : '🌊'} ${appState.strategy === 'snowball' ? 'Snowball' : 'Avalanche'} Target — extra payments go here</div>`
             : '';
 
         const payUrlRow = debt.paymentUrl
@@ -354,7 +360,7 @@ function renderDebtsList(simResults) {
 
         debtElt.innerHTML = `
             ${paidOverlay}
-            <div class="debt-order-badge" title="${strategy === 'snowball' ? 'Payoff order: smallest balance first' : 'Payoff order: highest interest first'}">${globalIdx + 1}</div>
+            <div class="debt-order-badge" title="${appState.strategy === 'snowball' ? 'Payoff order: smallest balance first' : 'Payoff order: highest interest first'}">${globalIdx + 1}</div>
             <div class="debt-name">${escHtml(debt.name)}</div>
             <div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.35rem;">${typeBadge}${promoBadge}${autoBadge}</div>
             ${targetBadge}
@@ -382,7 +388,7 @@ function renderDebtsList(simResults) {
         grid.style.display = 'grid';
         debtsSubset.forEach((debt, i) => grid.appendChild(buildDebtCard(debt, globalOffset + i)));
         wrapper.appendChild(grid);
-        debtsListContainer.appendChild(wrapper);
+        appState.debtsListContainer.appendChild(wrapper);
     }
 
     if (promoDebts.length > 0) {
@@ -403,9 +409,9 @@ function renderDebtsList(simResults) {
         appendSection(regularDebts, promoDebts.length, header);
     }
 
-    debtsListContainer.querySelectorAll('.btn-edit').forEach(b   => b.addEventListener('click', e => openDebtModal(e.target.dataset.id)));
-    debtsListContainer.querySelectorAll('.btn-delete').forEach(b => b.addEventListener('click', e => deleteDebt(e.target.dataset.id)));
-    debtsListContainer.querySelectorAll('.btn-mark-paid').forEach(b => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === 'true')));
+    appState.debtsListContainer.querySelectorAll('.btn-edit').forEach(b   => b.addEventListener('click', e => openDebtModal(e.target.dataset.id)));
+    appState.debtsListContainer.querySelectorAll('.btn-delete').forEach(b => b.addEventListener('click', e => deleteDebt(e.target.dataset.id)));
+    appState.debtsListContainer.querySelectorAll('.btn-mark-paid').forEach(b => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === 'true')));
 }
 
 function buildPaidButton(id, autoPay, paidState, isPastDue) {
@@ -430,3 +436,5 @@ function buildPaidOverlay(autoPay) {
             <span class="paid-overlay-text">Paid This Month</span>
         </div>`;
 }
+
+export { buildPaidButton, buildPaidOverlay, renderCostCard, renderDebtsList, renderIncomeList, renderRecurringCostsList };
