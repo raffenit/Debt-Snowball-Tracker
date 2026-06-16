@@ -1,6 +1,6 @@
 {
   "name": "debt-snowball-tracker",
-  "version": "1.0.0",
+  "version": "2.2.0",
   "description": "Debt payoff tracker with snowball/avalanche simulation",
   "type": "module",
   "scripts": {
