@@ -4114,6 +4114,7 @@ const PANEL_HTML = `<div class="app-container">
                     <select id="cost-category">
                         <option value="utility">⚡ Utility (Electric, Water, Gas, Internet)</option>
                         <option value="subscription">📱 Subscription (Streaming, Services)</option>
+                        <option value="maintenance">🔧 Maintenance (Home & Auto)</option>
                         <option value="other">📦 Other Recurring Bill</option>
                         <option value="one-time">🔴 ONE-TIME ONLY — This Month Only (No Repeat)</option>
                     </select>

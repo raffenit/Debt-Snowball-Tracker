@@ -6,7 +6,7 @@ import { renderCheckpointsList } from './render-checkpoints.js';
 import { renderSpendingBudgets } from './render-budgets.js';
 import { renderDebtsList, renderIncomeList, renderRecurringCostsList } from './render-lists.js';
 import { renderPaymentPlan, renderVisualization } from './render-payment.js';
-import { saveData } from './storage.js';
+import { saveData, saveDataAndRender } from './storage.js';
 import { launchConfetti } from './render-support.js';
 
 // ─── Debt Modal ──────────────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ function saveDebt() {
             appState.debts.push({ id: Date.now().toString(), ...debtData });
         }
 
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
+        saveDataAndRender();
         closeDebtModal();
         showSavedToast(id ? 'Debt updated ✓' : 'Debt added ✓');
     } catch (err) {
@@ -222,8 +222,8 @@ function deleteDebt(id) {
         const deleted = appState.debts.find(d => d.id === id);
         appState.debts = appState.debts.filter(d => d.id !== id);
         delete appState.paidStatus[id];
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-        showUndoToast('Debt deleted', () => { appState.debts.push(deleted); saveData().catch(err => console.error('Debt Snowball: save failed —', err)); });
+        saveDataAndRender();
+        showUndoToast('Debt deleted', () => { appState.debts.push(deleted); saveDataAndRender(); });
     });
 }
 
@@ -278,7 +278,7 @@ function saveCost() {
             targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
         }
 
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
+        saveDataAndRender();
         closeCostModal();
         showSavedToast(id ? 'Cost updated ✓' : 'Cost added ✓');
     } catch (err) {
@@ -299,12 +299,12 @@ function deleteCost(id) {
             if (array === appState.recurringCosts) appState.recurringCosts = array;
             else appState.oneTimeCosts = array;
             delete appState.paidStatus[id];
-            saveData().catch(err => console.error("Debt Snowball: save failed —", err));
+            saveDataAndRender();
             showUndoToast('Cost deleted', () => {
                 array.push(deleted);
                 if (array === appState.recurringCosts) appState.recurringCosts = array;
                 else appState.oneTimeCosts = array;
-                saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+                saveDataAndRender();
             });
         }
     });
@@ -338,7 +338,7 @@ function saveIncome() {
             appState.incomeEntries.push({ id: Date.now().toString(), ...entryBase });
         }
 
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
+        saveDataAndRender();
         closeIncomeModal();
         showSavedToast(id ? 'Income updated ✓' : 'Income added ✓');
     } catch (err) {
@@ -350,8 +350,8 @@ function deleteIncome(id) {
     showInlineConfirm(id, 'income', () => {
         const deleted = appState.incomeEntries.find(e => e.id === id);
         appState.incomeEntries = appState.incomeEntries.filter(e => e.id !== id);
-        saveData().catch(err => console.error("Debt Snowball: save failed —", err));
-        showUndoToast('Income entry deleted', () => { appState.incomeEntries.push(deleted); saveData().catch(err => console.error('Debt Snowball: save failed —', err)); });
+        saveDataAndRender();
+        showUndoToast('Income entry deleted', () => { appState.incomeEntries.push(deleted); saveDataAndRender(); });
     });
 }
 
@@ -378,9 +378,7 @@ function togglePaid(id, autoPay) {
             card.style.opacity   = '';
         }, 160);
     }
-    saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-    renderRecurringCostsList();
-    renderDebtsList(runSimulation(appState.strategy));
+    saveDataAndRender();
 }
 
 // ─── Inline Confirm & Undo Toast ─────────────────────────────────────────────

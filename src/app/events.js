@@ -7,7 +7,7 @@ import { closeCheckpointModal, openCheckpointModal, renderCheckpointsList, saveC
 import { closeBudgetModal, closeExpenseModal, deleteBudget, deleteExpense, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
 import { renderRecurringCostsList } from './render-lists.js';
 import { exportData, importData } from './render-export.js';
-import { saveData } from './storage.js';
+import { saveData, saveDataAndRender } from './storage.js';
 import { renderPaymentPlan } from './render-payment.js';
 import { autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, openWindfallModal, updateAutoMinHint } from './render-support.js';
 
@@ -102,7 +102,7 @@ function setupEventListeners() {
             budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date });
             appState.inlineExpenseBudget = null;
             appState.expandedBudgets.add(bid);
-            saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+            saveDataAndRender();
             renderSpendingBudgets();
             showSavedToast('Expense added ✓');
             return;
@@ -319,15 +319,13 @@ function setupEventListeners() {
             const val  = parseFloat(form?.querySelector('.override-input')?.value);
             if (isNaN(val) || val < 0) { showErrorToast('Enter a valid amount.'); return; }
             appState.minPayOverrides[id] = val;
-            saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-            renderPaymentPlan();
+            saveDataAndRender();
             return;
         }
         const clearBtn = e.target.closest('.btn-override-clear');
         if (clearBtn) {
             delete appState.minPayOverrides[clearBtn.dataset.id];
-            saveData().catch(err => console.error('Debt Snowball: save failed —', err));
-            renderPaymentPlan();
+            saveDataAndRender();
             return;
         }
     });

@@ -93,6 +93,7 @@ function renderRecurringCostsList() {
     const categories = [
         { key: 'utility',      label: '⚡ Utilities (Monthly Bills)',           cls: 'cost-subsection-utility' },
         { key: 'subscription', label: '📱 Subscriptions (Recurring Services)',   cls: 'cost-subsection-subscription' },
+        { key: 'maintenance',  label: '🔧 Maintenance (Home & Auto)',            cls: 'cost-subsection-maintenance' },
         { key: 'other',        label: '📦 Other Recurring Bills',               cls: 'cost-subsection-other' },
     ];
 

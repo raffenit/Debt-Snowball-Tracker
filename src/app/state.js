@@ -20,7 +20,7 @@ export const appState = {
     monthlyArchives: [],  // [{ month, label, incomeEntries, recurringCosts, checkpoints, startingBalance, totalIncome, totalCosts }]
     spendingBudgets: [],  // [{ id, name, amount, exception, expenses: [] }]
     expandedBudgets: new Set(), // UI state: which budget IDs are expanded
-    expandedCostSections: new Set(['utility', 'subscription', 'other', 'one-time']), // UI state
+    expandedCostSections: new Set(['utility', 'subscription', 'maintenance', 'other', 'one-time']), // UI state
     inlineExpenseBudget: null,  // UI state: which budget ID has inline add-expense form open
     paydownChart: null,
     lastSimPayoffDate: null, // used for countdown ticker

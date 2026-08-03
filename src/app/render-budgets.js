@@ -2,7 +2,7 @@ import { appState } from './state.js';
 import { currentMonthKey } from '../core/date-utils.js';
 import { escHtml, formatMoney } from '../core/pure-utils.js';
 import { showErrorToast, showSavedToast, showUndoToast } from './render-modals.js';
-import { saveData } from './storage.js';
+import { saveData, saveDataAndRender } from './storage.js';
 
 // ─── Spending Budgets ────────────────────────────────────────────────────────
 // Focused module for budget list rendering, budget/expense modals, and CRUD.
@@ -229,7 +229,7 @@ function saveBudget() {
             appState.spendingBudgets.push({ id: Date.now().toString(), name, amount, exception, expenses: [] });
         }
 
-        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+        saveDataAndRender();
         closeBudgetModal();
         renderSpendingBudgets();
         showSavedToast(id ? 'Budget updated ✓' : 'Budget added ✓');
@@ -244,7 +244,7 @@ function deleteBudget(id) {
     if (!confirm(`Delete the "${budget.name}" budget and all its expenses for this month?`)) return;
     appState.spendingBudgets = appState.spendingBudgets.filter(b => b.id !== id);
     appState.expandedBudgets.delete(id);
-    saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+    saveDataAndRender();
     renderSpendingBudgets();
     showSavedToast('Budget deleted ✓');
 }
@@ -307,7 +307,7 @@ function saveExpense() {
             budget.expenses.push({ id: Date.now().toString(), description, amount, date });
         }
 
-        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+        saveDataAndRender();
         closeExpenseModal();
         appState.expandedBudgets.add(budgetId);
         renderSpendingBudgets();
@@ -323,11 +323,11 @@ function deleteExpense(budgetId, expenseId) {
     const deleted = budget.expenses.find(e => e.id === expenseId);
     if (!deleted) return;
     budget.expenses = budget.expenses.filter(e => e.id !== expenseId);
-    saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+    saveDataAndRender();
     renderSpendingBudgets();
     showUndoToast('Expense deleted', () => {
         budget.expenses.push(deleted);
-        saveData().catch(err => console.error('Debt Snowball: save failed —', err));
+        saveDataAndRender();
         renderSpendingBudgets();
     });
 }

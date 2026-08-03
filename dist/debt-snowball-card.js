@@ -22,7 +22,7 @@ var DebtSnowballApp = (() => {
     // [{ id, name, amount, exception, expenses: [] }]
     expandedBudgets: /* @__PURE__ */ new Set(),
     // UI state: which budget IDs are expanded
-    expandedCostSections: /* @__PURE__ */ new Set(["utility", "subscription", "other", "one-time"]),
+    expandedCostSections: /* @__PURE__ */ new Set(["utility", "subscription", "maintenance", "other", "one-time"]),
     // UI state
     inlineExpenseBudget: null,
     // UI state: which budget ID has inline add-expense form open
@@ -990,6 +990,9 @@ var DebtSnowballApp = (() => {
       }
     });
   }
+  function saveDataAndRender() {
+    return saveData().then(() => renderUI()).catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+  }
   function currentMonthKey2() {
     const d = /* @__PURE__ */ new Date();
     return `${d.getFullYear()}-${d.getMonth()}`;
@@ -1273,7 +1276,7 @@ var DebtSnowballApp = (() => {
       } else {
         appState.spendingBudgets.push({ id: Date.now().toString(), name, amount, exception, expenses: [] });
       }
-      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      saveDataAndRender();
       closeBudgetModal();
       renderSpendingBudgets();
       showSavedToast(id ? "Budget updated \u2713" : "Budget added \u2713");
@@ -1287,7 +1290,7 @@ var DebtSnowballApp = (() => {
     if (!confirm(`Delete the "${budget.name}" budget and all its expenses for this month?`)) return;
     appState.spendingBudgets = appState.spendingBudgets.filter((b) => b.id !== id);
     appState.expandedBudgets.delete(id);
-    saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    saveDataAndRender();
     renderSpendingBudgets();
     showSavedToast("Budget deleted \u2713");
   }
@@ -1339,7 +1342,7 @@ var DebtSnowballApp = (() => {
       } else {
         budget.expenses.push({ id: Date.now().toString(), description, amount, date });
       }
-      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      saveDataAndRender();
       closeExpenseModal();
       appState.expandedBudgets.add(budgetId);
       renderSpendingBudgets();
@@ -1354,11 +1357,11 @@ var DebtSnowballApp = (() => {
     const deleted = budget.expenses.find((e) => e.id === expenseId);
     if (!deleted) return;
     budget.expenses = budget.expenses.filter((e) => e.id !== expenseId);
-    saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    saveDataAndRender();
     renderSpendingBudgets();
     showUndoToast("Expense deleted", () => {
       budget.expenses.push(deleted);
-      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      saveDataAndRender();
       renderSpendingBudgets();
     });
   }
@@ -1438,6 +1441,7 @@ var DebtSnowballApp = (() => {
     const categories = [
       { key: "utility", label: "\u26A1 Utilities (Monthly Bills)", cls: "cost-subsection-utility" },
       { key: "subscription", label: "\u{1F4F1} Subscriptions (Recurring Services)", cls: "cost-subsection-subscription" },
+      { key: "maintenance", label: "\u{1F527} Maintenance (Home & Auto)", cls: "cost-subsection-maintenance" },
       { key: "other", label: "\u{1F4E6} Other Recurring Bills", cls: "cost-subsection-other" }
     ];
     categories.forEach(({ key, label, cls }) => {
@@ -2643,7 +2647,7 @@ var DebtSnowballApp = (() => {
       } else {
         appState.debts.push({ id: Date.now().toString(), ...debtData });
       }
-      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      saveDataAndRender();
       closeDebtModal();
       showSavedToast(id ? "Debt updated \u2713" : "Debt added \u2713");
     } catch (err) {
@@ -2655,10 +2659,10 @@ var DebtSnowballApp = (() => {
       const deleted = appState.debts.find((d) => d.id === id);
       appState.debts = appState.debts.filter((d) => d.id !== id);
       delete appState.paidStatus[id];
-      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      saveDataAndRender();
       showUndoToast("Debt deleted", () => {
         appState.debts.push(deleted);
-        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        saveDataAndRender();
       });
     });
   }
@@ -2698,7 +2702,7 @@ var DebtSnowballApp = (() => {
         const nextDueMonth = intervalMonths > 1 ? startMonthKey ?? currentMonthKey() : void 0;
         targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
       }
-      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      saveDataAndRender();
       closeCostModal();
       showSavedToast(id ? "Cost updated \u2713" : "Cost added \u2713");
     } catch (err) {
@@ -2718,12 +2722,12 @@ var DebtSnowballApp = (() => {
         if (array === appState.recurringCosts) appState.recurringCosts = array;
         else appState.oneTimeCosts = array;
         delete appState.paidStatus[id];
-        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        saveDataAndRender();
         showUndoToast("Cost deleted", () => {
           array.push(deleted);
           if (array === appState.recurringCosts) appState.recurringCosts = array;
           else appState.oneTimeCosts = array;
-          saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+          saveDataAndRender();
         });
       }
     });
@@ -2751,7 +2755,7 @@ var DebtSnowballApp = (() => {
       } else {
         appState.incomeEntries.push({ id: Date.now().toString(), ...entryBase });
       }
-      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      saveDataAndRender();
       closeIncomeModal();
       showSavedToast(id ? "Income updated \u2713" : "Income added \u2713");
     } catch (err) {
@@ -2762,10 +2766,10 @@ var DebtSnowballApp = (() => {
     showInlineConfirm(id, "income", () => {
       const deleted = appState.incomeEntries.find((e) => e.id === id);
       appState.incomeEntries = appState.incomeEntries.filter((e) => e.id !== id);
-      saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+      saveDataAndRender();
       showUndoToast("Income entry deleted", () => {
         appState.incomeEntries.push(deleted);
-        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        saveDataAndRender();
       });
     });
   }
@@ -2789,9 +2793,7 @@ var DebtSnowballApp = (() => {
         card.style.opacity = "";
       }, 160);
     }
-    saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
-    renderRecurringCostsList();
-    renderDebtsList(runSimulation(appState.strategy));
+    saveDataAndRender();
   }
   function showInlineConfirm(id, type, onConfirm) {
     const selector = type === "debt" ? ".btn-delete" : type === "cost" ? ".btn-delete-cost" : ".btn-delete-income";
@@ -3072,7 +3074,7 @@ One-time costs will be removed, income will be cleared, and interval costs will 
         budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date });
         appState.inlineExpenseBudget = null;
         appState.expandedBudgets.add(bid);
-        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+        saveDataAndRender();
         renderSpendingBudgets();
         showSavedToast("Expense added \u2713");
         return;
@@ -3280,15 +3282,13 @@ One-time costs will be removed, income will be cleared, and interval costs will 
           return;
         }
         appState.minPayOverrides[id] = val;
-        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
-        renderPaymentPlan();
+        saveDataAndRender();
         return;
       }
       const clearBtn = e.target.closest(".btn-override-clear");
       if (clearBtn) {
         delete appState.minPayOverrides[clearBtn.dataset.id];
-        saveData().catch((err) => console.error("Debt Snowball: save failed \u2014", err));
-        renderPaymentPlan();
+        saveDataAndRender();
         return;
       }
     });
@@ -3357,7 +3357,7 @@ One-time costs will be removed, income will be cleared, and interval costs will 
   }
 
   // src/app/header.js
-  var PANEL_VERSION = "2.2.0";
+  var PANEL_VERSION = "2.2.2";
   var PANEL_BUILD_DATE = "2025-06-16";
   var currentScript = document.currentScript;
   var scriptSrc = currentScript?.src || "unknown";
@@ -7479,6 +7479,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                     <select id="cost-category">
                         <option value="utility">\u26A1 Utility (Electric, Water, Gas, Internet)</option>
                         <option value="subscription">\u{1F4F1} Subscription (Streaming, Services)</option>
+                        <option value="maintenance">\u{1F527} Maintenance (Home & Auto)</option>
                         <option value="other">\u{1F4E6} Other Recurring Bill</option>
                         <option value="one-time">\u{1F534} ONE-TIME ONLY \u2014 This Month Only (No Repeat)</option>
                     </select>

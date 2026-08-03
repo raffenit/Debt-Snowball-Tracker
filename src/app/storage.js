@@ -174,6 +174,14 @@ async function saveData() {
     });
 }
 
+// Save + auto-refresh UI. Use this for fire-and-forget saves so the UI
+// always reflects the latest state without callers needing to manually render.
+function saveDataAndRender() {
+    return saveData()
+        .then(() => renderUI())
+        .catch(err => console.error('Debt Snowball: save failed —', err));
+}
+
 function currentMonthKey() {
     const d = new Date();
     return `${d.getFullYear()}-${d.getMonth()}`;
@@ -181,4 +189,4 @@ function currentMonthKey() {
 
 // ─── Manual Month Advance ─────────────────────────────────────────────────────
 
-export { STORE_URL_PATH, ensureStoreDashboard, loadBackendData, saveData, currentMonthKey };
+export { STORE_URL_PATH, ensureStoreDashboard, loadBackendData, saveData, saveDataAndRender, currentMonthKey };
