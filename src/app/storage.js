@@ -71,6 +71,23 @@ async function loadBackendData() {
             appState.startingBalance = result.startingBalance || 0;
             appState.monthlyArchives  = result.monthlyArchives  || [];
             appState.spendingBudgets  = result.spendingBudgets  || [];
+
+            // Migration: income entries previously defaulted to scheduleType 'one-time',
+            // which caused them to be skipped during month rollover (resulting in zero income).
+            // Convert any entries with no scheduleType or 'one-time' to 'monthly'.
+            let incomeMigrated = false;
+            appState.incomeEntries = appState.incomeEntries.map(e => {
+                const sched = e.scheduleType || e.schedule;
+                if (!sched || sched === 'one-time') {
+                    incomeMigrated = true;
+                    const day = parseInt((e.date || '').split('-')[2]) || 1;
+                    return { ...e, scheduleType: 'monthly', scheduleDay: day };
+                }
+                return e;
+            });
+            if (incomeMigrated) {
+                console.info('[DebtSnowball] Migrated income entries to monthly schedule (were one-time/missing).');
+            }
             appState.minPayOverrides  = result.minPayOverrides  || {};
 
             // Backward-compat: oneTimeCosts may not exist in older saved data.
@@ -89,7 +106,7 @@ async function loadBackendData() {
             // not persist across months.
             const workingKey = result.paidMonth || currentMonthKey();
             const workingIdx = monthKeyToIndex(workingKey);
-            let needsCleanupSave = false;
+            let needsCleanupSave = incomeMigrated;
             const staleOneTime = appState.oneTimeCosts.filter(c => {
                 if (!c.addedMonth) return true; // legacy entries with no addedMonth — remove
                 return monthKeyToIndex(c.addedMonth) < workingIdx;

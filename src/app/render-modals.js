@@ -134,7 +134,7 @@ function openIncomeModal(incomeId = null) {
             appState._root.getElementById('income-label').value    = entry.label;
             appState._root.getElementById('income-date').value     = entry.date;
             appState._root.getElementById('income-amount').value   = entry.amount;
-            appState._root.getElementById('income-schedule').value = entry.scheduleType || 'one-time';
+            appState._root.getElementById('income-schedule').value = entry.scheduleType || 'monthly';
             updateIncomeScheduleHint();
         }
     } else {
@@ -320,7 +320,7 @@ function saveIncome() {
         const label        = appState._root.getElementById('income-label').value;
         const date         = appState._root.getElementById('income-date').value;
         const amount       = parseFloat(appState._root.getElementById('income-amount').value);
-        const scheduleType = appState._root.getElementById('income-schedule').value || 'one-time';
+        const scheduleType = appState._root.getElementById('income-schedule').value || 'monthly';
 
         if (!label.trim()) throw new Error('Please enter a label for this income entry.');
         if (!date)         throw new Error('Please select a date.');

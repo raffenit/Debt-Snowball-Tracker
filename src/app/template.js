@@ -4220,9 +4220,9 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group">
                     <label for="income-schedule">Recurrence</label>
                     <select id="income-schedule">
-                        <option value="one-time">One-time (this month only)</option>
                         <option value="monthly">Monthly (same day each month)</option>
                         <option value="biweekly">Every 2 weeks</option>
+                        <option value="one-time">One-time (this month only)</option>
                     </select>
                     <p class="subtitle" id="income-schedule-hint" style="font-size:0.8rem; margin-top:0.3rem; display:none;"></p>
                 </div>

@@ -914,6 +914,19 @@ var DebtSnowballApp = (() => {
         appState.startingBalance = result.startingBalance || 0;
         appState.monthlyArchives = result.monthlyArchives || [];
         appState.spendingBudgets = result.spendingBudgets || [];
+        let incomeMigrated = false;
+        appState.incomeEntries = appState.incomeEntries.map((e) => {
+          const sched = e.scheduleType || e.schedule;
+          if (!sched || sched === "one-time") {
+            incomeMigrated = true;
+            const day = parseInt((e.date || "").split("-")[2]) || 1;
+            return { ...e, scheduleType: "monthly", scheduleDay: day };
+          }
+          return e;
+        });
+        if (incomeMigrated) {
+          console.info("[DebtSnowball] Migrated income entries to monthly schedule (were one-time/missing).");
+        }
         appState.minPayOverrides = result.minPayOverrides || {};
         if (result.oneTimeCosts) {
           appState.oneTimeCosts = result.oneTimeCosts;
@@ -923,7 +936,7 @@ var DebtSnowballApp = (() => {
         }
         const workingKey = result.paidMonth || currentMonthKey2();
         const workingIdx = monthKeyToIndex(workingKey);
-        let needsCleanupSave = false;
+        let needsCleanupSave = incomeMigrated;
         const staleOneTime = appState.oneTimeCosts.filter((c) => {
           if (!c.addedMonth) return true;
           return monthKeyToIndex(c.addedMonth) < workingIdx;
@@ -2602,7 +2615,7 @@ var DebtSnowballApp = (() => {
         appState._root.getElementById("income-label").value = entry.label;
         appState._root.getElementById("income-date").value = entry.date;
         appState._root.getElementById("income-amount").value = entry.amount;
-        appState._root.getElementById("income-schedule").value = entry.scheduleType || "one-time";
+        appState._root.getElementById("income-schedule").value = entry.scheduleType || "monthly";
         updateIncomeScheduleHint();
       }
     } else {
@@ -2765,7 +2778,7 @@ var DebtSnowballApp = (() => {
       const label = appState._root.getElementById("income-label").value;
       const date = appState._root.getElementById("income-date").value;
       const amount = parseFloat(appState._root.getElementById("income-amount").value);
-      const scheduleType = appState._root.getElementById("income-schedule").value || "one-time";
+      const scheduleType = appState._root.getElementById("income-schedule").value || "monthly";
       if (!label.trim()) throw new Error("Please enter a label for this income entry.");
       if (!date) throw new Error("Please select a date.");
       if (isNaN(amount)) throw new Error("Please enter a valid amount.");
@@ -3412,7 +3425,7 @@ One-time costs will be removed, income will be cleared, and interval costs will 
   }
 
   // src/app/header.js
-  var PANEL_VERSION = "2.3.0";
+  var PANEL_VERSION = "2.3.1";
   var PANEL_BUILD_DATE = "2026-08-04";
   var currentScript = document.currentScript;
   var scriptSrc = currentScript?.src || "unknown";
@@ -7640,9 +7653,9 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                 <div class="input-group">
                     <label for="income-schedule">Recurrence</label>
                     <select id="income-schedule">
-                        <option value="one-time">One-time (this month only)</option>
                         <option value="monthly">Monthly (same day each month)</option>
                         <option value="biweekly">Every 2 weeks</option>
+                        <option value="one-time">One-time (this month only)</option>
                     </select>
                     <p class="subtitle" id="income-schedule-hint" style="font-size:0.8rem; margin-top:0.3rem; display:none;"></p>
                 </div>
