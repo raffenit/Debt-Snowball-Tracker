@@ -3388,8 +3388,8 @@ One-time costs will be removed, income will be cleared, and interval costs will 
   }
 
   // src/app/header.js
-  var PANEL_VERSION = "2.2.2";
-  var PANEL_BUILD_DATE = "2025-06-16";
+  var PANEL_VERSION = "2.2.6";
+  var PANEL_BUILD_DATE = "2026-08-04";
   var currentScript = document.currentScript;
   var scriptSrc = currentScript?.src || "unknown";
   var installType = scriptSrc.includes("hacsfiles") ? "HACS" : scriptSrc.includes("local") ? "Manual (/local/)" : scriptSrc.includes("community") ? "HACS (community)" : "Unknown";
