@@ -2715,21 +2715,24 @@ var DebtSnowballApp = (() => {
   function deleteCost(id) {
     showInlineConfirm(id, "cost", () => {
       let deleted = appState.recurringCosts.find((c) => c.id === id);
-      let array = appState.recurringCosts;
+      const isRecurring = !!deleted;
       if (!deleted) {
         deleted = appState.oneTimeCosts.find((c) => c.id === id);
-        array = appState.oneTimeCosts;
       }
       if (deleted) {
-        array = array.filter((c) => c.id !== id);
-        if (array === appState.recurringCosts) appState.recurringCosts = array;
-        else appState.oneTimeCosts = array;
+        if (isRecurring) {
+          appState.recurringCosts = appState.recurringCosts.filter((c) => c.id !== id);
+        } else {
+          appState.oneTimeCosts = appState.oneTimeCosts.filter((c) => c.id !== id);
+        }
         delete appState.paidStatus[id];
         saveDataAndRender();
         showUndoToast("Cost deleted", () => {
-          array.push(deleted);
-          if (array === appState.recurringCosts) appState.recurringCosts = array;
-          else appState.oneTimeCosts = array;
+          if (isRecurring) {
+            appState.recurringCosts = [...appState.recurringCosts, deleted];
+          } else {
+            appState.oneTimeCosts = [...appState.oneTimeCosts, deleted];
+          }
           saveDataAndRender();
         });
       }
@@ -3388,7 +3391,7 @@ One-time costs will be removed, income will be cleared, and interval costs will 
   }
 
   // src/app/header.js
-  var PANEL_VERSION = "2.2.7";
+  var PANEL_VERSION = "2.2.8";
   var PANEL_BUILD_DATE = "2026-08-04";
   var currentScript = document.currentScript;
   var scriptSrc = currentScript?.src || "unknown";

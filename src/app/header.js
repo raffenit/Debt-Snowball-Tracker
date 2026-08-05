@@ -15,7 +15,7 @@
  */
 
 // Version marker - check console to verify which file is loaded
-const PANEL_VERSION = '2.2.7';
+const PANEL_VERSION = '2.2.8';
 const PANEL_BUILD_DATE = '2026-08-04';
 
 // Detect installation path for debugging

@@ -289,21 +289,24 @@ function saveCost() {
 function deleteCost(id) {
     showInlineConfirm(id, 'cost', () => {
         let deleted = appState.recurringCosts.find(c => c.id === id);
-        let array = appState.recurringCosts;
+        const isRecurring = !!deleted;
         if (!deleted) {
             deleted = appState.oneTimeCosts.find(c => c.id === id);
-            array = appState.oneTimeCosts;
         }
         if (deleted) {
-            array = array.filter(c => c.id !== id);
-            if (array === appState.recurringCosts) appState.recurringCosts = array;
-            else appState.oneTimeCosts = array;
+            if (isRecurring) {
+                appState.recurringCosts = appState.recurringCosts.filter(c => c.id !== id);
+            } else {
+                appState.oneTimeCosts = appState.oneTimeCosts.filter(c => c.id !== id);
+            }
             delete appState.paidStatus[id];
             saveDataAndRender();
             showUndoToast('Cost deleted', () => {
-                array.push(deleted);
-                if (array === appState.recurringCosts) appState.recurringCosts = array;
-                else appState.oneTimeCosts = array;
+                if (isRecurring) {
+                    appState.recurringCosts = [...appState.recurringCosts, deleted];
+                } else {
+                    appState.oneTimeCosts = [...appState.oneTimeCosts, deleted];
+                }
                 saveDataAndRender();
             });
         }
