@@ -85,14 +85,18 @@ async function loadBackendData() {
             // Cleanup: remove stale one-time costs from previous months.
             // These may have accumulated due to a delete bug (fixed in v2.2.8)
             // where costs were never actually removed from state.
+            // Also remove legacy one-time costs with no addedMonth — they should
+            // not persist across months.
             const workingKey = result.paidMonth || currentMonthKey();
             const workingIdx = monthKeyToIndex(workingKey);
+            let needsCleanupSave = false;
             const staleOneTime = appState.oneTimeCosts.filter(c => {
-                if (!c.addedMonth) return false; // legacy entries with no addedMonth — keep
+                if (!c.addedMonth) return true; // legacy entries with no addedMonth — remove
                 return monthKeyToIndex(c.addedMonth) < workingIdx;
             });
             if (staleOneTime.length > 0) {
                 appState.oneTimeCosts = appState.oneTimeCosts.filter(c => !staleOneTime.includes(c));
+                needsCleanupSave = true;
                 console.info(`[DebtSnowball] Cleaned up ${staleOneTime.length} stale one-time cost(s) from previous months.`);
             }
 
@@ -100,6 +104,7 @@ async function loadBackendData() {
             const leakedOneTime = appState.recurringCosts.filter(c => (c.category || 'other') === 'one-time');
             if (leakedOneTime.length > 0) {
                 appState.recurringCosts = appState.recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
+                needsCleanupSave = true;
                 console.info(`[DebtSnowball] Cleaned up ${leakedOneTime.length} one-time cost(s) that leaked into recurringCosts.`);
             }
 
@@ -142,6 +147,12 @@ async function loadBackendData() {
                 appState.paidStatus = result.paidStatus;
             } else {
                 appState.paidStatus = {};
+            }
+
+            // If cleanup removed stale data but no rollover occurred, persist the cleaned state
+            // so it doesn't come back on next reload.
+            if (needsCleanupSave) {
+                saveData().catch(err => console.error('Debt Snowball: cleanup save failed —', err));
             }
         }
     } catch (err) {

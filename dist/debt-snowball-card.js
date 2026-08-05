@@ -923,17 +923,20 @@ var DebtSnowballApp = (() => {
         }
         const workingKey = result.paidMonth || currentMonthKey2();
         const workingIdx = monthKeyToIndex(workingKey);
+        let needsCleanupSave = false;
         const staleOneTime = appState.oneTimeCosts.filter((c) => {
-          if (!c.addedMonth) return false;
+          if (!c.addedMonth) return true;
           return monthKeyToIndex(c.addedMonth) < workingIdx;
         });
         if (staleOneTime.length > 0) {
           appState.oneTimeCosts = appState.oneTimeCosts.filter((c) => !staleOneTime.includes(c));
+          needsCleanupSave = true;
           console.info(`[DebtSnowball] Cleaned up ${staleOneTime.length} stale one-time cost(s) from previous months.`);
         }
         const leakedOneTime = appState.recurringCosts.filter((c) => (c.category || "other") === "one-time");
         if (leakedOneTime.length > 0) {
           appState.recurringCosts = appState.recurringCosts.filter((c) => (c.category || "other") !== "one-time");
+          needsCleanupSave = true;
           console.info(`[DebtSnowball] Cleaned up ${leakedOneTime.length} one-time cost(s) that leaked into recurringCosts.`);
         }
         const prevMonth = result.paidMonth;
@@ -964,6 +967,9 @@ var DebtSnowballApp = (() => {
           appState.paidStatus = result.paidStatus;
         } else {
           appState.paidStatus = {};
+        }
+        if (needsCleanupSave) {
+          saveData().catch((err) => console.error("Debt Snowball: cleanup save failed \u2014", err));
         }
       }
     } catch (err) {
@@ -3406,7 +3412,7 @@ One-time costs will be removed, income will be cleared, and interval costs will 
   }
 
   // src/app/header.js
-  var PANEL_VERSION = "2.2.9";
+  var PANEL_VERSION = "2.3.0";
   var PANEL_BUILD_DATE = "2026-08-04";
   var currentScript = document.currentScript;
   var scriptSrc = currentScript?.src || "unknown";
