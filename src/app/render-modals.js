@@ -1,6 +1,6 @@
 import { appState } from './state.js';
-import { currentMonthKey, generateBiweeklyForMonth, htmlMonthToKey, keyToHtmlMonth } from '../core/date-utils.js';
-import { runSimulation } from '../core/simulation.js';
+import { currentMonthKey, generateBiweeklyForMonth, htmlMonthToKey, isCostDueThisMonth, keyToHtmlMonth } from '../core/date-utils.js';
+import { getStrategyOrder, runSimulation } from '../core/simulation.js';
 import { updateCostModalIntervalVisibility } from './modals.js';
 import { renderCheckpointsList } from './render-checkpoints.js';
 import { renderSpendingBudgets } from './render-budgets.js';
@@ -356,13 +356,51 @@ function deleteIncome(id) {
 }
 
 // ─── Paid-this-month toggle ───────────────────────────────────────────────────
+
+// Calculate the scheduled payment amount for a single debt in the current month.
+// Mirrors the logic in renderPaymentPlan so the deduction matches what the UI shows.
+function _getDebtPaymentAmount(debtId) {
+    const debt = appState.debts.find(d => d.id === debtId);
+    if (!debt || debt.balance <= 0) return 0;
+
+    const aliveDebts = appState.debts.filter(d => d.balance > 0);
+    const sortedDebts = getStrategyOrder(aliveDebts, appState.strategy);
+    const targetId = sortedDebts[0]?.id;
+
+    const totalIncome = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const totalRecurring = [
+        ...appState.recurringCosts.filter(c => isCostDueThisMonth(c)),
+        ...appState.oneTimeCosts,
+    ].reduce((s, c) => s + c.amount, 0);
+    const totalMinPay = sortedDebts.reduce((s, d) => s + (appState.minPayOverrides[d.id] ?? d.minPayment), 0);
+    const extra = Math.max(0, totalIncome - totalRecurring - totalMinPay);
+
+    const effMin = appState.minPayOverrides[debt.id] ?? debt.minPayment;
+    const isTarget = debt.id === targetId;
+    return isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
+}
+
 function togglePaid(id, autoPay) {
     const wasUnpaid = !appState.paidStatus[id];
+    const debt = appState.debts.find(d => d.id === id);
+
     if (appState.paidStatus[id]) {
+        // Unmarking: restore the deducted amount to the debt balance
+        if (debt) {
+            const prev = appState.paidStatus[id];
+            const deducted = (typeof prev === 'object' && prev.amount) || 0;
+            if (deducted > 0) debt.balance = Math.round((debt.balance + deducted) * 100) / 100;
+        }
         delete appState.paidStatus[id];
     } else {
-        appState.paidStatus[id] = autoPay ? 'autopay' : 'paid';
-        if (wasUnpaid && appState.debts.find(d => d.id === id)) {
+        // Marking paid: deduct the payment amount from the debt balance
+        let amount = 0;
+        if (debt) {
+            amount = _getDebtPaymentAmount(id);
+            if (amount > 0) debt.balance = Math.round((debt.balance - amount) * 100) / 100;
+        }
+        appState.paidStatus[id] = { status: autoPay ? 'autopay' : 'paid', amount };
+        if (wasUnpaid && debt) {
             launchConfetti();
         }
     }

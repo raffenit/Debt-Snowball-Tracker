@@ -1470,6 +1470,13 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     box-shadow: inset 0 1px 0 rgba(240,160,80,0.08);
 }
 
+.cost-subsection-maintenance .cost-subsection-header {
+    background: linear-gradient(90deg, rgba(251,146,60,0.12) 0%, rgba(251,146,60,0.04) 100%);
+    border-left: 3px solid #fb923c;
+    color: #fb923c;
+    box-shadow: inset 0 1px 0 rgba(251,146,60,0.08);
+}
+
 .cost-subsection-onetime .cost-subsection-header {
     background: linear-gradient(90deg, rgba(239,68,68,0.1) 0%, rgba(239,68,68,0.03) 100%);
     border-left: 3px solid #f87171;

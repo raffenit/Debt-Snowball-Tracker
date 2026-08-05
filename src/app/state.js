@@ -16,7 +16,7 @@ export const appState = {
     startingBalance: 0,
     strategy: 'snowball', // 'snowball' | 'avalanche'
     showMortgage: true,   // toggle mortgage visibility
-    paidStatus: {},       // { [id]: 'paid' | 'autopay' } — resets each calendar month
+    paidStatus: {},       // { [id]: { status: 'paid'|'autopay', amount: number } } — resets each calendar month
     monthlyArchives: [],  // [{ month, label, incomeEntries, recurringCosts, checkpoints, startingBalance, totalIncome, totalCosts }]
     spendingBudgets: [],  // [{ id, name, amount, exception, expenses: [] }]
     expandedBudgets: new Set(), // UI state: which budget IDs are expanded

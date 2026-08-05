@@ -15,7 +15,7 @@ var DebtSnowballApp = (() => {
     showMortgage: true,
     // toggle mortgage visibility
     paidStatus: {},
-    // { [id]: 'paid' | 'autopay' } — resets each calendar month
+    // { [id]: { status: 'paid'|'autopay', amount: number } } — resets each calendar month
     monthlyArchives: [],
     // [{ month, label, incomeEntries, recurringCosts, checkpoints, startingBalance, totalIncome, totalCosts }]
     spendingBudgets: [],
@@ -2773,13 +2773,41 @@ var DebtSnowballApp = (() => {
       });
     });
   }
+  function _getDebtPaymentAmount(debtId) {
+    const debt = appState.debts.find((d) => d.id === debtId);
+    if (!debt || debt.balance <= 0) return 0;
+    const aliveDebts = appState.debts.filter((d) => d.balance > 0);
+    const sortedDebts = getStrategyOrder(aliveDebts, appState.strategy);
+    const targetId = sortedDebts[0]?.id;
+    const totalIncome = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const totalRecurring = [
+      ...appState.recurringCosts.filter((c) => isCostDueThisMonth(c)),
+      ...appState.oneTimeCosts
+    ].reduce((s, c) => s + c.amount, 0);
+    const totalMinPay = sortedDebts.reduce((s, d) => s + (appState.minPayOverrides[d.id] ?? d.minPayment), 0);
+    const extra = Math.max(0, totalIncome - totalRecurring - totalMinPay);
+    const effMin = appState.minPayOverrides[debt.id] ?? debt.minPayment;
+    const isTarget = debt.id === targetId;
+    return isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
+  }
   function togglePaid(id, autoPay) {
     const wasUnpaid = !appState.paidStatus[id];
+    const debt = appState.debts.find((d) => d.id === id);
     if (appState.paidStatus[id]) {
+      if (debt) {
+        const prev = appState.paidStatus[id];
+        const deducted = typeof prev === "object" && prev.amount || 0;
+        if (deducted > 0) debt.balance = Math.round((debt.balance + deducted) * 100) / 100;
+      }
       delete appState.paidStatus[id];
     } else {
-      appState.paidStatus[id] = autoPay ? "autopay" : "paid";
-      if (wasUnpaid && appState.debts.find((d) => d.id === id)) {
+      let amount = 0;
+      if (debt) {
+        amount = _getDebtPaymentAmount(id);
+        if (amount > 0) debt.balance = Math.round((debt.balance - amount) * 100) / 100;
+      }
+      appState.paidStatus[id] = { status: autoPay ? "autopay" : "paid", amount };
+      if (wasUnpaid && debt) {
         launchConfetti();
       }
     }
@@ -4834,6 +4862,13 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border-left: 3px solid var(--warning-color);
     color: var(--warning-color);
     box-shadow: inset 0 1px 0 rgba(240,160,80,0.08);
+}
+
+.cost-subsection-maintenance .cost-subsection-header {
+    background: linear-gradient(90deg, rgba(251,146,60,0.12) 0%, rgba(251,146,60,0.04) 100%);
+    border-left: 3px solid #fb923c;
+    color: #fb923c;
+    box-shadow: inset 0 1px 0 rgba(251,146,60,0.08);
 }
 
 .cost-subsection-onetime .cost-subsection-header {
