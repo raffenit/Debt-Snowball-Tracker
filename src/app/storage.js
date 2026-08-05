@@ -82,6 +82,27 @@ async function loadBackendData() {
                 appState.recurringCosts = appState.recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
             }
 
+            // Cleanup: remove stale one-time costs from previous months.
+            // These may have accumulated due to a delete bug (fixed in v2.2.8)
+            // where costs were never actually removed from state.
+            const workingKey = result.paidMonth || currentMonthKey();
+            const workingIdx = monthKeyToIndex(workingKey);
+            const staleOneTime = appState.oneTimeCosts.filter(c => {
+                if (!c.addedMonth) return false; // legacy entries with no addedMonth — keep
+                return monthKeyToIndex(c.addedMonth) < workingIdx;
+            });
+            if (staleOneTime.length > 0) {
+                appState.oneTimeCosts = appState.oneTimeCosts.filter(c => !staleOneTime.includes(c));
+                console.info(`[DebtSnowball] Cleaned up ${staleOneTime.length} stale one-time cost(s) from previous months.`);
+            }
+
+            // Also cleanup: remove any one-time costs that leaked into recurringCosts
+            const leakedOneTime = appState.recurringCosts.filter(c => (c.category || 'other') === 'one-time');
+            if (leakedOneTime.length > 0) {
+                appState.recurringCosts = appState.recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
+                console.info(`[DebtSnowball] Cleaned up ${leakedOneTime.length} one-time cost(s) that leaked into recurringCosts.`);
+            }
+
             const prevMonth = result.paidMonth;
             const thisMonth = currentMonthKey();
 

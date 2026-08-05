@@ -921,6 +921,21 @@ var DebtSnowballApp = (() => {
           appState.oneTimeCosts = appState.recurringCosts.filter((c) => (c.category || "other") === "one-time");
           appState.recurringCosts = appState.recurringCosts.filter((c) => (c.category || "other") !== "one-time");
         }
+        const workingKey = result.paidMonth || currentMonthKey2();
+        const workingIdx = monthKeyToIndex(workingKey);
+        const staleOneTime = appState.oneTimeCosts.filter((c) => {
+          if (!c.addedMonth) return false;
+          return monthKeyToIndex(c.addedMonth) < workingIdx;
+        });
+        if (staleOneTime.length > 0) {
+          appState.oneTimeCosts = appState.oneTimeCosts.filter((c) => !staleOneTime.includes(c));
+          console.info(`[DebtSnowball] Cleaned up ${staleOneTime.length} stale one-time cost(s) from previous months.`);
+        }
+        const leakedOneTime = appState.recurringCosts.filter((c) => (c.category || "other") === "one-time");
+        if (leakedOneTime.length > 0) {
+          appState.recurringCosts = appState.recurringCosts.filter((c) => (c.category || "other") !== "one-time");
+          console.info(`[DebtSnowball] Cleaned up ${leakedOneTime.length} one-time cost(s) that leaked into recurringCosts.`);
+        }
         const prevMonth = result.paidMonth;
         const thisMonth = currentMonthKey2();
         appState.workingMonthKey = prevMonth && monthKeyToIndex(prevMonth) > monthKeyToIndex(thisMonth) ? prevMonth : thisMonth;
@@ -3391,7 +3406,7 @@ One-time costs will be removed, income will be cleared, and interval costs will 
   }
 
   // src/app/header.js
-  var PANEL_VERSION = "2.2.8";
+  var PANEL_VERSION = "2.2.9";
   var PANEL_BUILD_DATE = "2026-08-04";
   var currentScript = document.currentScript;
   var scriptSrc = currentScript?.src || "unknown";
