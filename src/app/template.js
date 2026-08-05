@@ -784,15 +784,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         padding: 0.3rem;
         gap: 0.2rem;
         margin-bottom: 1.25rem;
-        overflow-x: visible;
+        overflow-x: auto;
     }
 
     .tab-btn {
-        flex: 1;
+        flex: 0 0 auto;
         justify-content: center;
         padding: 0.625rem 0.5rem;
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         min-height: 40px;
+    }
+
+    .tab-label {
+        font-size: 0.75rem;
     }
 
     .schedule-header {
@@ -3816,7 +3820,8 @@ const PANEL_HTML = `<div class="app-container">
 
         <nav class="tab-nav">
             <button class="tab-btn active" data-tab="payment-plan"><span class="tab-icon">&#128197;</span><span class="tab-label"> Plan</span></button>
-            <button class="tab-btn" data-tab="income"><span class="tab-icon">&#128176;</span><span class="tab-label"> Budget</span></button>
+            <button class="tab-btn" data-tab="budgets"><span class="tab-icon">&#128176;</span><span class="tab-label"> Budgets</span></button>
+            <button class="tab-btn" data-tab="income"><span class="tab-icon">&#128181;</span><span class="tab-label"> Income & Expenses</span></button>
             <button class="tab-btn" data-tab="debts"><span class="tab-icon">&#128179;</span><span class="tab-label"> Debts</span></button>
             <button class="tab-btn" data-tab="timeline"><span class="tab-icon">&#128202;</span><span class="tab-label"> Timeline</span></button>
         </nav>
@@ -3914,7 +3919,7 @@ const PANEL_HTML = `<div class="app-container">
                     </section>
             </div>
 
-            <div class="tab-panel" id="tab-income">
+            <div class="tab-panel" id="tab-budgets">
                 <section class="spending-budgets-section">
                     <div class="section-header">
                         <div>
@@ -3925,7 +3930,9 @@ const PANEL_HTML = `<div class="app-container">
                     </div>
                     <div id="budgets-list" style="margin-top: 0.25rem;"></div>
                 </section>
+            </div>
 
+            <div class="tab-panel" id="tab-income">
                 <section class="income-section">
                     <div class="section-header">
                         <div>
