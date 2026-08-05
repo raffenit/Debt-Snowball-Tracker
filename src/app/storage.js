@@ -176,10 +176,15 @@ async function saveData() {
 
 // Save + auto-refresh UI. Use this for fire-and-forget saves so the UI
 // always reflects the latest state without callers needing to manually render.
+// We render even on save failure because the in-memory appState is already
+// mutated by the caller — the user should see their change immediately.
 function saveDataAndRender() {
     return saveData()
         .then(() => renderUI())
-        .catch(err => console.error('Debt Snowball: save failed —', err));
+        .catch(err => {
+            console.error('Debt Snowball: save failed —', err);
+            renderUI();
+        });
 }
 
 function currentMonthKey() {

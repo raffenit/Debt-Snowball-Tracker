@@ -991,7 +991,10 @@ var DebtSnowballApp = (() => {
     });
   }
   function saveDataAndRender() {
-    return saveData().then(() => renderUI()).catch((err) => console.error("Debt Snowball: save failed \u2014", err));
+    return saveData().then(() => renderUI()).catch((err) => {
+      console.error("Debt Snowball: save failed \u2014", err);
+      renderUI();
+    });
   }
   function currentMonthKey2() {
     const d = /* @__PURE__ */ new Date();
