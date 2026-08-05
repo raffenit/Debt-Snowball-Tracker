@@ -1452,7 +1452,7 @@ var DebtSnowballApp = (() => {
       if (group.length === 0) return;
       const section = document.createElement("div");
       section.className = `cost-subsection ${cls}`;
-      const isCompact = key === "utility" || key === "subscription";
+      const isCompact = key === "utility" || key === "subscription" || key === "maintenance";
       const isCollapsible = isCompact;
       const isExpanded = appState.expandedCostSections.has(key);
       const groupTotal = group.reduce((s, c) => s + c.amount, 0);
@@ -1522,7 +1522,7 @@ var DebtSnowballApp = (() => {
       dueFreq = "Monthly";
     }
     const el = document.createElement("div");
-    const isCompact = !isOneTime && (cost.category === "utility" || cost.category === "subscription");
+    const isCompact = !isOneTime && (cost.category === "utility" || cost.category === "subscription" || cost.category === "maintenance");
     if (isCompact) {
       el.className = "debt-card cost-card cost-card-compact" + (isCard ? " cost-card-credit" : " cost-card-direct") + (paidState ? " card-paid" : "") + (isDue ? "" : " not-due-month");
       const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join("");

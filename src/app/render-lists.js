@@ -104,7 +104,7 @@ function renderRecurringCostsList() {
         const section = document.createElement('div');
         section.className = `cost-subsection ${cls}`;
 
-        const isCompact     = key === 'utility' || key === 'subscription';
+        const isCompact     = key === 'utility' || key === 'subscription' || key === 'maintenance';
         const isCollapsible = isCompact;
         const isExpanded    = appState.expandedCostSections.has(key);
         const groupTotal    = group.reduce((s, c) => s + c.amount, 0);
@@ -194,7 +194,7 @@ function renderCostCard(cost, grid, isOneTime, currentDay) {
     }
 
     const el = document.createElement('div');
-    const isCompact = !isOneTime && (cost.category === 'utility' || cost.category === 'subscription');
+    const isCompact = !isOneTime && (cost.category === 'utility' || cost.category === 'subscription' || cost.category === 'maintenance');
 
     if (isCompact) {
         el.className = 'debt-card cost-card cost-card-compact' +
