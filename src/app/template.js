@@ -2318,6 +2318,42 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     font-size: 0.875rem;
     padding: 2rem 1rem;
 }
+.archive-add {
+    margin-top: 1.25rem;
+    border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
+    padding-top: 0.75rem;
+}
+.archive-add-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.archive-add-row input[type="month"] {
+    flex: 1;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+    background: rgba(7,6,26,0.7);
+    border: 1px solid var(--border-bright);
+    border-radius: 7px;
+    color: var(--text-primary);
+    font-family: inherit;
+}
+.archive-add-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.4rem;
+    line-height: 1.4;
+}
+.archive-retro-badge {
+    display: inline-block;
+    background: rgba(251,191,36,0.12);
+    color: var(--warning-color);
+    border: 1px solid rgba(251,191,36,0.3);
+    border-radius: 999px;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.5rem;
+    margin-bottom: 0.5rem;
+}
 
 .income-badge {
     background: rgba(16, 185, 129, 0.15);

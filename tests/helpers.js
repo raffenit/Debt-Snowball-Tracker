@@ -41,6 +41,7 @@ export {
 // Rollover logic
 export {
     calculateMonthRollover,
+    buildRetroArchive,
 } from '../src/core/rollover.js';
 
 // Card-expense budget sync

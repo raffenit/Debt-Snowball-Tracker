@@ -582,6 +582,56 @@ var DebtSnowballApp = (() => {
       }
     };
   }
+  function buildRetroArchive(state, monthKey) {
+    const {
+      debts: debts2 = [],
+      recurringCosts: recurringCosts2 = [],
+      oneTimeCosts = [],
+      incomeEntries: incomeEntries2 = [],
+      spendingBudgets = []
+    } = state;
+    const isCashCost = (c) => c.paymentMethod !== "card";
+    const [y, m] = monthKey.split("-").map(Number);
+    const htmlMk = `${y}-${String(m + 1).padStart(2, "0")}`;
+    const income = [
+      ...generateRecurringIncomeForMonth(incomeEntries2, monthKey),
+      ...incomeEntries2.filter((e) => (e.scheduleType || e.schedule) === "one-time" && (e.date || "").slice(0, 7) === htmlMk)
+    ];
+    const cashCostsDue = [
+      ...recurringCosts2.filter((c) => isCostDueInMonth(c, monthKey) && isCashCost(c)),
+      ...oneTimeCosts.filter((c) => c.addedMonth === monthKey && isCashCost(c))
+    ];
+    const totalIncome = income.reduce((s, e) => s + e.amount, 0);
+    const totalCosts = cashCostsDue.reduce((s, c) => s + c.amount, 0);
+    const shells = (spendingBudgets || []).map((b) => ({
+      ...b,
+      expenses: [],
+      exception: b.exception?.month === monthKey ? b.exception : null
+    }));
+    const { budgets } = syncCardExpenses({
+      recurringCosts: recurringCosts2,
+      oneTimeCosts,
+      spendingBudgets: shells,
+      monthKey,
+      skips: []
+    });
+    return {
+      month: monthKey,
+      label: formatMonthLabel(monthKey),
+      incomeEntries: income,
+      recurringCosts: [...recurringCosts2],
+      oneTimeCosts: oneTimeCosts.filter((c) => c.addedMonth === monthKey),
+      checkpoints: [],
+      debts: debts2.map((d) => ({ ...d })),
+      spendingBudgets: budgets,
+      startingBalance: 0,
+      paidStatus: {},
+      totalIncome,
+      totalCosts,
+      finalBalance: totalIncome - totalCosts,
+      retro: true
+    };
+  }
   var init_rollover = __esm({
     "src/core/rollover.js"() {
       init_date_utils();
@@ -982,7 +1032,7 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.7.0";
+      PANEL_VERSION = "2.8.0";
       PANEL_BUILD_DATE = "2026-09-22";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
@@ -1711,6 +1761,7 @@ var DebtSnowballApp = (() => {
     body.innerHTML = "";
     if (appState.monthlyArchives.length === 0) {
       body.innerHTML = '<div class="archive-empty">No archived months yet.<br>History is saved automatically when each month rolls over.</div>';
+      _appendArchiveAdder(body);
       showModal(appState._root.getElementById("archive-modal"));
       _renderServerBackups(body);
       return;
@@ -1733,6 +1784,7 @@ var DebtSnowballApp = (() => {
       summary.className = "archive-summary";
       const fmt = (n) => typeof n === "number" ? formatMoney(n) : "$0.00";
       summary.innerHTML = `
+            ${a.retro ? `<div class="archive-retro-badge" title="This month was reconstructed after the fact \u2014 verify the numbers">\u27F2 Reconstructed</div>` : ""}
             <div class="archive-summary-row">
                 <span class="archive-summary-label">Starting Balance</span>
                 <span class="archive-summary-value">${fmt(a.startingBalance)}</span>
@@ -1806,8 +1858,49 @@ var DebtSnowballApp = (() => {
     }
     renderArchiveDetail(0);
     select.addEventListener("change", () => renderArchiveDetail(Number(select.value)));
+    _appendArchiveAdder(body);
     showModal(appState._root.getElementById("archive-modal"));
     _renderServerBackups(body);
+  }
+  function _appendArchiveAdder(body) {
+    const wrap = document.createElement("div");
+    wrap.className = "archive-add";
+    wrap.innerHTML = `
+        <div class="archive-backups-title">\u2795 Add a Missing Month</div>
+        <div class="archive-add-row">
+            <input type="month" class="retro-month-input">
+            <button class="btn btn-secondary btn-sm">Add</button>
+        </div>
+        <div class="archive-add-hint">Rebuilt from your recurring income, bills, and budgets \u2014 card charges are mirrored automatically. Fill in cash expenses by opening the month via \u2039 Prev on the Cash Flow tab.</div>`;
+    body.appendChild(wrap);
+    const input = wrap.querySelector(".retro-month-input");
+    wrap.querySelector("button").addEventListener("click", async () => {
+      const { showErrorToast: showErrorToast2, showSavedToast: showSavedToast2 } = await Promise.resolve().then(() => (init_render_modals(), render_modals_exports));
+      const { reportError: reportError2 } = await Promise.resolve().then(() => (init_error_report(), error_report_exports));
+      const val = input.value;
+      if (!val) {
+        showErrorToast2("Pick a month first.");
+        return;
+      }
+      const monthKey = htmlMonthToKey(val);
+      const workKey = appState.workingMonthKey || currentMonthKey();
+      if (monthKeyToIndex(monthKey) >= monthKeyToIndex(workKey)) {
+        showErrorToast2("Only past months can be reconstructed \u2014 the current month is live.");
+        return;
+      }
+      if (appState.monthlyArchives.some((a) => a.month === monthKey)) {
+        showErrorToast2("That month is already in history.");
+        return;
+      }
+      const archive = buildRetroArchive(appState, monthKey);
+      const idx = appState.monthlyArchives.findIndex((a) => monthKeyToIndex(a.month) < monthKeyToIndex(monthKey));
+      if (idx === -1) appState.monthlyArchives.push(archive);
+      else appState.monthlyArchives.splice(idx, 0, archive);
+      const { saveDataAndRender: saveDataAndRender2 } = await Promise.resolve().then(() => (init_storage(), storage_exports));
+      await saveDataAndRender2();
+      openArchiveModal();
+      showSavedToast2(`${archive.label} added \u2014 open it via \u2039 Prev Month to fill in details \u2713`);
+    });
   }
   async function _renderServerBackups(body) {
     const wrap = document.createElement("div");
@@ -1957,6 +2050,8 @@ This replaces ALL current data with that snapshot.`)) {
     "src/app/modals.js"() {
       init_state();
       init_pure_utils();
+      init_date_utils();
+      init_rollover();
     }
   });
 
@@ -3919,6 +4014,31 @@ This replaces ALL current data with that snapshot.`)) {
   });
 
   // src/app/render-modals.js
+  var render_modals_exports = {};
+  __export(render_modals_exports, {
+    closeCostModal: () => closeCostModal,
+    closeDebtModal: () => closeDebtModal,
+    closeIncomeModal: () => closeIncomeModal,
+    deleteCost: () => deleteCost,
+    deleteDebt: () => deleteDebt,
+    deleteIncome: () => deleteIncome,
+    dismissToast: () => dismissToast,
+    openCostModal: () => openCostModal,
+    openDebtModal: () => openDebtModal,
+    openIncomeModal: () => openIncomeModal,
+    renderUI: () => renderUI,
+    saveCost: () => saveCost,
+    saveDebt: () => saveDebt,
+    saveIncome: () => saveIncome,
+    showErrorToast: () => showErrorToast,
+    showInlineConfirm: () => showInlineConfirm,
+    showSanityWarningsModal: () => showSanityWarningsModal,
+    showSavedToast: () => showSavedToast,
+    showUndoToast: () => showUndoToast,
+    togglePaid: () => togglePaid,
+    updateHASensors: () => updateHASensors,
+    updateIncomeScheduleHint: () => updateIncomeScheduleHint
+  });
   function openDebtModal(debtId = null) {
     appState.debtForm.reset();
     appState._root.getElementById("debt-id").value = "";
@@ -7502,6 +7622,42 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     color: var(--text-secondary);
     font-size: 0.875rem;
     padding: 2rem 1rem;
+}
+.archive-add {
+    margin-top: 1.25rem;
+    border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
+    padding-top: 0.75rem;
+}
+.archive-add-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.archive-add-row input[type="month"] {
+    flex: 1;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+    background: rgba(7,6,26,0.7);
+    border: 1px solid var(--border-bright);
+    border-radius: 7px;
+    color: var(--text-primary);
+    font-family: inherit;
+}
+.archive-add-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.4rem;
+    line-height: 1.4;
+}
+.archive-retro-badge {
+    display: inline-block;
+    background: rgba(251,191,36,0.12);
+    color: var(--warning-color);
+    border: 1px solid rgba(251,191,36,0.3);
+    border-radius: 999px;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.5rem;
+    margin-bottom: 0.5rem;
 }
 
 .income-badge {

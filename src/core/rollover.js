@@ -10,7 +10,7 @@ import {
     monthKeyToIndex,
     addMonthsToKey,
 } from './date-utils.js';
-import { cashExpensesForMonth } from './card-expenses.js';
+import { cashExpensesForMonth, syncCardExpenses } from './card-expenses.js';
 
 /**
  * Calculate the state transition when closing one month and opening the next.
@@ -109,5 +109,76 @@ export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
             minPayOverrides: {},
             spendingBudgets: nextBudgets,
         },
+    };
+}
+
+/**
+ * Reconstruct an archive for a month that was never rolled over.
+ *
+ * The archive mirrors what calculateMonthRollover would have captured:
+ * recurring income is projected onto the month (biweekly series included),
+ * stored one-time income dated in the month carries over, budget categories
+ * become empty shells the user can fill via archive editing, and card-paid
+ * bills are mirrored in as auto expenses via the normal sync.
+ *
+ * startingBalance is 0 and totals are computed from the reconstruction —
+ * the archive is marked `retro` so the UI can disclose it was rebuilt.
+ *
+ * @param {Object} state - Live app state (debts, costs, income, budgets)
+ * @param {string} monthKey - Month to reconstruct ("YYYY-M", 0-indexed month)
+ * @returns {Object} Archive snapshot suitable for monthlyArchives
+ */
+export function buildRetroArchive(state, monthKey) {
+    const {
+        debts = [],
+        recurringCosts = [],
+        oneTimeCosts = [],
+        incomeEntries = [],
+        spendingBudgets = [],
+    } = state;
+    const isCashCost = c => c.paymentMethod !== 'card';
+    const [y, m] = monthKey.split('-').map(Number);
+    const htmlMk = `${y}-${String(m + 1).padStart(2, '0')}`;
+
+    const income = [
+        ...generateRecurringIncomeForMonth(incomeEntries, monthKey),
+        ...incomeEntries.filter(e =>
+            (e.scheduleType || e.schedule) === 'one-time' && (e.date || '').slice(0, 7) === htmlMk),
+    ];
+
+    const cashCostsDue = [
+        ...recurringCosts.filter(c => isCostDueInMonth(c, monthKey) && isCashCost(c)),
+        ...oneTimeCosts.filter(c => c.addedMonth === monthKey && isCashCost(c)),
+    ];
+    const totalIncome = income.reduce((s, e) => s + e.amount, 0);
+    const totalCosts  = cashCostsDue.reduce((s, c) => s + c.amount, 0);
+
+    // Budget shells (no manual expenses — user fills those in) then mirror
+    // that month's card-paid bills in through the normal sync so card
+    // spending shows up without manual re-entry.
+    const shells = (spendingBudgets || []).map(b => ({
+        ...b,
+        expenses: [],
+        exception: b.exception?.month === monthKey ? b.exception : null,
+    }));
+    const { budgets } = syncCardExpenses({
+        recurringCosts, oneTimeCosts, spendingBudgets: shells, monthKey, skips: [],
+    });
+
+    return {
+        month: monthKey,
+        label: formatMonthLabel(monthKey),
+        incomeEntries: income,
+        recurringCosts: [...recurringCosts],
+        oneTimeCosts: oneTimeCosts.filter(c => c.addedMonth === monthKey),
+        checkpoints: [],
+        debts: debts.map(d => ({ ...d })),
+        spendingBudgets: budgets,
+        startingBalance: 0,
+        paidStatus: {},
+        totalIncome,
+        totalCosts,
+        finalBalance: totalIncome - totalCosts,
+        retro: true,
     };
 }

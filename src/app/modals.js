@@ -1,5 +1,7 @@
 import { appState } from './state.js';
 import { escHtml, formatMoney } from '../core/pure-utils.js';
+import { htmlMonthToKey, monthKeyToIndex, currentMonthKey } from '../core/date-utils.js';
+import { buildRetroArchive } from '../core/rollover.js';
 
 function updateCostModalIntervalVisibility() {
     const cat      = appState._root.getElementById('cost-category').value;
@@ -33,6 +35,7 @@ function openArchiveModal() {
 
     if (appState.monthlyArchives.length === 0) {
         body.innerHTML = '<div class="archive-empty">No archived months yet.<br>History is saved automatically when each month rolls over.</div>';
+        _appendArchiveAdder(body);
         showModal(appState._root.getElementById('archive-modal'));
         _renderServerBackups(body);
         return;
@@ -62,6 +65,7 @@ function openArchiveModal() {
         const fmt = n => typeof n === 'number' ? formatMoney(n) : '$0.00';
 
         summary.innerHTML = `
+            ${a.retro ? `<div class="archive-retro-badge" title="This month was reconstructed after the fact — verify the numbers">⟲ Reconstructed</div>` : ''}
             <div class="archive-summary-row">
                 <span class="archive-summary-label">Starting Balance</span>
                 <span class="archive-summary-value">${fmt(a.startingBalance)}</span>
@@ -150,8 +154,51 @@ function openArchiveModal() {
     renderArchiveDetail(0);
     select.addEventListener('change', () => renderArchiveDetail(Number(select.value)));
 
+    _appendArchiveAdder(body);
     showModal(appState._root.getElementById('archive-modal'));
     _renderServerBackups(body);
+}
+
+// "Add a missing month" — reconstructs an archive for a month that was never
+// rolled over, so the user can fill it in via archive editing.
+function _appendArchiveAdder(body) {
+    const wrap = document.createElement('div');
+    wrap.className = 'archive-add';
+    wrap.innerHTML = `
+        <div class="archive-backups-title">➕ Add a Missing Month</div>
+        <div class="archive-add-row">
+            <input type="month" class="retro-month-input">
+            <button class="btn btn-secondary btn-sm">Add</button>
+        </div>
+        <div class="archive-add-hint">Rebuilt from your recurring income, bills, and budgets — card charges are mirrored automatically. Fill in cash expenses by opening the month via ‹ Prev on the Cash Flow tab.</div>`;
+    body.appendChild(wrap);
+
+    const input = wrap.querySelector('.retro-month-input');
+    wrap.querySelector('button').addEventListener('click', async () => {
+        const { showErrorToast, showSavedToast } = await import('./render-modals.js');
+        const { reportError } = await import('./error-report.js');
+        const val = input.value;
+        if (!val) { showErrorToast('Pick a month first.'); return; }
+        const monthKey = htmlMonthToKey(val);
+        const workKey  = appState.workingMonthKey || currentMonthKey();
+        if (monthKeyToIndex(monthKey) >= monthKeyToIndex(workKey)) {
+            showErrorToast('Only past months can be reconstructed — the current month is live.');
+            return;
+        }
+        if (appState.monthlyArchives.some(a => a.month === monthKey)) {
+            showErrorToast('That month is already in history.');
+            return;
+        }
+        const archive = buildRetroArchive(appState, monthKey);
+        // Archives are newest-first — insert before the first older one
+        const idx = appState.monthlyArchives.findIndex(a => monthKeyToIndex(a.month) < monthKeyToIndex(monthKey));
+        if (idx === -1) appState.monthlyArchives.push(archive);
+        else appState.monthlyArchives.splice(idx, 0, archive);
+        const { saveDataAndRender } = await import('./storage.js');
+        await saveDataAndRender();
+        openArchiveModal(); // refresh the list with the new entry selected-ready
+        showSavedToast(`${archive.label} added — open it via ‹ Prev Month to fill in details ✓`);
+    });
 }
 
 // ─── Server backups ──────────────────────────────────────────────────────────

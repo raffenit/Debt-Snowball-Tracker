@@ -303,3 +303,66 @@ describe('calculateMonthRollover', () => {
         assert.equal(archive.totalCosts, 1050);
     });
 });
+
+// ─── buildRetroArchive ────────────────────────────────────────────────────────
+
+import { buildRetroArchive } from './helpers.js';
+
+describe('buildRetroArchive', () => {
+
+    test('reconstructs income, cash costs, and totals for a past month', () => {
+        const a = buildRetroArchive(baseState({
+            incomeEntries: [{ id: 'i1', label: 'Salary', amount: 3000, date: '2026-04-15', scheduleType: 'monthly', scheduleDay: 15 }],
+            recurringCosts: [
+                { id: 'c1', name: 'Rent', amount: 1000, paymentMethod: 'direct' },
+                { id: 'c2', name: 'Netflix', amount: 15, paymentMethod: 'card' },
+            ],
+        }), '2026-7'); // August 2026
+
+        assert.equal(a.month, '2026-7');
+        assert.equal(a.label, 'August 2026');
+        assert.equal(a.retro, true);
+        assert.equal(a.totalIncome, 3000);
+        assert.equal(a.incomeEntries[0].date, '2026-08-15');   // projected onto August
+        assert.equal(a.totalCosts, 1000);                       // card bill excluded from cash costs
+        assert.equal(a.finalBalance, 2000);
+    });
+
+    test('card bills are mirrored into budget shells as auto expenses', () => {
+        const a = buildRetroArchive(baseState({
+            recurringCosts: [{ id: 'c2', name: 'Subs', amount: 15, paymentMethod: 'card', dueDay: 10 }],
+            spendingBudgets: [{ id: 'b1', name: 'Subs', amount: 50, expenses: [{ id: 'x', amount: 5 }] }],
+        }), '2026-7');
+
+        const shell = a.spendingBudgets.find(b => b.id === 'b1');
+        assert.deepEqual(shell.expenses.filter(e => !e.autoCard), []);   // manual expenses cleared
+        const auto = shell.expenses.find(e => e.autoCard);
+        assert.ok(auto, 'card charge mirrored into the budget');
+        assert.equal(auto.amount, 15);
+        assert.equal(auto.date, '2026-08-10');
+    });
+
+    test('one-time costs/income only land in their own month', () => {
+        const a = buildRetroArchive(baseState({
+            incomeEntries: [{ id: 'i9', label: 'Bonus', amount: 500, date: '2026-08-03', scheduleType: 'one-time' }],
+            oneTimeCosts: [
+                { id: 'o1', name: 'Gift', amount: 60, addedMonth: '2026-7', paymentMethod: 'direct' },
+                { id: 'o2', name: 'Other month', amount: 40, addedMonth: '2026-6', paymentMethod: 'direct' },
+            ],
+        }), '2026-7');
+
+        assert.equal(a.totalIncome, 500);
+        assert.equal(a.totalCosts, 60);
+        assert.deepEqual(a.oneTimeCosts.map(c => c.id), ['o1']);
+    });
+
+    test('biweekly income series regenerates the right dates for the month', () => {
+        const a = buildRetroArchive(baseState({
+            incomeEntries: [{ id: 'i1', label: 'Paycheck', amount: 1500, scheduleType: 'biweekly', scheduleAnchorDate: '2026-09-05' }],
+        }), '2026-8'); // September 2026
+
+        // Sep 5 + 19 on a 14-day cycle from the anchor
+        assert.deepEqual(a.incomeEntries.map(e => e.date), ['2026-09-05', '2026-09-19']);
+        assert.equal(a.totalIncome, 3000);
+    });
+});
