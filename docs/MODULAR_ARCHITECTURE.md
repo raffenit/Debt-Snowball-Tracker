@@ -107,7 +107,11 @@ User Action → events.js → mutates state (state-shim.js)
 | `rollover.js` | `tests/rollover.test.js` — 13 tests covering archive, final balance, cost pruning, interval advancement, income regeneration, budget reset, one-time cost handling |
 | `date-utils.js` | `tests/date-utils.test.js` — round-trip tests for `keyToHtmlMonth` / `htmlMonthToKey` |
 | `simulation.js` | `tests/app.extended.test.js` — windfall allocation, strategy ordering, effective budget |
-| `card-expenses.js` | `tests/card-expenses.test.js` — card-charge → budget sync, budget matching, due-day gating, tombstones, pay-in-full sustainability, per-card totals |
+| `card-expenses.js` | `tests/card-expenses.test.js` — card-charge → budget sync, budget/category routing (incl. `budgetCategory` override + `autopay` sentinel), category auto-budgets, tombstones, pay-in-full sustainability, per-card totals |
+| `backups.js` | `tests/backups.test.js` — import/backup validation, month-scoped field filtering, backup-slot rotation, archive budget view selection |
+| `budgets.js` | `tests/budgets.test.js` — category auto-budget creation/routing, auto-budget lifecycle, limit formatting |
+| `health.js` | `tests/health.test.js` — `sanitizeData()` repair pass for stored/imported data, issue reporting, fatal detection |
+| `sanity.js` | `tests/sanity.test.js` — `checkDataSanity()` advisory anomaly detection (duplicates, drift, dangling refs, bad amounts) |
 | `advance.js` | Integration via `calculateMonthRollover()` tests; async HA API calls mocked |
 | `storage.js` | Mock `_root._hass.connection.sendMessagePromise` |
 | Render modules | Build the dist file, assert it loads without syntax errors; `tests/build.test.js` verifies module presence and marker order |
