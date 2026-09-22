@@ -1819,6 +1819,60 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     outline: 2px dashed var(--accent-color);
     outline-offset: 3px;
 }
+.budget-drag-handle {
+    cursor: grab;
+    color: var(--text-secondary);
+    opacity: 0.45;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+    padding: 0 0.1rem;
+    transition: opacity 0.15s ease;
+}
+.budget-drag-handle:hover {
+    opacity: 0.9;
+}
+.budget-card.dragging {
+    opacity: 0.45;
+}
+.budget-card.budget-reorder-target {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 3px;
+    background: rgba(91, 127, 255, 0.06);
+}
+.card-charges-detail {
+    display: inline-block;
+}
+.card-charges-detail > summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.card-charges-detail > summary::before {
+    content: '▸ ';
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+.card-charges-detail[open] > summary::before {
+    content: '▾ ';
+}
+.card-charge-items {
+    margin: 0.4rem 0 0.2rem 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.card-charge-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 1.5rem;
+}
+.card-charge-hint {
+    font-style: italic;
+    opacity: 0.75;
+    margin-top: 0.3rem;
+}
 .schedule-row.drop-target {
     outline: 2px dashed var(--accent-color);
     outline-offset: -2px;
@@ -4368,6 +4422,19 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group">
                     <label for="expense-date">Date</label>
                     <input type="date" id="expense-date">
+                </div>
+                <div class="input-group">
+                    <label for="expense-payment-method">Paid Via</label>
+                    <select id="expense-payment-method">
+                        <option value="direct">Debit / Cash / Bank (deducts from cash flow)</option>
+                        <option value="card">Credit Card (adds to card balance)</option>
+                    </select>
+                </div>
+                <div class="input-group" id="expense-card-debt-group" style="display:none;">
+                    <label for="expense-card-debt">Charged To Which Card?</label>
+                    <select id="expense-card-debt">
+                        <option value="">— Unspecified card —</option>
+                    </select>
                 </div>
                 <div class="input-group">
                     <label for="expense-budget-select">Budget</label>

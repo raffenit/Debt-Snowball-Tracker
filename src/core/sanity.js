@@ -127,6 +127,21 @@ export function checkDataSanity(s) {
         out.push(w('dangling-skips', 'cardExpenseSkips', 'notice',
             `${danglingSkips.length} card-expense skip(s) reference deleted bills — they can never match.`));
     }
+    // Manual expenses charged to a card that no longer exists
+    const danglingCard = budgets.reduce((n, b) =>
+        n + (b.expenses || []).filter(e => e.cardDebtId && !knownIds.has(e.cardDebtId)).length, 0);
+    if (danglingCard) {
+        out.push(w('dangling-carddebt', 'spendingBudgets', 'notice',
+            `${danglingCard} expense(s) charged to a card that no longer exists — they won't count toward any card's total.`));
+    }
+    // A bill linked to a card but marked 'direct' is silently misclassified:
+    // excluded from card totals AND wrongly counted as a cash outflow.
+    const misrouted = [...recurringCosts, ...oneTimeCosts]
+        .filter(c => c.cardDebtId && c.paymentMethod !== 'card');
+    if (misrouted.length) {
+        out.push(w('card-method-mismatch', 'recurringCosts', 'warning',
+            `${misrouted.length} bill(s) linked to a card but marked "direct" (e.g. "${misrouted[0].name}") — they're excluded from card totals and counted as cash. Edit the bill's Payment Method to Card.`));
+    }
 
     // ─── Month-scoped consistency ────────────────────────────────────────────
     const htmlMk = s.workingMonthKey ? keyToHtmlMonth(s.workingMonthKey) : null;
@@ -166,6 +181,20 @@ export function checkDataSanity(s) {
         if (prev.totalCosts > 0 && costTotal > prev.totalCosts * 2.5) {
             out.push(w('cost-jump', 'recurringCosts', 'warning',
                 `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}× last month's — possible duplication.`));
+        }
+
+        // A manual expense repeated from last month's archive is probably a
+        // recurring bill the user forgot to convert — suggest it.
+        const prevExpKeys = new Set((prev.spendingBudgets || [])
+            .flatMap(b => (b.expenses || []).filter(e => !e.autoCard)
+                .map(e => `${(e.description || '').toLowerCase().trim()}|${e.amount}`)));
+        if (prevExpKeys.size) {
+            const repeats = budgets.flatMap(b => (b.expenses || [])
+                .filter(e => !e.autoCard && prevExpKeys.has(`${(e.description || '').toLowerCase().trim()}|${e.amount}`)));
+            if (repeats.length) {
+                out.push(w('repeat-expenses', 'spendingBudgets', 'notice',
+                    `${repeats.length} expense(s) also appeared in ${prev.label || 'last month'} (e.g. "${repeats[0].description}") — if recurring, hit 🔁 on the row to make it a bill.`));
+            }
         }
     }
 

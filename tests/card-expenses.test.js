@@ -487,6 +487,50 @@ describe('cardChargesByDebt', () => {
         assert.deepEqual(r.byDebt, {});
         assert.equal(r.unassigned, 0);
     });
+
+    test('manual card expenses count toward their linked card', () => {
+        const r = cardChargesByDebt({
+            spendingBudgets: [{
+                id: 'b1', name: 'Fun',
+                expenses: [
+                    { id: 'e1', description: 'Concert', amount: 60, date: '2026-09-12', paymentMethod: 'card', cardDebtId: 'd1' },
+                    { id: 'e2', description: 'Card, no link', amount: 20, date: '2026-09-15', paymentMethod: 'card' },
+                    { id: 'e3', description: 'Cash purchase', amount: 30, date: '2026-09-15' }, // direct — ignored
+                ],
+            }],
+            monthKey: MONTH,
+        });
+        assert.deepEqual(r.byDebt, { d1: 60 });
+        assert.equal(r.unassigned, 20);
+    });
+
+    test('manual card expenses respect month boundaries like cash expenses', () => {
+        const r = cardChargesByDebt({
+            spendingBudgets: [{
+                id: 'b1', name: 'Fun',
+                expenses: [
+                    { id: 'e1', description: 'In month', amount: 60, date: '2026-09-12', paymentMethod: 'card', cardDebtId: 'd1' },
+                    { id: 'e2', description: 'Last month', amount: 20, date: '2026-08-12', paymentMethod: 'card', cardDebtId: 'd1' },
+                    { id: 'e3', description: 'Undated', amount: 10, paymentMethod: 'card', cardDebtId: 'd1' },
+                    { id: 'e4', description: 'Auto mirror', amount: 99, autoCard: true, paymentMethod: 'card', cardDebtId: 'd1' }, // autoCard exempt — bills carry it
+                ],
+            }],
+            monthKey: MONTH,
+        });
+        assert.equal(r.byDebt.d1, 70); // 60 + undated 10; excludes Aug + autoCard
+    });
+
+    test('manual card expenses flow into payoff sustainability', () => {
+        const s = computeCardPayoffStatus({
+            incomeEntries: [{ id: 'i1', amount: 1000 }],
+            spendingBudgets: [{ id: 'b1', name: 'X', expenses: [
+                { id: 'e1', description: 'Card buy', amount: 400, date: '2026-09-10', paymentMethod: 'card', cardDebtId: 'd1' },
+            ]}],
+            monthKey: MONTH,
+        });
+        assert.equal(s.cardCharges, 400);
+        assert.equal(s.byDebt.d1, 400);
+    });
 });
 
 describe('cashExpensesForMonth', () => {
@@ -532,9 +576,42 @@ describe('cashExpensesForMonth', () => {
         assert.equal(cashExpensesForMonth(budgets, MONTH).length, 1);
     });
 
+    test('excludes manual card-paid expenses — they land on the card, not cash', () => {
+        const budgets = [{
+            id: 'b1', name: 'Misc',
+            expenses: [
+                { id: 'e1', description: 'Debit purchase', amount: 10, date: '2026-09-01' },
+                { id: 'e2', description: 'Credit purchase', amount: 50, date: '2026-09-02', paymentMethod: 'card', cardDebtId: 'd1' },
+            ],
+        }];
+        const out = cashExpensesForMonth(budgets, MONTH);
+        assert.equal(out.length, 1);
+        assert.equal(out[0].id, 'e1');
+    });
+
     test('handles missing budgets/expenses gracefully', () => {
         assert.deepEqual(cashExpensesForMonth([], MONTH), []);
         assert.deepEqual(cashExpensesForMonth(undefined, MONTH), []);
         assert.deepEqual(cashExpensesForMonth([{ id: 'b1', name: 'X' }], MONTH), []);
     });
 });
+
+    test('items lists every contributing charge with its card and source', () => {
+        const r = cardChargesByDebt({
+            recurringCosts: [
+                cardCost({ id: 'c1', name: 'Netflix', amount: 15, cardDebtId: 'd1' }),
+            ],
+            spendingBudgets: [{
+                id: 'b1', name: 'Fun',
+                expenses: [
+                    { id: 'e1', description: 'Concert', amount: 60, date: '2026-09-12', paymentMethod: 'card' },
+                    { id: 'e2', description: 'Auto mirror', amount: 15, autoCard: true, costId: 'c1' }, // counted via cost side — skipped here
+                ],
+            }],
+            monthKey: MONTH,
+        });
+        assert.deepEqual(r.items, [
+            { name: 'Netflix', amount: 15, debtId: 'd1', source: 'bill' },
+            { name: 'Concert', amount: 60, debtId: null, source: 'expense' },
+        ]);
+    });

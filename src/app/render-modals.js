@@ -3,6 +3,7 @@ import { currentMonthKey, generateBiweeklyForMonth, htmlMonthToKey, isCostDueThi
 import { escHtml } from '../core/pure-utils.js';
 import { getStrategyOrder, runSimulation } from '../core/simulation.js';
 import { syncCardExpenses, cashExpensesForMonth } from '../core/card-expenses.js';
+import { consumeConvertedExpense } from '../core/budgets.js';
 import { updateCostModalIntervalVisibility, showCategorizeModal, showDataHealthModal } from './modals.js';
 import { renderCheckpointsList } from './render-checkpoints.js';
 import { renderSpendingBudgets } from './render-budgets.js';
@@ -71,7 +72,9 @@ function closeDebtModal() {
 }
 
 // ─── Recurring Cost Modal ────────────────────────────────────────────────────
-function openCostModal(costId = null) {
+// `prefill` seeds a new bill from another record — used by the budget
+// expense "convert to recurring" flow.
+function openCostModal(costId = null, prefill = null) {
     appState.costForm.reset();
     appState._root.getElementById('cost-id').value = '';
     appState._root.getElementById('cost-autopay-toggle').checked = false;
@@ -123,10 +126,19 @@ function openCostModal(costId = null) {
             }
         }
     } else {
-        appState._root.getElementById('cost-modal-title').textContent = 'Add Bill';
+        appState._root.getElementById('cost-modal-title').textContent = prefill ? 'Convert to Recurring Bill' : 'Add Bill';
         appState._root.getElementById('cost-payment-method').value = 'direct';
         appState._root.getElementById('cost-amount-type').value = 'fixed';
         appState._root.getElementById('cost-interval').value = '1';
+        if (prefill) {
+            appState._root.getElementById('cost-name').value            = prefill.name || '';
+            appState._root.getElementById('cost-amount').value          = prefill.amount ?? '';
+            appState._root.getElementById('cost-due-day').value         = prefill.dueDay || 1;
+            appState._root.getElementById('cost-category').value        = prefill.category || 'other';
+            appState._root.getElementById('cost-payment-method').value  = prefill.paymentMethod || 'direct';
+            appState._root.getElementById('cost-budget').value          = prefill.budgetId || '';
+            appState._root.getElementById('cost-card-debt').value       = prefill.cardDebtId || '';
+        }
     }
     updateCostModalIntervalVisibility();
 
@@ -137,6 +149,7 @@ function openCostModal(costId = null) {
 }
 
 function closeCostModal() {
+    appState._expenseToConvert = null; // cancel any pending expense→bill conversion
     appState.costModal.classList.remove('active');
     setTimeout(() => { appState.costModal.style.display = 'none'; }, 300);
 }
@@ -303,7 +316,26 @@ function saveCost() {
             }
         } else {
             const nextDueMonth = intervalMonths > 1 ? (startMonthKey ?? currentMonthKey()) : undefined;
-            targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth, budgetId, cardDebtId });
+            const newId = Date.now().toString();
+            targetArray.push({ id: newId, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth, budgetId, cardDebtId });
+
+            // Expense→bill conversion: consume the manual expense it replaces
+            // (live month only — archives are history) and mark paid when the
+            // money already left, so converting doesn't double-count the
+            // spend or resurrect a paid purchase as an unpaid bill.
+            const conv = appState._expenseToConvert;
+            if (conv) {
+                appState._expenseToConvert = null;
+                if (!conv.fromArchive) {
+                    const result = consumeConvertedExpense(appState.spendingBudgets, {
+                        budgetId: conv.budgetId, expenseId: conv.expenseId,
+                        paymentMethod, todayISO: new Date().toISOString().slice(0, 10),
+                    });
+                    if (result?.markPaid) {
+                        appState.paidStatus[newId] = { status: 'paid', amount: result.removed.amount };
+                    }
+                }
+            }
         }
 
         saveDataAndRender();

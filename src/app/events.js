@@ -5,7 +5,8 @@ import { advanceToNextMonth } from './advance.js';
 import { closeArchiveModal, openArchiveModal, updateCostModalIntervalVisibility } from './modals.js';
 import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSanityWarningsModal, showSavedToast, togglePaid, updateIncomeScheduleHint } from './render-modals.js';
 import { closeCheckpointModal, openCheckpointModal, renderCheckpointsList, saveCheckpoint } from './render-checkpoints.js';
-import { closeBudgetModal, closeExpenseModal, deleteBudget, deleteExpense, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
+import { closeBudgetModal, closeExpenseModal, convertExpenseToBill, deleteBudget, deleteExpense, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
+import { reorderBudgets } from '../core/budgets.js';
 import { renderRecurringCostsList } from './render-lists.js';
 import { exportData, importData } from './render-export.js';
 import { saveData, saveDataAndRender, createServerBackup } from './storage.js';
@@ -64,7 +65,8 @@ function setupEventListeners() {
     // Delegated click handler for all budget card interactions
     appState._root.getElementById('budgets-list').addEventListener('click', e => {
         const toggle = e.target.closest('[data-toggle-budget]');
-        if (toggle) {
+        // Buttons inside the header (edit, etc.) get their own handlers — don't toggle
+        if (toggle && !e.target.closest('button')) {
             const bid = toggle.dataset.toggleBudget;
             if (appState.expandedBudgets.has(bid)) {
                 appState.expandedBudgets.delete(bid);
@@ -123,6 +125,10 @@ function setupEventListeners() {
         const editExp = e.target.closest('.btn-edit-expense');
         if (editExp) { openExpenseModal(editExp.dataset.budgetId, editExp.dataset.expenseId); return; }
 
+        // Convert manual expense to a recurring bill
+        const toRecurring = e.target.closest('.btn-expense-torecurring');
+        if (toRecurring) { convertExpenseToBill(toRecurring.dataset.budgetId, toRecurring.dataset.expenseId); return; }
+
         const delExp = e.target.closest('.btn-delete-expense');
         if (delExp) {
             // Animate the row out before removing
@@ -150,6 +156,18 @@ function setupEventListeners() {
     const budgetsList = appState._root.getElementById('budgets-list');
 
     budgetsList.addEventListener('dragstart', e => {
+        const handle = e.target.closest('.budget-drag-handle');
+        if (handle) {
+            const card = handle.closest('.budget-card');
+            if (!card) return;
+            appState._budgetDragId = card.dataset.budgetId;
+            e.dataTransfer.setData('text/plain', JSON.stringify({
+                budgetDragId: card.dataset.budgetId,
+            }));
+            e.dataTransfer.effectAllowed = 'move';
+            card.classList.add('dragging');
+            return;
+        }
         const row = e.target.closest('.budget-expense-row[draggable="true"]');
         if (!row) return;
         e.dataTransfer.setData('text/plain', JSON.stringify({
@@ -160,28 +178,46 @@ function setupEventListeners() {
         row.classList.add('dragging');
     });
     budgetsList.addEventListener('dragend', e => {
+        appState._budgetDragId = null;
         e.target.closest('.budget-expense-row')?.classList.remove('dragging');
-        budgetsList.querySelectorAll('.budget-drop-target').forEach(c => c.classList.remove('budget-drop-target'));
+        e.target.closest('.budget-card')?.classList.remove('dragging');
+        budgetsList.querySelectorAll('.budget-drop-target, .budget-reorder-target').forEach(c => c.classList.remove('budget-drop-target', 'budget-reorder-target'));
     });
     budgetsList.addEventListener('dragover', e => {
         const card = e.target.closest('.budget-card');
         if (!card) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
+        if (appState._budgetDragId) {
+            // Reorder mode — highlight the insertion target, not the source card
+            budgetsList.querySelectorAll('.budget-reorder-target').forEach(c => { if (c !== card) c.classList.remove('budget-reorder-target'); });
+            if (card.dataset.budgetId !== appState._budgetDragId) card.classList.add('budget-reorder-target');
+            return;
+        }
         budgetsList.querySelectorAll('.budget-drop-target').forEach(c => { if (c !== card) c.classList.remove('budget-drop-target'); });
         card.classList.add('budget-drop-target');
     });
     budgetsList.addEventListener('dragleave', e => {
         const card = e.target.closest('.budget-card');
-        if (card && !card.contains(e.relatedTarget)) card.classList.remove('budget-drop-target');
+        if (card && !card.contains(e.relatedTarget)) card.classList.remove('budget-drop-target', 'budget-reorder-target');
     });
     budgetsList.addEventListener('drop', e => {
         const card = e.target.closest('.budget-card');
         if (!card) return;
         e.preventDefault();
-        card.classList.remove('budget-drop-target');
+        card.classList.remove('budget-drop-target', 'budget-reorder-target');
         let payload;
         try { payload = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+        if (payload?.budgetDragId) {
+            // Reorder is structural — live month only (handles aren't rendered in archive view)
+            if (appState.viewingArchiveIndex !== null) return;
+            const next = reorderBudgets(appState.spendingBudgets, payload.budgetDragId, card.dataset.budgetId);
+            if (next === appState.spendingBudgets) return;
+            appState.spendingBudgets = next;
+            saveDataAndRender();
+            showSavedToast('Budget order updated ✓');
+            return;
+        }
         if (!payload?.expenseId) return;
         moveExpenseToBudget(payload.expenseId, payload.budgetId, card.dataset.budgetId);
     });
@@ -370,6 +406,12 @@ function setupEventListeners() {
     appState._root.getElementById('cost-category').addEventListener('change', updateCostModalIntervalVisibility);
     appState._root.getElementById('cost-interval').addEventListener('change', updateCostModalIntervalVisibility);
     appState._root.getElementById('cost-payment-method').addEventListener('change', updateCostModalIntervalVisibility);
+
+    // Expense modal: show the card picker only when paid by credit card
+    appState._root.getElementById('expense-payment-method')?.addEventListener('change', e => {
+        const grp = appState._root.getElementById('expense-card-debt-group');
+        if (grp) grp.style.display = e.target.value === 'card' ? '' : 'none';
+    });
 
     // Auto min-payment calc
     appState._root.getElementById('auto-min-btn').addEventListener('click', autoCalcMinPaymentCC);

@@ -265,9 +265,10 @@ function renderDebtsList(simResults) {
 
     // Per-card charge totals for the working month (linked via cost.cardDebtId)
     const _chargesByDebt = isArchiveView ? {} : cardChargesByDebt({
-        recurringCosts: appState.recurringCosts,
-        oneTimeCosts:   appState.oneTimeCosts,
-        monthKey:       appState.workingMonthKey || currentMonthKey(),
+        recurringCosts:  appState.recurringCosts,
+        oneTimeCosts:    appState.oneTimeCosts,
+        spendingBudgets: appState.spendingBudgets,
+        monthKey:        appState.workingMonthKey || currentMonthKey(),
     }).byDebt;
 
     const hasMortgage = _debts.some(d => d.type === 'mortgage');

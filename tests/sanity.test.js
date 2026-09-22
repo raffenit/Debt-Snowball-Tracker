@@ -150,6 +150,19 @@ describe('checkDataSanity — dangling references', () => {
         const ws = checkDataSanity(base({ cardExpenseSkips: ['2026-8:gone'] }));
         assert.ok(ids(ws).includes('dangling-skips'));
     });
+
+    test('expenses linked to a deleted card flag', () => {
+        const ws = checkDataSanity(base({
+            debts: [{ id: 'd1', name: 'Visa', balance: 100 }],
+            spendingBudgets: [{ id: 'b1', name: 'Fun', expenses: [
+                { id: 'e1', description: 'Concert', amount: 60, paymentMethod: 'card', cardDebtId: 'd1' },
+                { id: 'e2', description: 'Ghost card', amount: 20, paymentMethod: 'card', cardDebtId: 'd9' },
+            ]}],
+        }));
+        const w = ws.find(x => x.id === 'dangling-carddebt');
+        assert.ok(w);
+        assert.match(w.detail, /1 expense/);
+    });
 });
 
 // ─── Month consistency ───────────────────────────────────────────────────────
@@ -209,6 +222,29 @@ describe('checkDataSanity — month-over-month', () => {
         assert.ok(ids(ws).includes('cost-jump'));
     });
 
+    test('repeated manual expense across months → convert suggestion', () => {
+        const ws = checkDataSanity(base({
+            monthlyArchives: [{
+                month: '2026-7', totalIncome: 4000, totalCosts: 2000,
+                incomeEntries: [{ id: 'i1' }, { id: 'i2' }],
+                recurringCosts: [{ id: 'c1' }, { id: 'c2' }],
+                spendingBudgets: [{ id: 'b1', name: 'Subs', expenses: [
+                    { id: 'e0', description: 'Netflix', amount: 15, date: '2026-08-10' },
+                ]}],
+            }],
+            spendingBudgets: [{ id: 'b1', name: 'Subs', expenses: [
+                { id: 'e1', description: 'Netflix', amount: 15, date: '2026-09-10' },
+                { id: 'e2', description: 'One-off', amount: 33, date: '2026-09-11' },
+                { id: 'e3', description: 'Netflix', amount: 15, date: '2026-09-10', autoCard: true }, // mirrors don't count
+            ]}],
+        }));
+        const w = ws.find(x => x.id === 'repeat-expenses');
+        assert.ok(w);
+        assert.equal(w.severity, 'notice');
+        assert.match(w.detail, /1 expense/);
+        assert.match(w.detail, /Netflix/);
+    });
+
     test('no archive → no drift checks (fresh install is quiet)', () => {
         const ws = checkDataSanity(base({ incomeEntries: [{ id: 'i1', amount: 99999 }] }));
         assert.ok(!ids(ws).includes('income-jump'));
@@ -222,3 +258,18 @@ describe('checkDataSanity — coverage', () => {
         assert.ok(ids(ws).includes('no-income'));
     });
 });
+
+    test('bill linked to a card but marked direct → warning', () => {
+        const ws = checkDataSanity(base({
+            debts: [{ id: 'd1', name: 'Visa', balance: 500 }],
+            recurringCosts: [{ id: 'c1', name: 'Netflix', amount: 15, paymentMethod: 'direct', cardDebtId: 'd1' }],
+        }));
+        assert.ok(ids(ws).includes('card-method-mismatch'));
+    });
+
+    test('card bill with no linked card → no warning (legit unlinked)', () => {
+        const ws = checkDataSanity(base({
+            recurringCosts: [{ id: 'c1', name: 'Netflix', amount: 15, paymentMethod: 'card' }],
+        }));
+        assert.ok(!ids(ws).includes('card-method-mismatch'));
+    });

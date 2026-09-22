@@ -24,7 +24,7 @@
 //
 // Pure functions only — callers own state mutation and persistence.
 
-import { isCostDueInMonth } from './date-utils.js';
+import { isCostDueInMonth, keyToHtmlMonth } from './date-utils.js';
 
 export const CARD_AUTOPAY_BUDGET_ID   = 'auto-card-autopay';
 export const CARD_AUTOPAY_BUDGET_NAME = '💳 Card Autopay';
@@ -258,11 +258,14 @@ export function syncCardExpenses({ recurringCosts = [], oneTimeCosts = [], spend
  *
  * @returns {{cardCharges: number, cashAvailable: number, sustainable: boolean, shortfall: number}}
  */
-export function computeCardPayoffStatus({ recurringCosts = [], oneTimeCosts = [], incomeEntries = [], debts = [], minPayOverrides = {}, monthKey }) {
+export function computeCardPayoffStatus({ recurringCosts = [], oneTimeCosts = [], incomeEntries = [], debts = [], minPayOverrides = {}, spendingBudgets = [], monthKey }) {
     const due = [...recurringCosts, ...oneTimeCosts]
         .filter(c => isCostDueInMonth(c, monthKey));
 
-    const cardCharges  = due.filter(c => c.paymentMethod === 'card').reduce((s, c) => s + c.amount, 0);
+    // cardChargesByDebt already totals card bills AND manual card expenses —
+    // cardCharges is just its sum.
+    const { byDebt, unassigned, items } = cardChargesByDebt({ recurringCosts, oneTimeCosts, spendingBudgets, monthKey });
+    const cardCharges  = Object.values(byDebt).reduce((s, v) => s + v, 0) + unassigned;
     const directCosts  = due.filter(c => c.paymentMethod !== 'card').reduce((s, c) => s + c.amount, 0);
     const income       = incomeEntries.reduce((s, e) => s + e.amount, 0);
     const minPayments  = debts
@@ -271,40 +274,57 @@ export function computeCardPayoffStatus({ recurringCosts = [], oneTimeCosts = []
 
     const cashAvailable = income - directCosts - minPayments;
     const shortfall     = Math.max(0, cardCharges - cashAvailable);
-    const { byDebt, unassigned } = cardChargesByDebt({ recurringCosts, oneTimeCosts, monthKey });
-    return { cardCharges, cashAvailable, sustainable: shortfall === 0, shortfall, byDebt, unassigned };
+    return { cardCharges, cashAvailable, sustainable: shortfall === 0, shortfall, byDebt, unassigned, items };
 }
 
 /**
  * Group this month's card charges by the debt (credit card) they're linked to.
  * Costs carry `cardDebtId` when the user picked a specific card in the modal.
+ * Manual budget expenses marked `paymentMethod === 'card'` count the same way
+ * (dated expenses only in their month; undated count every month, matching
+ * cashExpensesForMonth semantics).
  *
- * @returns {{byDebt: Object<string, number>, unassigned: number}}
+ * @returns {{byDebt: Object<string, number>, unassigned: number, items: Array}}
  *   byDebt maps debtId → total charged; unassigned totals card costs with no
- *   linked debt.
+ *   linked debt. items lists every contributing charge ({name, amount, debtId,
+ *   source}) for display/diagnostics.
  */
-export function cardChargesByDebt({ recurringCosts = [], oneTimeCosts = [], monthKey }) {
+export function cardChargesByDebt({ recurringCosts = [], oneTimeCosts = [], spendingBudgets = [], monthKey }) {
     const byDebt = {};
     let unassigned = 0;
+    const items = [];
+    const tally = (name, amount, debtId, source) => {
+        items.push({ name, amount, debtId: debtId || null, source });
+        if (debtId) byDebt[debtId] = (byDebt[debtId] || 0) + amount;
+        else unassigned += amount;
+    };
     for (const c of [...recurringCosts, ...oneTimeCosts]) {
         if (c.paymentMethod !== 'card' || !isCostDueInMonth(c, monthKey)) continue;
-        if (c.cardDebtId) byDebt[c.cardDebtId] = (byDebt[c.cardDebtId] || 0) + c.amount;
-        else unassigned += c.amount;
+        tally(c.name, c.amount, c.cardDebtId, 'bill');
     }
-    return { byDebt, unassigned };
+    const htmlMk = keyToHtmlMonth(monthKey);
+    for (const b of spendingBudgets || []) {
+        for (const e of b.expenses || []) {
+            if (e.autoCard || e.paymentMethod !== 'card') continue;
+            if (e.date && e.date.slice(0, 7) !== htmlMk) continue;
+            tally(e.description, e.amount, e.cardDebtId, 'expense');
+        }
+    }
+    return { byDebt, unassigned, items };
 }
 
 /**
  * Flatten the month's *manual* budget expenses (cash/debit/Zelle purchases)
  * for use as cash outflows in the payment plan. Auto-logged card expenses
- * (autoCard) are excluded — they never touch the cash pool.
+ * (autoCard) and manual expenses marked `paymentMethod === 'card'` are
+ * excluded — they land on a card balance, never the cash pool.
  * Each returned expense gains `budgetName` for display. Expenses dated
  * outside `monthKey` are skipped; undated ones are included.
  */
 export function cashExpensesForMonth(spendingBudgets, monthKey) {
     return (spendingBudgets || [])
         .flatMap(b => (b.expenses || [])
-            .filter(e => !e.autoCard)
+            .filter(e => !e.autoCard && e.paymentMethod !== 'card')
             .map(e => ({ ...e, budgetName: b.name, budgetId: b.id })))
         .filter(e => {
             if (!e.date) return true;

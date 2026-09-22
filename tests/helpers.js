@@ -66,6 +66,7 @@ export {
 export {
     budgetsForView,
     budgetAmountForMonth,
+    consumeConvertedExpense,
 } from '../src/core/budgets.js';
 
 // Constants

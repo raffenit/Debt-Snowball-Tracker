@@ -441,29 +441,42 @@ var DebtSnowballApp = (() => {
     }
     return { budgets, changed, newFallbackCosts };
   }
-  function computeCardPayoffStatus({ recurringCosts: recurringCosts2 = [], oneTimeCosts = [], incomeEntries: incomeEntries2 = [], debts: debts2 = [], minPayOverrides = {}, monthKey }) {
+  function computeCardPayoffStatus({ recurringCosts: recurringCosts2 = [], oneTimeCosts = [], incomeEntries: incomeEntries2 = [], debts: debts2 = [], minPayOverrides = {}, spendingBudgets = [], monthKey }) {
     const due = [...recurringCosts2, ...oneTimeCosts].filter((c) => isCostDueInMonth(c, monthKey));
-    const cardCharges = due.filter((c) => c.paymentMethod === "card").reduce((s, c) => s + c.amount, 0);
+    const { byDebt, unassigned, items } = cardChargesByDebt({ recurringCosts: recurringCosts2, oneTimeCosts, spendingBudgets, monthKey });
+    const cardCharges = Object.values(byDebt).reduce((s, v) => s + v, 0) + unassigned;
     const directCosts = due.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
     const income = incomeEntries2.reduce((s, e) => s + e.amount, 0);
     const minPayments = debts2.filter((d) => d.balance > 0).reduce((s, d) => s + (minPayOverrides[d.id] ?? d.minPayment ?? 0), 0);
     const cashAvailable = income - directCosts - minPayments;
     const shortfall = Math.max(0, cardCharges - cashAvailable);
-    const { byDebt, unassigned } = cardChargesByDebt({ recurringCosts: recurringCosts2, oneTimeCosts, monthKey });
-    return { cardCharges, cashAvailable, sustainable: shortfall === 0, shortfall, byDebt, unassigned };
+    return { cardCharges, cashAvailable, sustainable: shortfall === 0, shortfall, byDebt, unassigned, items };
   }
-  function cardChargesByDebt({ recurringCosts: recurringCosts2 = [], oneTimeCosts = [], monthKey }) {
+  function cardChargesByDebt({ recurringCosts: recurringCosts2 = [], oneTimeCosts = [], spendingBudgets = [], monthKey }) {
     const byDebt = {};
     let unassigned = 0;
+    const items = [];
+    const tally = (name, amount, debtId, source) => {
+      items.push({ name, amount, debtId: debtId || null, source });
+      if (debtId) byDebt[debtId] = (byDebt[debtId] || 0) + amount;
+      else unassigned += amount;
+    };
     for (const c of [...recurringCosts2, ...oneTimeCosts]) {
       if (c.paymentMethod !== "card" || !isCostDueInMonth(c, monthKey)) continue;
-      if (c.cardDebtId) byDebt[c.cardDebtId] = (byDebt[c.cardDebtId] || 0) + c.amount;
-      else unassigned += c.amount;
+      tally(c.name, c.amount, c.cardDebtId, "bill");
     }
-    return { byDebt, unassigned };
+    const htmlMk = keyToHtmlMonth(monthKey);
+    for (const b of spendingBudgets || []) {
+      for (const e of b.expenses || []) {
+        if (e.autoCard || e.paymentMethod !== "card") continue;
+        if (e.date && e.date.slice(0, 7) !== htmlMk) continue;
+        tally(e.description, e.amount, e.cardDebtId, "expense");
+      }
+    }
+    return { byDebt, unassigned, items };
   }
   function cashExpensesForMonth(spendingBudgets, monthKey) {
-    return (spendingBudgets || []).flatMap((b) => (b.expenses || []).filter((e) => !e.autoCard).map((e) => ({ ...e, budgetName: b.name, budgetId: b.id }))).filter((e) => {
+    return (spendingBudgets || []).flatMap((b) => (b.expenses || []).filter((e) => !e.autoCard && e.paymentMethod !== "card").map((e) => ({ ...e, budgetName: b.name, budgetId: b.id }))).filter((e) => {
       if (!e.date) return true;
       const [y, m] = e.date.split("-").map(Number);
       return `${y}-${m - 1}` === monthKey;
@@ -691,6 +704,38 @@ var DebtSnowballApp = (() => {
       recurringCosts = [];
       incomeEntries = [];
       startingBalance = 0;
+    }
+  });
+
+  // src/core/budgets.js
+  function budgetsForView(archive, liveBudgets) {
+    return archive ? archive.spendingBudgets || [] : liveBudgets || [];
+  }
+  function budgetAmountForMonth(budget, monthKey) {
+    const exc = budget?.exception;
+    return exc && exc.month === monthKey ? exc.amount : budget?.amount ?? 0;
+  }
+  function consumeConvertedExpense(budgets, { budgetId, expenseId, paymentMethod, todayISO }) {
+    const b = (budgets || []).find((x) => x.id === budgetId);
+    const i = b?.expenses?.findIndex((e) => e.id === expenseId) ?? -1;
+    if (i < 0) return null;
+    const [removed] = b.expenses.splice(i, 1);
+    const markPaid = paymentMethod !== "card" && !!removed.date && removed.date <= todayISO;
+    return { removed, markPaid };
+  }
+  function reorderBudgets(budgets, dragId, targetId) {
+    if (!dragId || !targetId || dragId === targetId) return budgets;
+    const list = budgets || [];
+    const from = list.findIndex((b) => b.id === dragId);
+    const to = list.findIndex((b) => b.id === targetId);
+    if (from < 0 || to < 0) return list;
+    const next = list.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return next;
+  }
+  var init_budgets = __esm({
+    "src/core/budgets.js"() {
     }
   });
 
@@ -925,7 +970,7 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.5.0";
+      PANEL_VERSION = "2.6.0";
       PANEL_BUILD_DATE = "2026-09-22";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
@@ -2000,19 +2045,6 @@ This replaces ALL current data with that snapshot.`)) {
     }
   });
 
-  // src/core/budgets.js
-  function budgetsForView(archive, liveBudgets) {
-    return archive ? archive.spendingBudgets || [] : liveBudgets || [];
-  }
-  function budgetAmountForMonth(budget, monthKey) {
-    const exc = budget?.exception;
-    return exc && exc.month === monthKey ? exc.amount : budget?.amount ?? 0;
-  }
-  var init_budgets = __esm({
-    "src/core/budgets.js"() {
-    }
-  });
-
   // src/app/render-budgets.js
   function getArchive() {
     const i = appState.viewingArchiveIndex;
@@ -2072,13 +2104,24 @@ This replaces ALL current data with that snapshot.`)) {
       incomeEntries: appState.incomeEntries,
       debts: appState.debts,
       minPayOverrides: appState.minPayOverrides,
+      spendingBudgets: appState.spendingBudgets,
       monthKey: _mk
     });
     const perCard = Object.entries(payoff.byDebt).map(([debtId, amt]) => `${escHtml(appState.debts.find((d) => d.id === debtId)?.name || "Card")}: ${formatMoney(amt)}`);
     if (payoff.unassigned > 0) perCard.push(`Unlinked: ${formatMoney(payoff.unassigned)}`);
+    const chargeItems = (payoff.items || []).map((it) => {
+      const cardName = it.debtId ? appState.debts.find((d) => d.id === it.debtId)?.name || "Card" : "Unlinked";
+      return `<div class="card-charge-item"><span>${escHtml(it.name)}</span><span>${formatMoney(it.amount)} \xB7 ${escHtml(cardName)}</span></div>`;
+    }).join("");
     const cardStrip = !archive && payoff.cardCharges > 0 ? `
         <div class="budget-meta-bar" style="margin-top:0.5rem; flex-wrap:wrap; row-gap:0.35rem;">
-            <span class="budget-meta-budgeted">\u{1F4B3} Charged to cards this month: ${formatMoney(payoff.cardCharges)}</span>
+            <details class="card-charges-detail">
+                <summary class="budget-meta-budgeted" title="Click to see which charges make up this total">\u{1F4B3} Charged to cards this month: ${formatMoney(payoff.cardCharges)}</summary>
+                <div class="card-charge-items">
+                    ${chargeItems}
+                    <div class="card-charge-item card-charge-hint">Missing a charge? A bill or expense only counts when its payment method is set to a card.</div>
+                </div>
+            </details>
             ${perCard.length > 0 ? `<span style="font-size:0.75rem; color:var(--text-secondary);">${perCard.join(" \xB7 ")}</span>` : ""}
             <div class="budget-meta-divider"></div>
             ${payoff.sustainable ? `<span class="budget-meta-ok" title="Income covers all card charges after direct costs and minimum payments">\u2713 Covered \u2014 pay card balances in full</span>` : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover \u2014 the card balance will grow">\u26A0 ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
@@ -2108,13 +2151,16 @@ This replaces ALL current data with that snapshot.`)) {
       const expenseRows = expenses.length === 0 ? `<p class="budget-empty-text">No expenses logged yet.</p>` : [...expenses].sort((a, b) => (b.date || "") > (a.date || "") ? 1 : -1).map((exp) => {
         const upcoming = exp.autoCard && exp.date && exp.date > todayISO;
         const autoBadge = exp.autoCard ? ` <span class="expense-auto-badge" title="${upcoming ? "Scheduled card charge \u2014 posts on this date \xB7 edit the bill to change it" : "Auto-logged card charge \u2014 edit the bill to change it"}">${upcoming ? "\u23F3" : "\u26A1"}</span>` : "";
+        const cardName = exp.cardDebtId && appState.debts.find((d) => d.id === exp.cardDebtId)?.name;
+        const cardBadge = !exp.autoCard && exp.paymentMethod === "card" ? ` <span class="expense-auto-badge" title="Charged to ${escHtml(cardName || "a credit card")} \u2014 not deducted from cash flow">\u{1F4B3}${cardName ? ` ${escHtml(cardName)}` : ""}</span>` : "";
         return `
                 <div class="budget-expense-row${exp.autoCard ? " expense-auto" : ""}" data-expense-id="${exp.id}" data-budget-id="${budget.id}"${exp.autoCard ? "" : ' draggable="true" title="Drag to move to another budget"'}>
-                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}</span>
+                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}${cardBadge}</span>
                     <span class="expense-date">${exp.date ? (/* @__PURE__ */ new Date(exp.date + "T00:00:00")).toLocaleDateString(void 0, { month: "short", day: "numeric" }) : ""}</span>
                     <span class="expense-amount" style="color:var(--expense-color);">\u2212${formatMoney(exp.amount)}</span>
                     <div class="expense-actions">
                         ${exp.autoCard ? "" : `<button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">\u270E</button>`}
+                        ${exp.autoCard ? "" : `<button class="btn-icon btn-expense-torecurring" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Convert to recurring bill">\u{1F501}</button>`}
                         <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">\u2715</button>
                     </div>
                 </div>`;
@@ -2150,6 +2196,7 @@ This replaces ALL current data with that snapshot.`)) {
         <div class="budget-card ${isOver ? "budget-over" : ""}" data-budget-id="${budget.id}" data-expanded="${isExpanded}" style="animation-delay:${cardIdx * 0.06}s;">
             <div class="budget-card-header" data-toggle-budget="${budget.id}">
                 <div class="budget-header-left">
+                    ${archive ? "" : `<span class="budget-drag-handle" draggable="true" title="Drag to reorder">\u283F</span>`}
                     <span class="budget-toggle-icon">\u25B6</span>
                     <span class="budget-name">${escHtml(budget.name)}</span>
                     ${budget.autoGenerated ? `<span class="budget-exception-badge" title="Auto-managed: card charges are logged here and the monthly limit tracks them">\u26A1 auto</span>` : ""}
@@ -2158,6 +2205,7 @@ This replaces ALL current data with that snapshot.`)) {
                 <div class="budget-header-right">
                     ${isOver ? `<span class="budget-over-label">\u26A0 Over ${formatMoney(over)}</span>` : `<span class="budget-remaining">${formatMoney(budgetAmt - spent)} left</span>`}
                     <span class="budget-spent-of">${formatMoney(spent)} / ${formatMoney(budgetAmt)}</span>
+                    ${archive ? "" : `<button class="btn-icon btn-edit-budget" data-budget-id="${budget.id}" title="Edit budget">\u270E</button>`}
                 </div>
             </div>
             <div class="budget-progress-track">
@@ -2171,8 +2219,8 @@ This replaces ALL current data with that snapshot.`)) {
                 <div class="budget-card-actions">
                     ${addExpBtn}
                     ${archive ? "" : `
-                    <button class="btn btn-sm btn-override btn-override-budget" data-budget-id="${budget.id}">${hasExc ? "\u270E Edit" : "\u26A1 Override"}</button>
-                    <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}">\u270E Edit</button>
+                    <button class="btn btn-sm btn-override btn-override-budget" data-budget-id="${budget.id}" title="Set a one-time amount for this month only \u2014 base amount stays unchanged">${hasExc ? "\u26A1 Edit Override" : "\u26A1 Override"}</button>
+                    <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}" title="Edit name and base monthly amount">\u270E Edit</button>
                     <button class="btn btn-secondary btn-sm btn-delete-budget" data-budget-id="${budget.id}" style="margin-left:auto; border-color:var(--danger-color); color:var(--danger-color);">\u{1F5D1} Delete</button>`}
                 </div>
             </div>` : ""}
@@ -2190,7 +2238,7 @@ This replaces ALL current data with that snapshot.`)) {
     appState._root.getElementById("budget-exception-amount-group").style.display = "none";
     appState._root.getElementById("budget-exception-toggle").checked = false;
     if (budgetId) {
-      appState._root.getElementById("budget-modal-title").textContent = "Edit Budget";
+      appState._root.getElementById("budget-modal-title").textContent = focusException ? "Edit Budget \u2014 Monthly Override" : "Edit Budget";
       const budget = appState.spendingBudgets.find((b) => b.id === budgetId);
       if (budget) {
         appState._root.getElementById("budget-id").value = budget.id;
@@ -2268,6 +2316,18 @@ This replaces ALL current data with that snapshot.`)) {
     if (budgetSel) {
       budgetSel.innerHTML = budgets.map((b) => `<option value="${b.id}"${b.id === budgetId ? " selected" : ""}>${escHtml(b.name)}</option>`).join("");
     }
+    const methodSel = appState._root.getElementById("expense-payment-method");
+    const cardDebtSel = appState._root.getElementById("expense-card-debt");
+    if (cardDebtSel) {
+      const cards = appState.debts.filter((d) => d.type === "credit-card");
+      cardDebtSel.innerHTML = '<option value="">\u2014 Unspecified card \u2014</option>' + cards.map((d) => `<option value="${d.id}">${escHtml(d.name)}</option>`).join("");
+    }
+    const toggleCardGroup = () => {
+      const grp = appState._root.getElementById("expense-card-debt-group");
+      if (grp) grp.style.display = methodSel?.value === "card" ? "" : "none";
+    };
+    if (methodSel) methodSel.value = "direct";
+    toggleCardGroup();
     const budget = budgets.find((b) => b.id === budgetId);
     const budgetLabel = budget ? ` \u2014 ${budget.name}` : "";
     if (expenseId) {
@@ -2278,6 +2338,9 @@ This replaces ALL current data with that snapshot.`)) {
         appState._root.getElementById("expense-description").value = exp.description;
         appState._root.getElementById("expense-amount").value = exp.amount;
         appState._root.getElementById("expense-date").value = exp.date || "";
+        if (methodSel) methodSel.value = exp.paymentMethod || "direct";
+        if (cardDebtSel) cardDebtSel.value = exp.cardDebtId || "";
+        toggleCardGroup();
       }
     } else {
       appState._root.getElementById("expense-modal-title").textContent = `Add Expense${budgetLabel}`;
@@ -2288,6 +2351,26 @@ This replaces ALL current data with that snapshot.`)) {
     void appState.expenseModal.offsetWidth;
     appState.expenseModal.classList.add("active");
     setTimeout(() => appState.expenseModal.querySelector("input:not([type=hidden])").focus(), 50);
+  }
+  function convertExpenseToBill(budgetId, expenseId) {
+    const budget = getWorkingBudgets().find((b) => b.id === budgetId);
+    const exp = budget?.expenses?.find((e) => e.id === expenseId);
+    if (!exp || exp.autoCard) return;
+    const catGuess = budget.id?.startsWith("auto_cat_") ? budget.id.slice("auto_cat_".length) : "other";
+    appState._expenseToConvert = {
+      budgetId,
+      expenseId,
+      fromArchive: appState.viewingArchiveIndex !== null
+    };
+    openCostModal(null, {
+      name: exp.description,
+      amount: exp.amount,
+      dueDay: exp.date ? parseInt(exp.date.split("-")[2], 10) : 1,
+      paymentMethod: exp.paymentMethod || "direct",
+      cardDebtId: exp.cardDebtId,
+      budgetId,
+      category: ["subscription", "utility", "maintenance", "other"].includes(catGuess) ? catGuess : "other"
+    });
   }
   function closeExpenseModal() {
     appState.expenseModal.classList.remove("active");
@@ -2302,6 +2385,8 @@ This replaces ALL current data with that snapshot.`)) {
       const description = appState._root.getElementById("expense-description").value.trim();
       const amount = parseFloat(appState._root.getElementById("expense-amount").value);
       const date = appState._root.getElementById("expense-date").value;
+      const paymentMethod = appState._root.getElementById("expense-payment-method")?.value || "direct";
+      const cardDebtId = paymentMethod === "card" ? appState._root.getElementById("expense-card-debt")?.value || void 0 : void 0;
       if (!description) throw new Error("Please enter a description.");
       if (isNaN(amount) || amount < 0) throw new Error("Please enter a valid amount.");
       const budgets = getWorkingBudgets();
@@ -2312,7 +2397,7 @@ This replaces ALL current data with that snapshot.`)) {
       if (expenseId) {
         const idx = budget.expenses.findIndex((e) => e.id === expenseId);
         if (idx !== -1) {
-          const updated = { ...budget.expenses[idx], description, amount, date };
+          const updated = { ...budget.expenses[idx], description, amount, date, paymentMethod, cardDebtId };
           if (targetBudgetId !== budgetId) {
             const target = budgets.find((b) => b.id === targetBudgetId);
             if (!target) throw new Error("Target budget not found.");
@@ -2326,7 +2411,7 @@ This replaces ALL current data with that snapshot.`)) {
       } else {
         const target = budgets.find((b) => b.id === targetBudgetId) || budget;
         if (!target.expenses) target.expenses = [];
-        target.expenses.push({ id: Date.now().toString(), description, amount, date });
+        target.expenses.push({ id: Date.now().toString(), description, amount, date, paymentMethod, cardDebtId });
       }
       saveDataAndRender();
       closeExpenseModal();
@@ -2592,6 +2677,7 @@ This replaces ALL current data with that snapshot.`)) {
     const _chargesByDebt = isArchiveView ? {} : cardChargesByDebt({
       recurringCosts: appState.recurringCosts,
       oneTimeCosts: appState.oneTimeCosts,
+      spendingBudgets: appState.spendingBudgets,
       monthKey: appState.workingMonthKey || currentMonthKey()
     }).byDebt;
     const hasMortgage = _debts.some((d) => d.type === "mortgage");
@@ -3689,6 +3775,24 @@ This replaces ALL current data with that snapshot.`)) {
         `${danglingSkips.length} card-expense skip(s) reference deleted bills \u2014 they can never match.`
       ));
     }
+    const danglingCard = budgets.reduce((n, b) => n + (b.expenses || []).filter((e) => e.cardDebtId && !knownIds.has(e.cardDebtId)).length, 0);
+    if (danglingCard) {
+      out.push(w(
+        "dangling-carddebt",
+        "spendingBudgets",
+        "notice",
+        `${danglingCard} expense(s) charged to a card that no longer exists \u2014 they won't count toward any card's total.`
+      ));
+    }
+    const misrouted = [...recurringCosts2, ...oneTimeCosts].filter((c) => c.cardDebtId && c.paymentMethod !== "card");
+    if (misrouted.length) {
+      out.push(w(
+        "card-method-mismatch",
+        "recurringCosts",
+        "warning",
+        `${misrouted.length} bill(s) linked to a card but marked "direct" (e.g. "${misrouted[0].name}") \u2014 they're excluded from card totals and counted as cash. Edit the bill's Payment Method to Card.`
+      ));
+    }
     const htmlMk = s.workingMonthKey ? keyToHtmlMonth(s.workingMonthKey) : null;
     if (htmlMk) {
       let stray = 0;
@@ -3743,6 +3847,18 @@ This replaces ALL current data with that snapshot.`)) {
           "warning",
           `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}\xD7 last month's \u2014 possible duplication.`
         ));
+      }
+      const prevExpKeys = new Set((prev.spendingBudgets || []).flatMap((b) => (b.expenses || []).filter((e) => !e.autoCard).map((e) => `${(e.description || "").toLowerCase().trim()}|${e.amount}`)));
+      if (prevExpKeys.size) {
+        const repeats = budgets.flatMap((b) => (b.expenses || []).filter((e) => !e.autoCard && prevExpKeys.has(`${(e.description || "").toLowerCase().trim()}|${e.amount}`)));
+        if (repeats.length) {
+          out.push(w(
+            "repeat-expenses",
+            "spendingBudgets",
+            "notice",
+            `${repeats.length} expense(s) also appeared in ${prev.label || "last month"} (e.g. "${repeats[0].description}") \u2014 if recurring, hit \u{1F501} on the row to make it a bill.`
+          ));
+        }
       }
     }
     if (!incomeEntries2.length && (recurringCosts2.length || debts2.length)) {
@@ -3816,7 +3932,7 @@ This replaces ALL current data with that snapshot.`)) {
       appState.debtModal.style.display = "none";
     }, 300);
   }
-  function openCostModal(costId = null) {
+  function openCostModal(costId = null, prefill = null) {
     appState.costForm.reset();
     appState._root.getElementById("cost-id").value = "";
     appState._root.getElementById("cost-autopay-toggle").checked = false;
@@ -3858,10 +3974,19 @@ This replaces ALL current data with that snapshot.`)) {
         }
       }
     } else {
-      appState._root.getElementById("cost-modal-title").textContent = "Add Bill";
+      appState._root.getElementById("cost-modal-title").textContent = prefill ? "Convert to Recurring Bill" : "Add Bill";
       appState._root.getElementById("cost-payment-method").value = "direct";
       appState._root.getElementById("cost-amount-type").value = "fixed";
       appState._root.getElementById("cost-interval").value = "1";
+      if (prefill) {
+        appState._root.getElementById("cost-name").value = prefill.name || "";
+        appState._root.getElementById("cost-amount").value = prefill.amount ?? "";
+        appState._root.getElementById("cost-due-day").value = prefill.dueDay || 1;
+        appState._root.getElementById("cost-category").value = prefill.category || "other";
+        appState._root.getElementById("cost-payment-method").value = prefill.paymentMethod || "direct";
+        appState._root.getElementById("cost-budget").value = prefill.budgetId || "";
+        appState._root.getElementById("cost-card-debt").value = prefill.cardDebtId || "";
+      }
     }
     updateCostModalIntervalVisibility();
     appState.costModal.style.display = "flex";
@@ -3870,6 +3995,7 @@ This replaces ALL current data with that snapshot.`)) {
     setTimeout(() => appState.costModal.querySelector("input:not([type=hidden])").focus(), 50);
   }
   function closeCostModal() {
+    appState._expenseToConvert = null;
     appState.costModal.classList.remove("active");
     setTimeout(() => {
       appState.costModal.style.display = "none";
@@ -4012,7 +4138,23 @@ This replaces ALL current data with that snapshot.`)) {
         }
       } else {
         const nextDueMonth = intervalMonths > 1 ? startMonthKey ?? currentMonthKey() : void 0;
-        targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth, budgetId, cardDebtId });
+        const newId = Date.now().toString();
+        targetArray.push({ id: newId, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth, budgetId, cardDebtId });
+        const conv = appState._expenseToConvert;
+        if (conv) {
+          appState._expenseToConvert = null;
+          if (!conv.fromArchive) {
+            const result = consumeConvertedExpense(appState.spendingBudgets, {
+              budgetId: conv.budgetId,
+              expenseId: conv.expenseId,
+              paymentMethod,
+              todayISO: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
+            });
+            if (result?.markPaid) {
+              appState.paidStatus[newId] = { status: "paid", amount: result.removed.amount };
+            }
+          }
+        }
       }
       saveDataAndRender();
       closeCostModal();
@@ -4366,6 +4508,7 @@ This replaces ALL current data with that snapshot.`)) {
       init_pure_utils();
       init_simulation();
       init_card_expenses();
+      init_budgets();
       init_modals();
       init_render_checkpoints();
       init_render_budgets();
@@ -4450,6 +4593,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
   init_render_modals();
   init_render_checkpoints();
   init_render_budgets();
+  init_budgets();
   init_render_lists();
   init_render_export();
   init_storage();
@@ -4502,7 +4646,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     });
     appState._root.getElementById("budgets-list").addEventListener("click", (e) => {
       const toggle = e.target.closest("[data-toggle-budget]");
-      if (toggle) {
+      if (toggle && !e.target.closest("button")) {
         const bid = toggle.dataset.toggleBudget;
         if (appState.expandedBudgets.has(bid)) {
           appState.expandedBudgets.delete(bid);
@@ -4559,6 +4703,11 @@ One-time bills will be removed, income will be cleared, and interval bills will 
         openExpenseModal(editExp.dataset.budgetId, editExp.dataset.expenseId);
         return;
       }
+      const toRecurring = e.target.closest(".btn-expense-torecurring");
+      if (toRecurring) {
+        convertExpenseToBill(toRecurring.dataset.budgetId, toRecurring.dataset.expenseId);
+        return;
+      }
       const delExp = e.target.closest(".btn-delete-expense");
       if (delExp) {
         const row = delExp.closest(".budget-expense-row");
@@ -4588,6 +4737,18 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     });
     const budgetsList = appState._root.getElementById("budgets-list");
     budgetsList.addEventListener("dragstart", (e) => {
+      const handle = e.target.closest(".budget-drag-handle");
+      if (handle) {
+        const card = handle.closest(".budget-card");
+        if (!card) return;
+        appState._budgetDragId = card.dataset.budgetId;
+        e.dataTransfer.setData("text/plain", JSON.stringify({
+          budgetDragId: card.dataset.budgetId
+        }));
+        e.dataTransfer.effectAllowed = "move";
+        card.classList.add("dragging");
+        return;
+      }
       const row = e.target.closest('.budget-expense-row[draggable="true"]');
       if (!row) return;
       e.dataTransfer.setData("text/plain", JSON.stringify({
@@ -4598,14 +4759,23 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       row.classList.add("dragging");
     });
     budgetsList.addEventListener("dragend", (e) => {
+      appState._budgetDragId = null;
       e.target.closest(".budget-expense-row")?.classList.remove("dragging");
-      budgetsList.querySelectorAll(".budget-drop-target").forEach((c) => c.classList.remove("budget-drop-target"));
+      e.target.closest(".budget-card")?.classList.remove("dragging");
+      budgetsList.querySelectorAll(".budget-drop-target, .budget-reorder-target").forEach((c) => c.classList.remove("budget-drop-target", "budget-reorder-target"));
     });
     budgetsList.addEventListener("dragover", (e) => {
       const card = e.target.closest(".budget-card");
       if (!card) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
+      if (appState._budgetDragId) {
+        budgetsList.querySelectorAll(".budget-reorder-target").forEach((c) => {
+          if (c !== card) c.classList.remove("budget-reorder-target");
+        });
+        if (card.dataset.budgetId !== appState._budgetDragId) card.classList.add("budget-reorder-target");
+        return;
+      }
       budgetsList.querySelectorAll(".budget-drop-target").forEach((c) => {
         if (c !== card) c.classList.remove("budget-drop-target");
       });
@@ -4613,17 +4783,26 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     });
     budgetsList.addEventListener("dragleave", (e) => {
       const card = e.target.closest(".budget-card");
-      if (card && !card.contains(e.relatedTarget)) card.classList.remove("budget-drop-target");
+      if (card && !card.contains(e.relatedTarget)) card.classList.remove("budget-drop-target", "budget-reorder-target");
     });
     budgetsList.addEventListener("drop", (e) => {
       const card = e.target.closest(".budget-card");
       if (!card) return;
       e.preventDefault();
-      card.classList.remove("budget-drop-target");
+      card.classList.remove("budget-drop-target", "budget-reorder-target");
       let payload;
       try {
         payload = JSON.parse(e.dataTransfer.getData("text/plain"));
       } catch {
+        return;
+      }
+      if (payload?.budgetDragId) {
+        if (appState.viewingArchiveIndex !== null) return;
+        const next = reorderBudgets(appState.spendingBudgets, payload.budgetDragId, card.dataset.budgetId);
+        if (next === appState.spendingBudgets) return;
+        appState.spendingBudgets = next;
+        saveDataAndRender();
+        showSavedToast("Budget order updated \u2713");
         return;
       }
       if (!payload?.expenseId) return;
@@ -4803,6 +4982,10 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     appState._root.getElementById("cost-category").addEventListener("change", updateCostModalIntervalVisibility);
     appState._root.getElementById("cost-interval").addEventListener("change", updateCostModalIntervalVisibility);
     appState._root.getElementById("cost-payment-method").addEventListener("change", updateCostModalIntervalVisibility);
+    appState._root.getElementById("expense-payment-method")?.addEventListener("change", (e) => {
+      const grp = appState._root.getElementById("expense-card-debt-group");
+      if (grp) grp.style.display = e.target.value === "card" ? "" : "none";
+    });
     appState._root.getElementById("auto-min-btn").addEventListener("click", autoCalcMinPaymentCC);
     appState._root.getElementById("debt-balance").addEventListener("input", updateAutoMinHint);
     appState._root.getElementById("debt-rate").addEventListener("input", updateAutoMinHint);
@@ -6752,6 +6935,60 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 .budget-card.budget-drop-target {
     outline: 2px dashed var(--accent-color);
     outline-offset: 3px;
+}
+.budget-drag-handle {
+    cursor: grab;
+    color: var(--text-secondary);
+    opacity: 0.45;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+    padding: 0 0.1rem;
+    transition: opacity 0.15s ease;
+}
+.budget-drag-handle:hover {
+    opacity: 0.9;
+}
+.budget-card.dragging {
+    opacity: 0.45;
+}
+.budget-card.budget-reorder-target {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 3px;
+    background: rgba(91, 127, 255, 0.06);
+}
+.card-charges-detail {
+    display: inline-block;
+}
+.card-charges-detail > summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.card-charges-detail > summary::before {
+    content: '\u25B8 ';
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+.card-charges-detail[open] > summary::before {
+    content: '\u25BE ';
+}
+.card-charge-items {
+    margin: 0.4rem 0 0.2rem 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.card-charge-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 1.5rem;
+}
+.card-charge-hint {
+    font-style: italic;
+    opacity: 0.75;
+    margin-top: 0.3rem;
 }
 .schedule-row.drop-target {
     outline: 2px dashed var(--accent-color);
@@ -9301,6 +9538,19 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                 <div class="input-group">
                     <label for="expense-date">Date</label>
                     <input type="date" id="expense-date">
+                </div>
+                <div class="input-group">
+                    <label for="expense-payment-method">Paid Via</label>
+                    <select id="expense-payment-method">
+                        <option value="direct">Debit / Cash / Bank (deducts from cash flow)</option>
+                        <option value="card">Credit Card (adds to card balance)</option>
+                    </select>
+                </div>
+                <div class="input-group" id="expense-card-debt-group" style="display:none;">
+                    <label for="expense-card-debt">Charged To Which Card?</label>
+                    <select id="expense-card-debt">
+                        <option value="">\u2014 Unspecified card \u2014</option>
+                    </select>
                 </div>
                 <div class="input-group">
                     <label for="expense-budget-select">Budget</label>

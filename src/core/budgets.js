@@ -23,3 +23,40 @@ export function budgetAmountForMonth(budget, monthKey) {
     const exc = budget?.exception;
     return (exc && exc.month === monthKey) ? exc.amount : (budget?.amount ?? 0);
 }
+
+/**
+ * Consume a manual expense being converted into a recurring bill.
+ * Removes it from its budget so it isn't double-counted (the bill now
+ * represents it — card bills re-mirror as autoCard on next sync), and
+ * reports whether the new bill should be marked paid: cash expenses with a
+ * past date already left the account, so the bill shouldn't show as unpaid.
+ *
+ * Only call on the LIVE budgets — archived expenses are historical and stay.
+ *
+ * @returns {{removed: Object, markPaid: boolean}|null} null when not found
+ */
+export function consumeConvertedExpense(budgets, { budgetId, expenseId, paymentMethod, todayISO }) {
+    const b = (budgets || []).find(x => x.id === budgetId);
+    const i = b?.expenses?.findIndex(e => e.id === expenseId) ?? -1;
+    if (i < 0) return null;
+    const [removed] = b.expenses.splice(i, 1);
+    const markPaid = paymentMethod !== 'card' && !!removed.date && removed.date <= todayISO;
+    return { removed, markPaid };
+}
+
+/**
+ * Move a budget to a new position. Array order is display order.
+ * @returns {Array} the reordered array (new array), or the same reference
+ *   when the move is a no-op (same id, missing ids)
+ */
+export function reorderBudgets(budgets, dragId, targetId) {
+    if (!dragId || !targetId || dragId === targetId) return budgets;
+    const list = budgets || [];
+    const from = list.findIndex(b => b.id === dragId);
+    const to   = list.findIndex(b => b.id === targetId);
+    if (from < 0 || to < 0) return list;
+    const next = list.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return next;
+}

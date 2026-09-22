@@ -3,7 +3,7 @@ import { currentMonthKey, formatMonthLabel, keyToHtmlMonth } from '../core/date-
 import { computeCardPayoffStatus } from '../core/card-expenses.js';
 import { budgetsForView, budgetAmountForMonth } from '../core/budgets.js';
 import { escHtml, formatMoney } from '../core/pure-utils.js';
-import { showErrorToast, showSavedToast, showUndoToast } from './render-modals.js';
+import { showErrorToast, showSavedToast, showUndoToast, openCostModal } from './render-modals.js';
 import { saveData, saveDataAndRender } from './storage.js';
 
 // ─── Spending Budgets ────────────────────────────────────────────────────────
@@ -94,6 +94,7 @@ function renderSpendingBudgets() {
         incomeEntries:   appState.incomeEntries,
         debts:           appState.debts,
         minPayOverrides: appState.minPayOverrides,
+        spendingBudgets: appState.spendingBudgets,
         monthKey:        _mk,
     });
     // Per-card breakdown: which debt each charge landed on
@@ -101,9 +102,19 @@ function renderSpendingBudgets() {
         .map(([debtId, amt]) => `${escHtml(appState.debts.find(d => d.id === debtId)?.name || 'Card')}: ${formatMoney(amt)}`);
     if (payoff.unassigned > 0) perCard.push(`Unlinked: ${formatMoney(payoff.unassigned)}`);
 
+    const chargeItems = (payoff.items || []).map(it => {
+        const cardName = it.debtId ? (appState.debts.find(d => d.id === it.debtId)?.name || 'Card') : 'Unlinked';
+        return `<div class="card-charge-item"><span>${escHtml(it.name)}</span><span>${formatMoney(it.amount)} · ${escHtml(cardName)}</span></div>`;
+    }).join('');
     const cardStrip = !archive && payoff.cardCharges > 0 ? `
         <div class="budget-meta-bar" style="margin-top:0.5rem; flex-wrap:wrap; row-gap:0.35rem;">
-            <span class="budget-meta-budgeted">💳 Charged to cards this month: ${formatMoney(payoff.cardCharges)}</span>
+            <details class="card-charges-detail">
+                <summary class="budget-meta-budgeted" title="Click to see which charges make up this total">💳 Charged to cards this month: ${formatMoney(payoff.cardCharges)}</summary>
+                <div class="card-charge-items">
+                    ${chargeItems}
+                    <div class="card-charge-item card-charge-hint">Missing a charge? A bill or expense only counts when its payment method is set to a card.</div>
+                </div>
+            </details>
             ${perCard.length > 0 ? `<span style="font-size:0.75rem; color:var(--text-secondary);">${perCard.join(' · ')}</span>` : ''}
             <div class="budget-meta-divider"></div>
             ${payoff.sustainable
@@ -145,13 +156,18 @@ function renderSpendingBudgets() {
                 const autoBadge = exp.autoCard
                     ? ` <span class="expense-auto-badge" title="${upcoming ? 'Scheduled card charge — posts on this date · edit the bill to change it' : 'Auto-logged card charge — edit the bill to change it'}">${upcoming ? '⏳' : '⚡'}</span>`
                     : '';
+                const cardName  = exp.cardDebtId && appState.debts.find(d => d.id === exp.cardDebtId)?.name;
+                const cardBadge = !exp.autoCard && exp.paymentMethod === 'card'
+                    ? ` <span class="expense-auto-badge" title="Charged to ${escHtml(cardName || 'a credit card')} — not deducted from cash flow">💳${cardName ? ` ${escHtml(cardName)}` : ''}</span>`
+                    : '';
                 return `
                 <div class="budget-expense-row${exp.autoCard ? ' expense-auto' : ''}" data-expense-id="${exp.id}" data-budget-id="${budget.id}"${exp.autoCard ? '' : ' draggable="true" title="Drag to move to another budget"'}>
-                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}</span>
+                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}${cardBadge}</span>
                     <span class="expense-date">${exp.date ? new Date(exp.date + 'T00:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'}) : ''}</span>
                     <span class="expense-amount" style="color:var(--expense-color);">−${formatMoney(exp.amount)}</span>
                     <div class="expense-actions">
                         ${exp.autoCard ? '' : `<button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">✎</button>`}
+                        ${exp.autoCard ? '' : `<button class="btn-icon btn-expense-torecurring" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Convert to recurring bill">🔁</button>`}
                         <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">✕</button>
                     </div>
                 </div>`;
@@ -196,6 +212,7 @@ function renderSpendingBudgets() {
         <div class="budget-card ${isOver ? 'budget-over' : ''}" data-budget-id="${budget.id}" data-expanded="${isExpanded}" style="animation-delay:${cardIdx * 0.06}s;">
             <div class="budget-card-header" data-toggle-budget="${budget.id}">
                 <div class="budget-header-left">
+                    ${archive ? '' : `<span class="budget-drag-handle" draggable="true" title="Drag to reorder">⠿</span>`}
                     <span class="budget-toggle-icon">▶</span>
                     <span class="budget-name">${escHtml(budget.name)}</span>
                     ${budget.autoGenerated ? `<span class="budget-exception-badge" title="Auto-managed: card charges are logged here and the monthly limit tracks them">⚡ auto</span>` : ''}
@@ -206,6 +223,7 @@ function renderSpendingBudgets() {
                         ? `<span class="budget-over-label">⚠ Over ${formatMoney(over)}</span>`
                         : `<span class="budget-remaining">${formatMoney(budgetAmt - spent)} left</span>`}
                     <span class="budget-spent-of">${formatMoney(spent)} / ${formatMoney(budgetAmt)}</span>
+                    ${archive ? '' : `<button class="btn-icon btn-edit-budget" data-budget-id="${budget.id}" title="Edit budget">✎</button>`}
                 </div>
             </div>
             <div class="budget-progress-track">
@@ -219,8 +237,8 @@ function renderSpendingBudgets() {
                 <div class="budget-card-actions">
                     ${addExpBtn}
                     ${archive ? '' : `
-                    <button class="btn btn-sm btn-override btn-override-budget" data-budget-id="${budget.id}">${hasExc ? '✎ Edit' : '⚡ Override'}</button>
-                    <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}">✎ Edit</button>
+                    <button class="btn btn-sm btn-override btn-override-budget" data-budget-id="${budget.id}" title="Set a one-time amount for this month only — base amount stays unchanged">${hasExc ? '⚡ Edit Override' : '⚡ Override'}</button>
+                    <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}" title="Edit name and base monthly amount">✎ Edit</button>
                     <button class="btn btn-secondary btn-sm btn-delete-budget" data-budget-id="${budget.id}" style="margin-left:auto; border-color:var(--danger-color); color:var(--danger-color);">🗑 Delete</button>`}
                 </div>
             </div>` : ''}
@@ -244,7 +262,8 @@ function openBudgetModal(budgetId = null, focusException = false) {
     appState._root.getElementById('budget-exception-toggle').checked = false;
 
     if (budgetId) {
-        appState._root.getElementById('budget-modal-title').textContent = 'Edit Budget';
+        appState._root.getElementById('budget-modal-title').textContent =
+            focusException ? 'Edit Budget — Monthly Override' : 'Edit Budget';
         const budget = appState.spendingBudgets.find(b => b.id === budgetId);
         if (budget) {
             appState._root.getElementById('budget-id').value     = budget.id;
@@ -338,6 +357,21 @@ function openExpenseModal(budgetId, expenseId = null) {
             .join('');
     }
 
+    // Card picker — same pattern as the bill modal's "charged to card" select
+    const methodSel   = appState._root.getElementById('expense-payment-method');
+    const cardDebtSel = appState._root.getElementById('expense-card-debt');
+    if (cardDebtSel) {
+        const cards = appState.debts.filter(d => d.type === 'credit-card');
+        cardDebtSel.innerHTML = '<option value="">— Unspecified card —</option>' +
+            cards.map(d => `<option value="${d.id}">${escHtml(d.name)}</option>`).join('');
+    }
+    const toggleCardGroup = () => {
+        const grp = appState._root.getElementById('expense-card-debt-group');
+        if (grp) grp.style.display = methodSel?.value === 'card' ? '' : 'none';
+    };
+    if (methodSel) methodSel.value = 'direct';
+    toggleCardGroup();
+
     const budget = budgets.find(b => b.id === budgetId);
     const budgetLabel = budget ? ` — ${budget.name}` : '';
 
@@ -349,6 +383,9 @@ function openExpenseModal(budgetId, expenseId = null) {
             appState._root.getElementById('expense-description').value = exp.description;
             appState._root.getElementById('expense-amount').value      = exp.amount;
             appState._root.getElementById('expense-date').value        = exp.date || '';
+            if (methodSel)   methodSel.value   = exp.paymentMethod || 'direct';
+            if (cardDebtSel) cardDebtSel.value = exp.cardDebtId || '';
+            toggleCardGroup();
         }
     } else {
         appState._root.getElementById('expense-modal-title').textContent = `Add Expense${budgetLabel}`;
@@ -365,6 +402,37 @@ function openExpenseModal(budgetId, expenseId = null) {
     setTimeout(() => appState.expenseModal.querySelector('input:not([type=hidden])').focus(), 50);
 }
 
+// Convert a manual expense into a recurring bill: opens the bill modal
+// prefilled with the expense's details. On save, `saveCost` consumes the
+// source expense (live month only — archived expenses stay as history) and
+// marks the new bill paid when the money already left. Card-paid expenses
+// carry their routing over, so the bill's auto-mirror lands right back in
+// the same budget.
+function convertExpenseToBill(budgetId, expenseId) {
+    const budget = getWorkingBudgets().find(b => b.id === budgetId);
+    const exp = budget?.expenses?.find(e => e.id === expenseId);
+    if (!exp || exp.autoCard) return;
+
+    // Guess a bill category from the budget it lived in
+    const catGuess = budget.id?.startsWith('auto_cat_')
+        ? budget.id.slice('auto_cat_'.length)
+        : 'other';
+
+    appState._expenseToConvert = {
+        budgetId, expenseId,
+        fromArchive: appState.viewingArchiveIndex !== null,
+    };
+    openCostModal(null, {
+        name:          exp.description,
+        amount:        exp.amount,
+        dueDay:        exp.date ? parseInt(exp.date.split('-')[2], 10) : 1,
+        paymentMethod: exp.paymentMethod || 'direct',
+        cardDebtId:    exp.cardDebtId,
+        budgetId,
+        category:      ['subscription', 'utility', 'maintenance', 'other'].includes(catGuess) ? catGuess : 'other',
+    });
+}
+
 function closeExpenseModal() {
     appState.expenseModal.classList.remove('active');
     setTimeout(() => { appState.expenseModal.style.display = 'none'; }, 300);
@@ -377,6 +445,10 @@ function saveExpense() {
         const description = appState._root.getElementById('expense-description').value.trim();
         const amount      = parseFloat(appState._root.getElementById('expense-amount').value);
         const date        = appState._root.getElementById('expense-date').value;
+        const paymentMethod = appState._root.getElementById('expense-payment-method')?.value || 'direct';
+        const cardDebtId    = paymentMethod === 'card'
+            ? (appState._root.getElementById('expense-card-debt')?.value || undefined)
+            : undefined;
 
         if (!description)          throw new Error('Please enter a description.');
         if (isNaN(amount) || amount < 0) throw new Error('Please enter a valid amount.');
@@ -392,7 +464,7 @@ function saveExpense() {
         if (expenseId) {
             const idx = budget.expenses.findIndex(e => e.id === expenseId);
             if (idx !== -1) {
-                const updated = { ...budget.expenses[idx], description, amount, date };
+                const updated = { ...budget.expenses[idx], description, amount, date, paymentMethod, cardDebtId };
                 if (targetBudgetId !== budgetId) {
                     // Reassigned to a different budget
                     const target = budgets.find(b => b.id === targetBudgetId);
@@ -407,7 +479,7 @@ function saveExpense() {
         } else {
             const target = budgets.find(b => b.id === targetBudgetId) || budget;
             if (!target.expenses) target.expenses = [];
-            target.expenses.push({ id: Date.now().toString(), description, amount, date });
+            target.expenses.push({ id: Date.now().toString(), description, amount, date, paymentMethod, cardDebtId });
         }
 
         saveDataAndRender();
@@ -462,4 +534,4 @@ function deleteExpense(budgetId, expenseId) {
     });
 }
 
-export { closeBudgetModal, closeExpenseModal, deleteBudget, deleteExpense, getBudgetAmount, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense };
+export { closeBudgetModal, closeExpenseModal, convertExpenseToBill, deleteBudget, deleteExpense, getBudgetAmount, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense };
