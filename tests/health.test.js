@@ -23,6 +23,7 @@ const VALID = {
     cardExpenseSkips: ['2026-8:c1'],
     paidStatus: { c1: true },
     minPayOverrides: { d1: 25 },
+    expenseDefaults: { paymentMethod: 'card', cardDebtId: 'd1' },
     startingBalance: 500,
     showMortgage: false,
     strategy: 'avalanche',

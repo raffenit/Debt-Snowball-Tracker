@@ -461,6 +461,46 @@ describe('computeCardPayoffStatus', () => {
         assert.equal(s.unassigned, 40);
         assert.equal(s.cardCharges, 100);
     });
+
+    test('card payments fund charges — not double-counted', () => {
+        const s = computeCardPayoffStatus({
+            recurringCosts: [cardCost({ amount: 500 })],
+            incomeEntries: income(2000),
+            debts: [{ id: 'd1', name: 'Visa', type: 'credit-card', balance: 5000, minPayment: 200 }],
+            monthKey: MONTH,
+        });
+        // required = max(500, 200) = 500 — the $200 payment is INSIDE the
+        // charge funding, not on top of it (old model would demand $700).
+        assert.equal(s.plannedCardPay, 200);
+        assert.equal(s.cashAvailable, 1800);
+        assert.equal(s.sustainable, true);
+    });
+
+    test('charges beyond card payments still must be funded by leftover income', () => {
+        const s = computeCardPayoffStatus({
+            recurringCosts: [
+                cardCost({ amount: 1500 }),
+                cardCost({ id: 'c2', name: 'Rent', amount: 1000, paymentMethod: 'direct' }),
+            ],
+            incomeEntries: income(2000),
+            debts: [{ id: 'd1', name: 'Visa', type: 'credit-card', balance: 5000, minPayment: 200 }],
+            monthKey: MONTH,
+        });
+        // required = 1000 + max(1500, 200) = 2500 → shortfall 500
+        // (old model: 1500 charges + 200 min on top → shortfall 700)
+        assert.equal(s.shortfall, 500);
+        assert.equal(s.sustainable, false);
+    });
+
+    test('manual cash expenses reduce what is available', () => {
+        const s = computeCardPayoffStatus({
+            incomeEntries: income(2000),
+            spendingBudgets: [{ id: 'b1', name: 'Food',
+                expenses: [{ id: 'e1', description: 'Zelle', amount: 300, date: '2026-09-10' }] }],
+            monthKey: MONTH,
+        });
+        assert.equal(s.cashAvailable, 1700);
+    });
 });
 
 describe('cardChargesByDebt', () => {

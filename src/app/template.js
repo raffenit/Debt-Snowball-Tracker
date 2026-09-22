@@ -1873,6 +1873,53 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     opacity: 0.75;
     margin-top: 0.3rem;
 }
+
+.expense-method-toggle {
+    background: rgba(91,127,255,0.12);
+    border: 1px solid rgba(91,127,255,0.25);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    font-family: inherit;
+    padding: 0.1rem 0.45rem;
+    margin-left: 0.35rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+.expense-method-toggle:hover {
+    background: rgba(91,127,255,0.25);
+    color: var(--text-primary);
+}
+.expense-method-toggle.is-card {
+    background: rgba(251,191,36,0.12);
+    border-color: rgba(251,191,36,0.3);
+}
+
+/* ===== Expense defaults picker ===== */
+.budget-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.expense-defaults {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+.expense-defaults select {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.78rem;
+    background: rgba(7,6,26,0.7);
+    border: 1px solid var(--border-bright);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-family: inherit;
+}
 .schedule-row.drop-target {
     outline: 2px dashed var(--accent-color);
     outline-offset: -2px;
@@ -1917,7 +1964,8 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     color: var(--text-secondary);
 }
 
-.inline-expense-form input {
+.inline-expense-form input,
+.inline-expense-form select {
     padding: 0.45rem 0.65rem;
     font-size: 0.875rem;
     background: rgba(7,6,26,0.7);
@@ -1929,7 +1977,8 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     width: 100%;
 }
 
-.inline-expense-form input:focus {
+.inline-expense-form input:focus,
+.inline-expense-form select:focus {
     outline: none;
     border-color: var(--accent-color);
     box-shadow: 0 0 0 3px rgba(91,127,255,0.15);
@@ -4041,7 +4090,17 @@ const PANEL_HTML = `<div class="app-container">
                             <h2>Spending Budgets</h2>
                             <p class="subtitle" style="margin-bottom:0;">Set a monthly limit per category and track day-to-day spending against it. Card-charged bills are logged here automatically as they post. Expenses clear at month end.</p>
                         </div>
-                        <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
+                        <div class="budget-header-actions">
+                            <div class="expense-defaults" title="Applied automatically to new expenses — each entry can still be changed individually">
+                                <label for="expense-default-method">New expenses:</label>
+                                <select id="expense-default-method">
+                                    <option value="card">💳 Card</option>
+                                    <option value="direct">🏦 Cash/Debit</option>
+                                </select>
+                                <select id="expense-default-card" title="Default card for new expenses"></select>
+                            </div>
+                            <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
+                        </div>
                     </div>
                     <div id="budgets-list" style="margin-top: 0.25rem;"></div>
                 </section>

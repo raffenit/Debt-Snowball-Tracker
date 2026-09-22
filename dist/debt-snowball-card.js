@@ -77,6 +77,8 @@ var DebtSnowballApp = (() => {
         // the month the data is for
         minPayOverrides: {},
         // { [debtId]: amount } — this-month-only overrides
+        expenseDefaults: {},
+        // { paymentMethod: 'card'|'direct', cardDebtId } — defaults for new budget expenses
         loadFailed: false,
         // true when the initial backend load errored — blocks saves to protect stored data
         errorLog: [],
@@ -447,10 +449,18 @@ var DebtSnowballApp = (() => {
     const cardCharges = Object.values(byDebt).reduce((s, v) => s + v, 0) + unassigned;
     const directCosts = due.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
     const income = incomeEntries2.reduce((s, e) => s + e.amount, 0);
-    const minPayments = debts2.filter((d) => d.balance > 0).reduce((s, d) => s + (minPayOverrides[d.id] ?? d.minPayment ?? 0), 0);
-    const cashAvailable = income - directCosts - minPayments;
-    const shortfall = Math.max(0, cardCharges - cashAvailable);
-    return { cardCharges, cashAvailable, sustainable: shortfall === 0, shortfall, byDebt, unassigned, items };
+    const cashSpent = cashExpensesForMonth(spendingBudgets, monthKey).reduce((s, e) => s + e.amount, 0);
+    let plannedCardPay = 0, otherPayments = 0;
+    for (const d of debts2) {
+      if (!(d.balance > 0)) continue;
+      const pay = minPayOverrides[d.id] ?? d.minPayment ?? 0;
+      if (d.type === "credit-card") plannedCardPay += pay;
+      else otherPayments += pay;
+    }
+    const required = directCosts + cashSpent + otherPayments + Math.max(cardCharges, plannedCardPay);
+    const cashAvailable = income - directCosts - cashSpent - otherPayments - plannedCardPay;
+    const shortfall = Math.max(0, required - income);
+    return { cardCharges, plannedCardPay, cashAvailable, sustainable: shortfall === 0, shortfall, byDebt, unassigned, items };
   }
   function cardChargesByDebt({ recurringCosts: recurringCosts2 = [], oneTimeCosts = [], spendingBudgets = [], monthKey }) {
     const byDebt = {};
@@ -904,6 +914,7 @@ var DebtSnowballApp = (() => {
         { name: "cardExpenseSkips", kind: "strings", default: () => [] },
         { name: "paidStatus", kind: "object", default: () => ({}) },
         { name: "minPayOverrides", kind: "object", default: () => ({}) },
+        { name: "expenseDefaults", kind: "object", default: () => ({}) },
         { name: "startingBalance", kind: "number", default: () => 0 },
         { name: "showMortgage", kind: "boolean", default: () => true },
         { name: "strategy", kind: "enum", default: () => "snowball", values: ["snowball", "avalanche"] }
@@ -937,6 +948,7 @@ var DebtSnowballApp = (() => {
       monthlyArchives: data.monthlyArchives ?? [],
       paidStatus: backupIsCurrentMonth ? data.paidStatus ?? {} : {},
       minPayOverrides: backupIsCurrentMonth ? data.minPayOverrides ?? {} : {},
+      expenseDefaults: data.expenseDefaults ?? {},
       startingBalance: data.startingBalance ?? 0,
       showMortgage: data.showMortgage !== false,
       oneTimeCosts: (data.oneTimeCosts ?? []).filter((c) => c.addedMonth === monthKey),
@@ -970,7 +982,7 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.6.0";
+      PANEL_VERSION = "2.7.0";
       PANEL_BUILD_DATE = "2026-09-22";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
@@ -1002,6 +1014,7 @@ var DebtSnowballApp = (() => {
       spendingBudgets: appState.spendingBudgets,
       cardExpenseSkips: appState.cardExpenseSkips,
       minPayOverrides: appState.minPayOverrides,
+      expenseDefaults: appState.expenseDefaults,
       monthlyArchives: appState.monthlyArchives,
       paidStatus: appState.paidStatus,
       startingBalance: appState.startingBalance,
@@ -1154,7 +1167,8 @@ var DebtSnowballApp = (() => {
         "monthlyArchives",
         "paidStatus",
         "startingBalance",
-        "showMortgage"
+        "showMortgage",
+        "expenseDefaults"
       ];
     }
   });
@@ -1482,6 +1496,7 @@ var DebtSnowballApp = (() => {
           return true;
         });
         appState.minPayOverrides = data.minPayOverrides || {};
+        appState.expenseDefaults = data.expenseDefaults || {};
         if (result.oneTimeCosts !== void 0 && result.oneTimeCosts !== null) {
           appState.oneTimeCosts = data.oneTimeCosts;
         } else {
@@ -1574,7 +1589,8 @@ var DebtSnowballApp = (() => {
       monthlyArchives: appState.monthlyArchives,
       spendingBudgets: appState.spendingBudgets,
       cardExpenseSkips: appState.cardExpenseSkips,
-      minPayOverrides: appState.minPayOverrides
+      minPayOverrides: appState.minPayOverrides,
+      expenseDefaults: appState.expenseDefaults
     };
   }
   async function saveData() {
@@ -2124,8 +2140,9 @@ This replaces ALL current data with that snapshot.`)) {
             </details>
             ${perCard.length > 0 ? `<span style="font-size:0.75rem; color:var(--text-secondary);">${perCard.join(" \xB7 ")}</span>` : ""}
             <div class="budget-meta-divider"></div>
-            ${payoff.sustainable ? `<span class="budget-meta-ok" title="Income covers all card charges after direct costs and minimum payments">\u2713 Covered \u2014 pay card balances in full</span>` : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover \u2014 the card balance will grow">\u26A0 ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
+            ${payoff.sustainable ? `<span class="budget-meta-ok" title="Income covers this month's charges on top of direct costs, cash spending, and planned card payments">\u2713 Covered \u2014 card charges funded by income/card payments</span>` : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover after costs and payments \u2014 the card balance will grow">\u26A0 ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
         </div>` : "";
+    const prefMethod = (appState.expenseDefaults || {}).paymentMethod === "direct" ? "direct" : "card";
     const cards = budgets.map((budget, cardIdx) => {
       const budgetAmt = getBudgetAmount(budget);
       const expenses = budget.expenses || [];
@@ -2152,10 +2169,10 @@ This replaces ALL current data with that snapshot.`)) {
         const upcoming = exp.autoCard && exp.date && exp.date > todayISO;
         const autoBadge = exp.autoCard ? ` <span class="expense-auto-badge" title="${upcoming ? "Scheduled card charge \u2014 posts on this date \xB7 edit the bill to change it" : "Auto-logged card charge \u2014 edit the bill to change it"}">${upcoming ? "\u23F3" : "\u26A1"}</span>` : "";
         const cardName = exp.cardDebtId && appState.debts.find((d) => d.id === exp.cardDebtId)?.name;
-        const cardBadge = !exp.autoCard && exp.paymentMethod === "card" ? ` <span class="expense-auto-badge" title="Charged to ${escHtml(cardName || "a credit card")} \u2014 not deducted from cash flow">\u{1F4B3}${cardName ? ` ${escHtml(cardName)}` : ""}</span>` : "";
+        const methodBadge = exp.autoCard ? "" : exp.paymentMethod === "card" ? ` <button class="expense-method-toggle is-card" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Charged to ${escHtml(cardName || "a credit card")} \u2014 not deducted from cash flow. Click to mark cash/debit.">\u{1F4B3}${cardName ? ` ${escHtml(cardName)}` : ""}</button>` : ` <button class="expense-method-toggle" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Cash/debit \u2014 deducted from cash flow. Click to mark as a card charge.">\u{1F3E6}</button>`;
         return `
                 <div class="budget-expense-row${exp.autoCard ? " expense-auto" : ""}" data-expense-id="${exp.id}" data-budget-id="${budget.id}"${exp.autoCard ? "" : ' draggable="true" title="Drag to move to another budget"'}>
-                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}${cardBadge}</span>
+                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}${methodBadge}</span>
                     <span class="expense-date">${exp.date ? (/* @__PURE__ */ new Date(exp.date + "T00:00:00")).toLocaleDateString(void 0, { month: "short", day: "numeric" }) : ""}</span>
                     <span class="expense-amount" style="color:var(--expense-color);">\u2212${formatMoney(exp.amount)}</span>
                     <div class="expense-actions">
@@ -2184,6 +2201,13 @@ This replaces ALL current data with that snapshot.`)) {
                     <div class="inline-field">
                         <label>Date</label>
                         <input type="date" class="inline-date" value="${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}">
+                    </div>
+                    <div class="inline-field">
+                        <label>Paid Via</label>
+                        <select class="inline-method">
+                            <option value="card" ${prefMethod === "direct" ? "" : "selected"}>\u{1F4B3} Card</option>
+                            <option value="direct" ${prefMethod === "direct" ? "selected" : ""}>\u{1F3E6} Cash/Debit</option>
+                        </select>
                     </div>
                     <div class="inline-expense-form-actions">
                         <button class="btn-inline-save" data-budget-id="${budget.id}">Save</button>
@@ -2227,6 +2251,17 @@ This replaces ALL current data with that snapshot.`)) {
         </div>`;
     }).join("");
     container.innerHTML = archiveBanner + metaBar + cardStrip + cards;
+    const defMethod = appState._root.getElementById("expense-default-method");
+    const defCard = appState._root.getElementById("expense-default-card");
+    if (defMethod && defCard) {
+      const pref = appState.expenseDefaults || {};
+      const prefCards = appState.debts.filter((d) => d.type === "credit-card");
+      const method = pref.paymentMethod === "direct" ? "direct" : "card";
+      defMethod.value = method;
+      defCard.innerHTML = '<option value="">\u2014 Any card \u2014</option>' + prefCards.map((d) => `<option value="${d.id}">${escHtml(d.name)}</option>`).join("");
+      defCard.value = prefCards.some((d) => d.id === pref.cardDebtId) ? pref.cardDebtId : "";
+      defCard.style.display = method === "card" ? "" : "none";
+    }
     if (appState.inlineExpenseBudget) {
       const descInput = container.querySelector(".inline-expense-form .inline-desc");
       if (descInput) setTimeout(() => descInput.focus(), 50);
@@ -2318,15 +2353,19 @@ This replaces ALL current data with that snapshot.`)) {
     }
     const methodSel = appState._root.getElementById("expense-payment-method");
     const cardDebtSel = appState._root.getElementById("expense-card-debt");
+    const cards = appState.debts.filter((d) => d.type === "credit-card");
     if (cardDebtSel) {
-      const cards = appState.debts.filter((d) => d.type === "credit-card");
       cardDebtSel.innerHTML = '<option value="">\u2014 Unspecified card \u2014</option>' + cards.map((d) => `<option value="${d.id}">${escHtml(d.name)}</option>`).join("");
     }
     const toggleCardGroup = () => {
       const grp = appState._root.getElementById("expense-card-debt-group");
       if (grp) grp.style.display = methodSel?.value === "card" ? "" : "none";
     };
-    if (methodSel) methodSel.value = "direct";
+    const pref = appState.expenseDefaults || {};
+    if (methodSel) methodSel.value = pref.paymentMethod === "direct" ? "direct" : "card";
+    if (cardDebtSel) {
+      cardDebtSel.value = cards.some((d) => d.id === pref.cardDebtId) ? pref.cardDebtId : cards.length === 1 ? cards[0].id : "";
+    }
     toggleCardGroup();
     const budget = budgets.find((b) => b.id === budgetId);
     const budgetLabel = budget ? ` \u2014 ${budget.name}` : "";
@@ -4673,6 +4712,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
         const desc = form.querySelector(".inline-desc").value.trim();
         const amount = parseFloat(form.querySelector(".inline-amount").value);
         const date = form.querySelector(".inline-date").value;
+        const method = form.querySelector(".inline-method")?.value || "card";
         if (!desc) {
           showErrorToast("Please enter a description.");
           return;
@@ -4684,7 +4724,10 @@ One-time bills will be removed, income will be cleared, and interval bills will 
         const budget = getWorkingBudgets().find((b) => b.id === bid);
         if (!budget) return;
         if (!budget.expenses) budget.expenses = [];
-        budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date });
+        const cards = appState.debts.filter((d) => d.type === "credit-card");
+        const prefCard = appState.expenseDefaults?.cardDebtId;
+        const cardDebtId = method === "card" ? cards.some((d) => d.id === prefCard) ? prefCard : cards.length === 1 ? cards[0].id : void 0 : void 0;
+        budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date, paymentMethod: method, cardDebtId });
         appState.inlineExpenseBudget = null;
         appState.expandedBudgets.add(bid);
         saveDataAndRender();
@@ -4696,6 +4739,23 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       if (inlineCancel) {
         appState.inlineExpenseBudget = null;
         renderSpendingBudgets();
+        return;
+      }
+      const methodToggle = e.target.closest(".expense-method-toggle");
+      if (methodToggle) {
+        const budget = getWorkingBudgets().find((b) => b.id === methodToggle.dataset.budgetId);
+        const exp = budget?.expenses?.find((x) => x.id === methodToggle.dataset.expenseId);
+        if (!exp || exp.autoCard) return;
+        const toCard = exp.paymentMethod !== "card";
+        exp.paymentMethod = toCard ? "card" : "direct";
+        if (toCard && !exp.cardDebtId) {
+          const prefCard = appState.expenseDefaults?.cardDebtId;
+          const cards = appState.debts.filter((d) => d.type === "credit-card");
+          const cardId = cards.some((d) => d.id === prefCard) ? prefCard : cards.length === 1 ? cards[0].id : void 0;
+          if (cardId) exp.cardDebtId = cardId;
+        }
+        saveDataAndRender();
+        showSavedToast(toCard ? "Marked as card charge \u2014 removed from cash flow \u{1F4B3}" : "Marked as cash/debit \u2014 back in cash flow \u{1F3E6}");
         return;
       }
       const editExp = e.target.closest(".btn-edit-expense");
@@ -4734,6 +4794,14 @@ One-time bills will be removed, income will be cleared, and interval bills will 
         deleteBudget(delBudget.dataset.budgetId);
         return;
       }
+    });
+    appState._root.getElementById("expense-default-method")?.addEventListener("change", (e) => {
+      appState.expenseDefaults = { ...appState.expenseDefaults || {}, paymentMethod: e.target.value };
+      saveDataAndRender();
+    });
+    appState._root.getElementById("expense-default-card")?.addEventListener("change", (e) => {
+      appState.expenseDefaults = { ...appState.expenseDefaults || {}, cardDebtId: e.target.value || null };
+      saveDataAndRender();
     });
     const budgetsList = appState._root.getElementById("budgets-list");
     budgetsList.addEventListener("dragstart", (e) => {
@@ -6990,6 +7058,53 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     opacity: 0.75;
     margin-top: 0.3rem;
 }
+
+.expense-method-toggle {
+    background: rgba(91,127,255,0.12);
+    border: 1px solid rgba(91,127,255,0.25);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    font-family: inherit;
+    padding: 0.1rem 0.45rem;
+    margin-left: 0.35rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+.expense-method-toggle:hover {
+    background: rgba(91,127,255,0.25);
+    color: var(--text-primary);
+}
+.expense-method-toggle.is-card {
+    background: rgba(251,191,36,0.12);
+    border-color: rgba(251,191,36,0.3);
+}
+
+/* ===== Expense defaults picker ===== */
+.budget-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.expense-defaults {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+.expense-defaults select {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.78rem;
+    background: rgba(7,6,26,0.7);
+    border: 1px solid var(--border-bright);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-family: inherit;
+}
 .schedule-row.drop-target {
     outline: 2px dashed var(--accent-color);
     outline-offset: -2px;
@@ -7034,7 +7149,8 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     color: var(--text-secondary);
 }
 
-.inline-expense-form input {
+.inline-expense-form input,
+.inline-expense-form select {
     padding: 0.45rem 0.65rem;
     font-size: 0.875rem;
     background: rgba(7,6,26,0.7);
@@ -7046,7 +7162,8 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     width: 100%;
 }
 
-.inline-expense-form input:focus {
+.inline-expense-form input:focus,
+.inline-expense-form select:focus {
     outline: none;
     border-color: var(--accent-color);
     box-shadow: 0 0 0 3px rgba(91,127,255,0.15);
@@ -9157,7 +9274,17 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                             <h2>Spending Budgets</h2>
                             <p class="subtitle" style="margin-bottom:0;">Set a monthly limit per category and track day-to-day spending against it. Card-charged bills are logged here automatically as they post. Expenses clear at month end.</p>
                         </div>
-                        <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
+                        <div class="budget-header-actions">
+                            <div class="expense-defaults" title="Applied automatically to new expenses \u2014 each entry can still be changed individually">
+                                <label for="expense-default-method">New expenses:</label>
+                                <select id="expense-default-method">
+                                    <option value="card">\u{1F4B3} Card</option>
+                                    <option value="direct">\u{1F3E6} Cash/Debit</option>
+                                </select>
+                                <select id="expense-default-card" title="Default card for new expenses"></select>
+                            </div>
+                            <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
+                        </div>
                     </div>
                     <div id="budgets-list" style="margin-top: 0.25rem;"></div>
                 </section>

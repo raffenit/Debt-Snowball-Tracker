@@ -72,6 +72,7 @@ export function filterBackupFields(data, monthKey) {
         monthlyArchives:  data.monthlyArchives  ?? [],
         paidStatus:       backupIsCurrentMonth ? (data.paidStatus     ?? {}) : {},
         minPayOverrides:  backupIsCurrentMonth ? (data.minPayOverrides ?? {}) : {},
+        expenseDefaults:  data.expenseDefaults ?? {},
         startingBalance:  data.startingBalance ?? 0,
         showMortgage:     data.showMortgage !== false,
         oneTimeCosts:     (data.oneTimeCosts ?? []).filter(c => c.addedMonth === monthKey),

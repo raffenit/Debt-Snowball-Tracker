@@ -29,6 +29,7 @@ export const appState = {
     viewingArchiveIndex: null, // null = current month, number = index into monthlyArchives
     workingMonthKey: null,    // the month the data is for
     minPayOverrides: {},      // { [debtId]: amount } — this-month-only overrides
+    expenseDefaults: {},      // { paymentMethod: 'card'|'direct', cardDebtId } — defaults for new budget expenses
     loadFailed: false,        // true when the initial backend load errored — blocks saves to protect stored data
     errorLog: [],             // in-memory ring buffer of reported errors (see error-report.js)
     dataIssues: null,         // sanitizeData() issues found on load — consumed once by renderUI to show the health modal

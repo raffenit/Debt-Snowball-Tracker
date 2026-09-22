@@ -27,6 +27,7 @@ export const FIELD_SPECS = [
     { name: 'cardExpenseSkips', kind: 'strings', default: () => [] },
     { name: 'paidStatus',       kind: 'object',  default: () => ({}) },
     { name: 'minPayOverrides',  kind: 'object',  default: () => ({}) },
+    { name: 'expenseDefaults',  kind: 'object',  default: () => ({}) },
     { name: 'startingBalance',  kind: 'number',  default: () => 0 },
     { name: 'showMortgage',     kind: 'boolean', default: () => true },
     { name: 'strategy',         kind: 'enum',    default: () => 'snowball', values: ['snowball', 'avalanche'] },

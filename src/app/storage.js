@@ -135,6 +135,7 @@ async function loadBackendData() {
                     return true;
                 });
             appState.minPayOverrides  = data.minPayOverrides  || {};
+            appState.expenseDefaults  = data.expenseDefaults  || {};
 
             // Backward-compat: oneTimeCosts may not exist in older saved data.
             // If missing, migrate any one-time entries from recurringCosts.
@@ -271,6 +272,7 @@ function buildSavePayload() {
         spendingBudgets: appState.spendingBudgets,
         cardExpenseSkips: appState.cardExpenseSkips,
         minPayOverrides: appState.minPayOverrides,
+        expenseDefaults: appState.expenseDefaults,
     };
 }
 

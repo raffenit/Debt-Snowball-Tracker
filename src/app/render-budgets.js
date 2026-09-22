@@ -118,9 +118,12 @@ function renderSpendingBudgets() {
             ${perCard.length > 0 ? `<span style="font-size:0.75rem; color:var(--text-secondary);">${perCard.join(' · ')}</span>` : ''}
             <div class="budget-meta-divider"></div>
             ${payoff.sustainable
-                ? `<span class="budget-meta-ok" title="Income covers all card charges after direct costs and minimum payments">✓ Covered — pay card balances in full</span>`
-                : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover — the card balance will grow">⚠ ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
+                ? `<span class="budget-meta-ok" title="Income covers this month's charges on top of direct costs, cash spending, and planned card payments">✓ Covered — card charges funded by income/card payments</span>`
+                : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover after costs and payments — the card balance will grow">⚠ ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
         </div>` : '';
+
+    // Inline quick-add Paid Via default comes from the user's expense defaults
+    const prefMethod = (appState.expenseDefaults || {}).paymentMethod === 'direct' ? 'direct' : 'card';
 
     const cards = budgets.map((budget, cardIdx) => {
         const budgetAmt  = getBudgetAmount(budget);
@@ -157,12 +160,14 @@ function renderSpendingBudgets() {
                     ? ` <span class="expense-auto-badge" title="${upcoming ? 'Scheduled card charge — posts on this date · edit the bill to change it' : 'Auto-logged card charge — edit the bill to change it'}">${upcoming ? '⏳' : '⚡'}</span>`
                     : '';
                 const cardName  = exp.cardDebtId && appState.debts.find(d => d.id === exp.cardDebtId)?.name;
-                const cardBadge = !exp.autoCard && exp.paymentMethod === 'card'
-                    ? ` <span class="expense-auto-badge" title="Charged to ${escHtml(cardName || 'a credit card')} — not deducted from cash flow">💳${cardName ? ` ${escHtml(cardName)}` : ''}</span>`
-                    : '';
+                // Manual rows get a one-click method toggle — 💳 card charges
+                // skip cash flow, 🏦 cash/debit draws down the pool.
+                const methodBadge = exp.autoCard ? '' : exp.paymentMethod === 'card'
+                    ? ` <button class="expense-method-toggle is-card" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Charged to ${escHtml(cardName || 'a credit card')} — not deducted from cash flow. Click to mark cash/debit.">💳${cardName ? ` ${escHtml(cardName)}` : ''}</button>`
+                    : ` <button class="expense-method-toggle" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Cash/debit — deducted from cash flow. Click to mark as a card charge.">🏦</button>`;
                 return `
                 <div class="budget-expense-row${exp.autoCard ? ' expense-auto' : ''}" data-expense-id="${exp.id}" data-budget-id="${budget.id}"${exp.autoCard ? '' : ' draggable="true" title="Drag to move to another budget"'}>
-                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}${cardBadge}</span>
+                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}${methodBadge}</span>
                     <span class="expense-date">${exp.date ? new Date(exp.date + 'T00:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'}) : ''}</span>
                     <span class="expense-amount" style="color:var(--expense-color);">−${formatMoney(exp.amount)}</span>
                     <div class="expense-actions">
@@ -196,6 +201,13 @@ function renderSpendingBudgets() {
                     <div class="inline-field">
                         <label>Date</label>
                         <input type="date" class="inline-date" value="${new Date().toISOString().slice(0,10)}">
+                    </div>
+                    <div class="inline-field">
+                        <label>Paid Via</label>
+                        <select class="inline-method">
+                            <option value="card" ${prefMethod === 'direct' ? '' : 'selected'}>💳 Card</option>
+                            <option value="direct" ${prefMethod === 'direct' ? 'selected' : ''}>🏦 Cash/Debit</option>
+                        </select>
                     </div>
                     <div class="inline-expense-form-actions">
                         <button class="btn-inline-save" data-budget-id="${budget.id}">Save</button>
@@ -246,6 +258,20 @@ function renderSpendingBudgets() {
     }).join('');
 
     container.innerHTML = archiveBanner + metaBar + cardStrip + cards;
+
+    // Expense-defaults picker — reflect prefs and the current card list
+    const defMethod = appState._root.getElementById('expense-default-method');
+    const defCard   = appState._root.getElementById('expense-default-card');
+    if (defMethod && defCard) {
+        const pref      = appState.expenseDefaults || {};
+        const prefCards = appState.debts.filter(d => d.type === 'credit-card');
+        const method    = pref.paymentMethod === 'direct' ? 'direct' : 'card';
+        defMethod.value = method;
+        defCard.innerHTML = '<option value="">— Any card —</option>' +
+            prefCards.map(d => `<option value="${d.id}">${escHtml(d.name)}</option>`).join('');
+        defCard.value = prefCards.some(d => d.id === pref.cardDebtId) ? pref.cardDebtId : '';
+        defCard.style.display = method === 'card' ? '' : 'none';
+    }
 
     // Auto-focus the inline form description field if open
     if (appState.inlineExpenseBudget) {
@@ -360,8 +386,8 @@ function openExpenseModal(budgetId, expenseId = null) {
     // Card picker — same pattern as the bill modal's "charged to card" select
     const methodSel   = appState._root.getElementById('expense-payment-method');
     const cardDebtSel = appState._root.getElementById('expense-card-debt');
+    const cards = appState.debts.filter(d => d.type === 'credit-card');
     if (cardDebtSel) {
-        const cards = appState.debts.filter(d => d.type === 'credit-card');
         cardDebtSel.innerHTML = '<option value="">— Unspecified card —</option>' +
             cards.map(d => `<option value="${d.id}">${escHtml(d.name)}</option>`).join('');
     }
@@ -369,7 +395,15 @@ function openExpenseModal(budgetId, expenseId = null) {
         const grp = appState._root.getElementById('expense-card-debt-group');
         if (grp) grp.style.display = methodSel?.value === 'card' ? '' : 'none';
     };
-    if (methodSel) methodSel.value = 'direct';
+    // New expenses use the user's configured defaults (Budgets header picker);
+    // card defaults to the chosen card, else the only card on file.
+    const pref = appState.expenseDefaults || {};
+    if (methodSel) methodSel.value = pref.paymentMethod === 'direct' ? 'direct' : 'card';
+    if (cardDebtSel) {
+        cardDebtSel.value = cards.some(d => d.id === pref.cardDebtId)
+            ? pref.cardDebtId
+            : (cards.length === 1 ? cards[0].id : '');
+    }
     toggleCardGroup();
 
     const budget = budgets.find(b => b.id === budgetId);

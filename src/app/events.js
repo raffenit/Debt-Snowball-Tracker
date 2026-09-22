@@ -98,13 +98,21 @@ function setupEventListeners() {
             const desc   = form.querySelector('.inline-desc').value.trim();
             const amount = parseFloat(form.querySelector('.inline-amount').value);
             const date   = form.querySelector('.inline-date').value;
+            const method = form.querySelector('.inline-method')?.value || 'card';
             if (!desc)              { showErrorToast('Please enter a description.'); return; }
             if (isNaN(amount) || amount < 0) { showErrorToast('Please enter a valid amount.'); return; }
             // Archive-aware: budget cards may belong to an archived month
             const budget = getWorkingBudgets().find(b => b.id === bid);
             if (!budget) return;
             if (!budget.expenses) budget.expenses = [];
-            budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date });
+            // Card expenses link automatically when exactly one card exists —
+            // otherwise unlinked (assign via the row's ✎ button).
+            const cards = appState.debts.filter(d => d.type === 'credit-card');
+            const prefCard = appState.expenseDefaults?.cardDebtId;
+            const cardDebtId = method === 'card'
+                ? (cards.some(d => d.id === prefCard) ? prefCard : (cards.length === 1 ? cards[0].id : undefined))
+                : undefined;
+            budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date, paymentMethod: method, cardDebtId });
             appState.inlineExpenseBudget = null;
             appState.expandedBudgets.add(bid);
             saveDataAndRender();
@@ -118,6 +126,25 @@ function setupEventListeners() {
         if (inlineCancel) {
             appState.inlineExpenseBudget = null;
             renderSpendingBudgets();
+            return;
+        }
+
+        // One-click card ↔ cash/debit toggle on manual expense rows
+        const methodToggle = e.target.closest('.expense-method-toggle');
+        if (methodToggle) {
+            const budget = getWorkingBudgets().find(b => b.id === methodToggle.dataset.budgetId);
+            const exp    = budget?.expenses?.find(x => x.id === methodToggle.dataset.expenseId);
+            if (!exp || exp.autoCard) return;
+            const toCard = exp.paymentMethod !== 'card';
+            exp.paymentMethod = toCard ? 'card' : 'direct';
+            if (toCard && !exp.cardDebtId) {
+                const prefCard = appState.expenseDefaults?.cardDebtId;
+                const cards = appState.debts.filter(d => d.type === 'credit-card');
+                const cardId = cards.some(d => d.id === prefCard) ? prefCard : (cards.length === 1 ? cards[0].id : undefined);
+                if (cardId) exp.cardDebtId = cardId;
+            }
+            saveDataAndRender();
+            showSavedToast(toCard ? 'Marked as card charge — removed from cash flow 💳' : 'Marked as cash/debit — back in cash flow 🏦');
             return;
         }
 
@@ -150,6 +177,16 @@ function setupEventListeners() {
 
         const delBudget = e.target.closest('.btn-delete-budget');
         if (delBudget) { deleteBudget(delBudget.dataset.budgetId); return; }
+    });
+
+    // ── Expense-entry defaults (persisted prefs in the Budgets header) ───────
+    appState._root.getElementById('expense-default-method')?.addEventListener('change', e => {
+        appState.expenseDefaults = { ...(appState.expenseDefaults || {}), paymentMethod: e.target.value };
+        saveDataAndRender();
+    });
+    appState._root.getElementById('expense-default-card')?.addEventListener('change', e => {
+        appState.expenseDefaults = { ...(appState.expenseDefaults || {}), cardDebtId: e.target.value || null };
+        saveDataAndRender();
     });
 
     // ── Drag & drop: move expenses between budgets ────────────────────────────

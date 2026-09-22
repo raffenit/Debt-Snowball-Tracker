@@ -268,13 +268,26 @@ export function computeCardPayoffStatus({ recurringCosts = [], oneTimeCosts = []
     const cardCharges  = Object.values(byDebt).reduce((s, v) => s + v, 0) + unassigned;
     const directCosts  = due.filter(c => c.paymentMethod !== 'card').reduce((s, c) => s + c.amount, 0);
     const income       = incomeEntries.reduce((s, e) => s + e.amount, 0);
-    const minPayments  = debts
-        .filter(d => d.balance > 0)
-        .reduce((s, d) => s + (minPayOverrides[d.id] ?? d.minPayment ?? 0), 0);
+    const cashSpent    = cashExpensesForMonth(spendingBudgets, monthKey).reduce((s, e) => s + e.amount, 0);
 
-    const cashAvailable = income - directCosts - minPayments;
-    const shortfall     = Math.max(0, cardCharges - cashAvailable);
-    return { cardCharges, cashAvailable, sustainable: shortfall === 0, shortfall, byDebt, unassigned, items };
+    // Card payments are the FUNDING for card charges, not a separate
+    // obligation — paying $200 on a card that absorbed $500 of charges is
+    // $200 of outflow, not $700. So the month's requirement is:
+    //   direct + cash spending + non-card debt payments + max(charges, cardPay)
+    // Charges ≤ cardPay → the payment covers them (plus old balance).
+    // Charges > cardPay → the charges are the requirement; the min payment
+    // is inside that number, not on top of it.
+    let plannedCardPay = 0, otherPayments = 0;
+    for (const d of debts) {
+        if (!(d.balance > 0)) continue;
+        const pay = minPayOverrides[d.id] ?? d.minPayment ?? 0;
+        if (d.type === 'credit-card') plannedCardPay += pay; else otherPayments += pay;
+    }
+
+    const required      = directCosts + cashSpent + otherPayments + Math.max(cardCharges, plannedCardPay);
+    const cashAvailable = income - directCosts - cashSpent - otherPayments - plannedCardPay;
+    const shortfall     = Math.max(0, required - income);
+    return { cardCharges, plannedCardPay, cashAvailable, sustainable: shortfall === 0, shortfall, byDebt, unassigned, items };
 }
 
 /**

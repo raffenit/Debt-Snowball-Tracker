@@ -25,6 +25,7 @@ function exportData() {
         spendingBudgets: appState.spendingBudgets,
         cardExpenseSkips: appState.cardExpenseSkips,
         minPayOverrides: appState.minPayOverrides,
+        expenseDefaults: appState.expenseDefaults,
         monthlyArchives: appState.monthlyArchives,
         paidStatus:      appState.paidStatus,
         startingBalance: appState.startingBalance,
@@ -135,6 +136,7 @@ const BACKUP_FIELDS = [
     'debts', 'recurringCosts', 'oneTimeCosts', 'incomeEntries', 'checkpoints',
     'strategy', 'spendingBudgets', 'cardExpenseSkips', 'minPayOverrides',
     'monthlyArchives', 'paidStatus', 'startingBalance', 'showMortgage',
+    'expenseDefaults',
 ];
 
 /**
