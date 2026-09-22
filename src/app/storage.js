@@ -71,6 +71,7 @@ async function loadBackendData() {
             appState.startingBalance = result.startingBalance || 0;
             appState.monthlyArchives  = result.monthlyArchives  || [];
             appState.spendingBudgets  = result.spendingBudgets  || [];
+            appState.cardExpenseSkips = result.cardExpenseSkips || [];
 
             // Migration: income entries previously defaulted to scheduleType 'one-time',
             // which caused them to be skipped during month rollover (resulting in zero income).
@@ -88,6 +89,25 @@ async function loadBackendData() {
             if (incomeMigrated) {
                 console.info('[DebtSnowball] Migrated income entries to monthly schedule (were one-time/missing).');
             }
+
+            // Repair: older biweekly rows were saved without id/seriesId and could
+            // be duplicated by a rollover bug. Restore ids, derive seriesId, and
+            // drop exact series+date duplicates.
+            const seenIncomeRows = new Set();
+            appState.incomeEntries = appState.incomeEntries
+                .map((e, i) => ({
+                    ...e,
+                    id: e.id || `inc_${i}_${e.date}`,
+                    ...(e.scheduleType === 'biweekly' && !e.seriesId
+                        ? { seriesId: `${e.scheduleAnchorDate}|${e.label}|${e.amount}` }
+                        : {}),
+                }))
+                .filter(e => {
+                    const dupKey = e.scheduleType === 'biweekly' ? `${e.seriesId}|${e.date}` : e.id;
+                    if (seenIncomeRows.has(dupKey)) return false;
+                    seenIncomeRows.add(dupKey);
+                    return true;
+                });
             appState.minPayOverrides  = result.minPayOverrides  || {};
 
             // Backward-compat: oneTimeCosts may not exist in older saved data.
@@ -218,6 +238,7 @@ async function saveData() {
             paidMonth:      appState.workingMonthKey || currentMonthKey(),
             monthlyArchives: appState.monthlyArchives,
             spendingBudgets: appState.spendingBudgets,
+            cardExpenseSkips: appState.cardExpenseSkips,
             minPayOverrides: appState.minPayOverrides,
         },
     });

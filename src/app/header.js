@@ -15,8 +15,8 @@
  */
 
 // Version marker - check console to verify which file is loaded
-const PANEL_VERSION = '2.3.1';
-const PANEL_BUILD_DATE = '2026-08-04';
+const PANEL_VERSION = '2.4.0';
+const PANEL_BUILD_DATE = '2026-09-22';
 
 // Detect installation path for debugging
 const currentScript = document.currentScript;

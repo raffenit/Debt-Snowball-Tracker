@@ -1,5 +1,6 @@
 import { appState } from './state.js';
-import { formatMonthLabel, intervalLabel, isCostDueThisMonth } from '../core/date-utils.js';
+import { currentMonthKey, formatMonthLabel, intervalLabel, isCostDueThisMonth } from '../core/date-utils.js';
+import { cardChargesByDebt } from '../core/card-expenses.js';
 import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
 import { getStrategyOrder } from '../core/simulation.js';
 import { deleteCost, deleteDebt, deleteIncome, openCostModal, openDebtModal, openIncomeModal, togglePaid } from './render-modals.js';
@@ -75,8 +76,8 @@ function renderRecurringCostsList() {
     if (!hasAnyCosts) {
         appState.costsListContainer.innerHTML = `
             <div class="empty-state">
-                No costs yet.<br>Add your bills, subscriptions, and one-time expenses.
-                <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Cost</button>
+                No bills yet.<br>Add your recurring bills, subscriptions, and one-time expenses.
+                <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Bill</button>
             </div>`;
         appState.costsListContainer.style.display = 'block';
         const emptyBtn = appState.costsListContainer.querySelector('#empty-add-cost-btn');
@@ -141,7 +142,7 @@ function renderRecurringCostsList() {
 
         const otHeader = document.createElement('div');
         otHeader.className = 'cost-subsection-header';
-        otHeader.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">🔴 ONE-TIME EXPENSES (This Month Only)</span><span class="cost-subsection-total">${formatMoney(otTotal)}</span>`;
+        otHeader.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">🔴 ONE-TIME BILLS (This Month Only)</span><span class="cost-subsection-total">${formatMoney(otTotal)}</span>`;
         otSection.appendChild(otHeader);
 
         const otGrid = document.createElement('div');
@@ -262,6 +263,13 @@ function renderDebtsList(simResults) {
     const _debts        = archiveData ? (archiveData.debts || appState.debts) : appState.debts;
     const _paidStatus   = archiveData ? (archiveData.paidStatus || {}) : appState.paidStatus;
 
+    // Per-card charge totals for the working month (linked via cost.cardDebtId)
+    const _chargesByDebt = isArchiveView ? {} : cardChargesByDebt({
+        recurringCosts: appState.recurringCosts,
+        oneTimeCosts:   appState.oneTimeCosts,
+        monthKey:       appState.workingMonthKey || currentMonthKey(),
+    }).byDebt;
+
     const hasMortgage = _debts.some(d => d.type === 'mortgage');
     if (mortgageToggleBtn) {
         mortgageToggleBtn.style.display = hasMortgage ? '' : 'none';
@@ -369,6 +377,7 @@ function renderDebtsList(simResults) {
             <div class="debt-detail"><span class="debt-detail-label">Interest Rate</span><span class="debt-detail-value">${rateDisplay}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Min Payment</span><span class="debt-detail-value">${formatMoney(debt.minPayment)} ${minPayNote}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Due Day</span><span class="debt-detail-value">${formatOrdinal(debt.dueDay||1)} of each month</span></div>
+            ${(_chargesByDebt[debt.id] || 0) > 0 ? `<div class="debt-detail" title="Card-paid bills linked to this card this month"><span class="debt-detail-label">Charged This Month</span><span class="debt-detail-value" style="color:var(--warning-color);">${formatMoney(_chargesByDebt[debt.id])}</span></div>` : ''}
             ${promoExpiryRow}
             ${payoffLine}
             ${payUrlRow}

@@ -1,5 +1,6 @@
 import { appState } from './state.js';
 import { currentMonthKey } from '../core/date-utils.js';
+import { computeCardPayoffStatus } from '../core/card-expenses.js';
 import { escHtml, formatMoney } from '../core/pure-utils.js';
 import { showErrorToast, showSavedToast, showUndoToast } from './render-modals.js';
 import { saveData, saveDataAndRender } from './storage.js';
@@ -21,7 +22,7 @@ function renderSpendingBudgets() {
     if (appState.spendingBudgets.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
-                No spending budgets yet.<br>Track discretionary spending by setting a spending limit for each category.
+                No spending budgets yet.<br>Set a monthly limit per category and log spending as it happens — card-charged bills land here automatically too.
                 <br><button class="empty-cta-btn" id="empty-add-budget-btn">+ Add Your First Budget</button>
             </div>`;
         const emptyBtn = container.querySelector('#empty-add-budget-btn');
@@ -51,6 +52,32 @@ function renderSpendingBudgets() {
             </span>
         </div>`;
 
+    // Card pay-in-full check: everything charged to cards this month should be
+    // payable in full from this month's income after direct costs + minimums.
+    const _mk = appState.workingMonthKey || currentMonthKey();
+    const payoff = computeCardPayoffStatus({
+        recurringCosts:  appState.recurringCosts,
+        oneTimeCosts:    appState.oneTimeCosts,
+        incomeEntries:   appState.incomeEntries,
+        debts:           appState.debts,
+        minPayOverrides: appState.minPayOverrides,
+        monthKey:        _mk,
+    });
+    // Per-card breakdown: which debt each charge landed on
+    const perCard = Object.entries(payoff.byDebt)
+        .map(([debtId, amt]) => `${escHtml(appState.debts.find(d => d.id === debtId)?.name || 'Card')}: ${formatMoney(amt)}`);
+    if (payoff.unassigned > 0) perCard.push(`Unlinked: ${formatMoney(payoff.unassigned)}`);
+
+    const cardStrip = payoff.cardCharges > 0 ? `
+        <div class="budget-meta-bar" style="margin-top:0.5rem; flex-wrap:wrap; row-gap:0.35rem;">
+            <span class="budget-meta-budgeted">💳 Charged to cards this month: ${formatMoney(payoff.cardCharges)}</span>
+            ${perCard.length > 0 ? `<span style="font-size:0.75rem; color:var(--text-secondary);">${perCard.join(' · ')}</span>` : ''}
+            <div class="budget-meta-divider"></div>
+            ${payoff.sustainable
+                ? `<span class="budget-meta-ok" title="Income covers all card charges after direct costs and minimum payments">✓ Covered — pay card balances in full</span>`
+                : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover — the card balance will grow">⚠ ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
+        </div>` : '';
+
     const cards = appState.spendingBudgets.map((budget, cardIdx) => {
         const budgetAmt  = getBudgetAmount(budget);
         const expenses   = budget.expenses || [];
@@ -79,11 +106,11 @@ function renderSpendingBudgets() {
             ? `<p class="budget-empty-text">No expenses logged yet.</p>`
             : [...expenses].sort((a, b) => (b.date || '') > (a.date || '') ? 1 : -1).map(exp => `
                 <div class="budget-expense-row" data-expense-id="${exp.id}">
-                    <span class="expense-description">${escHtml(exp.description)}</span>
+                    <span class="expense-description">${escHtml(exp.description)}${exp.autoCard ? ' <span class="expense-auto-badge" title="Auto-logged card charge — edit the bill to change it">⚡</span>' : ''}</span>
                     <span class="expense-date">${exp.date ? new Date(exp.date + 'T00:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'}) : ''}</span>
                     <span class="expense-amount" style="color:var(--expense-color);">−${formatMoney(exp.amount)}</span>
                     <div class="expense-actions">
-                        <button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">✎</button>
+                        ${exp.autoCard ? '' : `<button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">✎</button>`}
                         <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">✕</button>
                     </div>
                 </div>`).join('');
@@ -129,7 +156,8 @@ function renderSpendingBudgets() {
                 <div class="budget-header-left">
                     <span class="budget-toggle-icon">▶</span>
                     <span class="budget-name">${escHtml(budget.name)}</span>
-                    ${hasExc ? `<span class="budget-exception-badge">Override: ${formatMoney(budgetAmt)}</span>` : ''}
+                    ${budget.autoGenerated ? `<span class="budget-exception-badge" title="Auto-managed: card charges are logged here and the monthly limit tracks them">⚡ auto</span>` : ''}
+                    ${hasExc && !budget.exception?.auto ? `<span class="budget-exception-badge">Override: ${formatMoney(budgetAmt)}</span>` : ''}
                 </div>
                 <div class="budget-header-right">
                     ${isOver
@@ -156,7 +184,7 @@ function renderSpendingBudgets() {
         </div>`;
     }).join('');
 
-    container.innerHTML = metaBar + cards;
+    container.innerHTML = metaBar + cardStrip + cards;
 
     // Auto-focus the inline form description field if open
     if (appState.inlineExpenseBudget) {
@@ -322,10 +350,18 @@ function deleteExpense(budgetId, expenseId) {
     if (!budget) return;
     const deleted = budget.expenses.find(e => e.id === expenseId);
     if (!deleted) return;
+    // Tombstone auto card expenses so the sync doesn't resurrect them next render
+    const skipKey = deleted.autoCard && deleted.costId
+        ? `${appState.workingMonthKey || currentMonthKey()}:${deleted.costId}`
+        : null;
+    if (skipKey && !appState.cardExpenseSkips.includes(skipKey)) {
+        appState.cardExpenseSkips.push(skipKey);
+    }
     budget.expenses = budget.expenses.filter(e => e.id !== expenseId);
     saveDataAndRender();
     renderSpendingBudgets();
     showUndoToast('Expense deleted', () => {
+        if (skipKey) appState.cardExpenseSkips = appState.cardExpenseSkips.filter(k => k !== skipKey);
         budget.expenses.push(deleted);
         saveDataAndRender();
         renderSpendingBudgets();

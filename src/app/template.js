@@ -3819,9 +3819,9 @@ const PANEL_HTML = `<div class="app-container">
         </div>
 
         <nav class="tab-nav">
-            <button class="tab-btn active" data-tab="payment-plan"><span class="tab-icon">&#128197;</span><span class="tab-label"> Plan</span></button>
+            <button class="tab-btn active" data-tab="payment-plan"><span class="tab-icon">&#128197;</span><span class="tab-label"> Cash Flow</span></button>
             <button class="tab-btn" data-tab="budgets"><span class="tab-icon">&#128176;</span><span class="tab-label"> Budgets</span></button>
-            <button class="tab-btn" data-tab="income"><span class="tab-icon">&#128181;</span><span class="tab-label"> Income & Expenses</span></button>
+            <button class="tab-btn" data-tab="income"><span class="tab-icon">&#128181;</span><span class="tab-label"> Income & Bills</span></button>
             <button class="tab-btn" data-tab="debts"><span class="tab-icon">&#128179;</span><span class="tab-label"> Debts</span></button>
             <button class="tab-btn" data-tab="timeline"><span class="tab-icon">&#128202;</span><span class="tab-label"> Timeline</span></button>
         </nav>
@@ -3869,14 +3869,14 @@ const PANEL_HTML = `<div class="app-container">
                             </div>
                             <!-- Expenditures -->
                             <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                                <span style="font-size: 0.7rem; color: var(--text-secondary);">− Expenses</span>
+                                <span style="font-size: 0.7rem; color: var(--text-secondary);">− Cash Out</span>
                                 <span id="month-overview-expenses" style="font-size: 1.1rem; font-weight: 600; color: var(--expense-color);">-</span>
                             </div>
                         </div>
 
                         <!-- Spending Budgets Summary (only shows if budgets exist) -->
                         <div id="month-overview-budgets" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(99,102,241,0.15);">
-                            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">💳 Spending Budgets (Card Charges)</div>
+                            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">💳 Spending Budgets (incl. auto-logged card charges)</div>
                             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem;" id="month-overview-budgets-grid">
                             </div>
                         </div>
@@ -3913,7 +3913,8 @@ const PANEL_HTML = `<div class="app-container">
                         </div>
                     </div>
 
-                    <!-- Payment Schedule List -->
+                    <!-- Cash Flow Schedule List -->
+                    <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; font-weight: 600;">📋 Cash Flow Schedule</div>
                     <div id="payment-plan-list" class="payment-schedule">
                         </div>
                     </section>
@@ -3924,7 +3925,7 @@ const PANEL_HTML = `<div class="app-container">
                     <div class="section-header">
                         <div>
                             <h2>Spending Budgets</h2>
-                            <p class="subtitle" style="margin-bottom:0;">Track discretionary spending with category limits. Expenses clear at month end.</p>
+                            <p class="subtitle" style="margin-bottom:0;">Set a monthly limit per category and track day-to-day spending against it. Card-charged bills are logged here automatically as they post. Expenses clear at month end.</p>
                         </div>
                         <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
                     </div>
@@ -3952,15 +3953,16 @@ const PANEL_HTML = `<div class="app-container">
                 <section class="recurring-section">
                     <div class="section-header">
                         <div>
-                            <h2>Bills & Expenses</h2>
+                            <h2>Fixed Bills</h2>
                             <p class="subtitle" style="margin-bottom:0;">
+                                Bills with a due date — <strong>Direct-pay</strong> bills appear in Cash Flow, <strong>card-paid</strong> bills auto-log to Budgets as they post.<br>
                                 <strong>Recurring</strong> = Every month · 
                                 <strong>Quarterly</strong> = Every 3 months · 
                                 <strong>Annual</strong> = Once per year · 
                                 <strong style="color:var(--danger-color);">One-Time</strong> = This month only (deleted next month)
                             </p>
                         </div>
-                        <button id="add-cost-btn" class="btn btn-warning">+ Add Bill/Expense</button>
+                        <button id="add-cost-btn" class="btn btn-warning">+ Add Bill</button>
                     </div>
                     <div id="recurring-summary" class="recurring-due-summary"></div>
                     <div id="costs-list" class="debts-list">
@@ -4118,7 +4120,7 @@ const PANEL_HTML = `<div class="app-container">
     <div id="cost-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="cost-modal-title">Add Recurring Cost</h3>
+                <h3 id="cost-modal-title">Add Bill</h3>
                 <button class="close-modal close-cost-modal">&times;</button>
             </div>
             <form id="cost-form">
@@ -4132,7 +4134,7 @@ const PANEL_HTML = `<div class="app-container">
                         <option value="other">📦 Other Recurring Bill</option>
                         <option value="one-time">🔴 ONE-TIME ONLY — This Month Only (No Repeat)</option>
                     </select>
-                    <p class="subtitle" id="category-hint" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem; color: var(--text-secondary);">Choose 'ONE-TIME' for expenses that happen just once this month.</p>
+                    <p class="subtitle" id="category-hint" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem; color: var(--text-secondary);">Choose 'ONE-TIME' for bills or purchases that happen just once this month. (Day-to-day spending goes in Budgets instead.)</p>
                 </div>
                 <div class="input-group">
                     <label for="cost-name">Name</label>
@@ -4176,9 +4178,23 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group">
                     <label for="cost-payment-method">Payment Method</label>
                     <select id="cost-payment-method" required>
-                        <option value="direct">Direct (bank transfer / cash)</option>
-                        <option value="card">Card (credit/debit, not in immediate cash budget)</option>
+                        <option value="direct">Direct (bank transfer, cash, Zelle…)</option>
+                        <option value="card">Card (credit/debit — auto-logs to Budgets)</option>
                     </select>
+                </div>
+                <div class="input-group" id="cost-budget-group" style="display:none;">
+                    <label for="cost-budget">Log Card Charges To Budget</label>
+                    <select id="cost-budget">
+                        <option value="">✨ Auto-match (by name / category)</option>
+                    </select>
+                    <p class="subtitle" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem; color: var(--text-secondary);">Card charges are auto-logged to a spending budget when their due day arrives. Unmatched charges go to the 💳 Card Autopay budget.</p>
+                </div>
+                <div class="input-group" id="cost-card-debt-group" style="display:none;">
+                    <label for="cost-card-debt">Charged To Which Card?</label>
+                    <select id="cost-card-debt">
+                        <option value="">— Unspecified card —</option>
+                    </select>
+                    <p class="subtitle" style="margin-top:0.3rem; margin-bottom:0; font-size:0.8rem; color: var(--text-secondary);">Links this charge to a credit card in Debts so you can see how much lands on each card each month.</p>
                 </div>
                 <div class="input-group promo-toggle-group">
                     <label class="toggle-label" for="cost-autopay-toggle">
@@ -4191,7 +4207,7 @@ const PANEL_HTML = `<div class="app-container">
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-cost-modal">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Save Cost</button>
+                    <button type="submit" class="btn btn-warning">Save Bill</button>
                 </div>
             </form>
         </div>

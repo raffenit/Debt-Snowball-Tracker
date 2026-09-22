@@ -2,6 +2,7 @@ import { appState } from './state.js';
 import { addMonthsToKey, currentMonthKey, formatMonthLabel, generateRecurringIncomeForMonth, isCostDueInMonth, isCostDueThisMonth } from '../core/date-utils.js';
 import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
 import { getStrategyOrder } from '../core/simulation.js';
+import { cashExpensesForMonth } from '../core/card-expenses.js';
 import { getBudgetAmount } from './render-budgets.js';
 import { renderPaydownChart, renderTimelineChart } from './render-charts.js';
 import { startCountdown, stopCountdown } from './render-support.js';
@@ -329,7 +330,7 @@ function renderVisualization(simResults) {
     renderTimelineChart(simResults.payoffLog, simResults.monthsElapsed);
     renderPaydownChart(simResults.monthlyTotals, simResults.perDebtMonthly);
 }
-// ─── Payment Plan ─────────────────────────────────────────────────────────────
+// ─── Monthly Cash Flow Plan ───────────────────────────────────────────────────
 function renderPaymentPlan() {
     const section = appState._root.getElementById('payment-plan-section');
     const list    = appState._root.getElementById('payment-plan-list');
@@ -383,7 +384,10 @@ function renderPaymentPlan() {
         events.push({ type: 'checkpoint', id: cp.id, name: 'Bank Balance Sync', day: cp.day, amount: cp.amount, sortKey: cp.day * 1000 + 0.5 });
     });
 
-    _costs.filter(c => isCostDueInMonth(c, _monthKey)).forEach(cost => {
+    // Card-charged costs are excluded entirely — they're autopaid by the card
+    // and never touch the cash pool this plan tracks. They're mirrored into
+    // the spending budgets instead (see core/card-expenses.js).
+    _costs.filter(c => isCostDueInMonth(c, _monthKey) && c.paymentMethod !== 'card').forEach(cost => {
         const day = cost.dueDay || 1;
         events.push({
             type:'recurring',
@@ -399,7 +403,7 @@ function renderPaymentPlan() {
     });
 
     // One-time costs always apply to the current month
-    _oneTimeCosts.forEach(cost => {
+    _oneTimeCosts.filter(c => c.paymentMethod !== 'card').forEach(cost => {
         events.push({
             type: 'one-time',
             id: cost.id,
@@ -413,15 +417,37 @@ function renderPaymentPlan() {
         });
     });
 
+    // Manual budget expenses (Zelle/cash/debit purchases) are real cash
+    // outflows — they draw down the pool on their logged date. Auto-logged
+    // card expenses are excluded (they're card charges, not cash).
+    // Archives don't store budgets, so this is empty in archive view.
+    const _budgetExpenses = cashExpensesForMonth(
+        archiveData ? [] : appState.spendingBudgets, _monthKey);
+    _budgetExpenses.forEach(exp => {
+        const day = exp.date ? (parseInt(exp.date.split('-')[2]) || 1) : 1;
+        events.push({
+            type: 'expense',
+            id: exp.id,
+            name: exp.description,
+            day,
+            amount: exp.amount,
+            budgetName: exp.budgetName,
+            settled: true,
+            sortKey: day * 1000 + 1.5
+        });
+    });
+
     const sortedDebts   = getStrategyOrder(_debts.filter(d => d.balance > 0), appState.strategy);
     const _overrides    = isArchiveView ? {} : appState.minPayOverrides;
     const totalMinPay   = sortedDebts.reduce((s,d) => s + (_overrides[d.id] ?? d.minPayment), 0);
     const totalInc      = _income.reduce((s,e) => s + e.amount, 0);
     const totalRec      = [
-        ..._costs.filter(c => isCostDueInMonth(c, _monthKey)),
-        ...appState.oneTimeCosts,
+        ..._costs.filter(c => isCostDueInMonth(c, _monthKey) && c.paymentMethod !== 'card'),
+        ..._oneTimeCosts.filter(c => c.paymentMethod !== 'card'),
     ].reduce((s,c) => s + c.amount, 0);
-    const extra         = Math.max(0, totalInc - totalRec - totalMinPay);
+    // Money already spent via budgets isn't available for the snowball extra
+    const totalSpentManual = _budgetExpenses.reduce((s, e) => s + e.amount, 0);
+    const extra         = Math.max(0, totalInc - totalRec - totalMinPay - totalSpentManual);
     const targetId      = sortedDebts[0]?.id;
 
     sortedDebts.forEach(debt => {
@@ -474,9 +500,12 @@ function renderPaymentPlan() {
             continue;
         }
 
-        // Card-method recurring costs bypass the cash pool entirely
-        if (ev.type === 'recurring' && ev.paymentMethod === 'card') {
-            schedule.push({ ...ev, balance: cashPool, isCard: true });
+        // Logged budget expenses already happened — always deduct, even if it
+        // drives the balance negative (the runway status surfaces that risk)
+        if (ev.type === 'expense') {
+            cashPool       -= ev.amount;
+            totalExpenses  += ev.amount;
+            schedule.push({ ...ev, balance: cashPool });
             continue;
         }
 
@@ -526,7 +555,6 @@ function renderPaymentPlan() {
 
         if (item.type === 'checkpoint')                       testBalance = item.amount;
         else if (item.type === 'income')                      testBalance += item.amount;
-        else if (item.type === 'recurring' && item.isCard) { /* card — no cash impact */ }
         else if (item.type !== 'starting-balance')            testBalance -= item.amount;
 
         if (testBalance < minProjected) {
@@ -561,7 +589,7 @@ function renderPaymentPlan() {
         .reduce((s, c) => s + c.amount, 0);
     const totalDebtPayments = sortedDebts
         .reduce((s, d) => s + (_overrides[d.id] ?? d.minPayment), 0);
-    const totalExpensesVal = totalDirectCosts + totalDebtPayments;
+    const totalExpensesVal = totalDirectCosts + totalDebtPayments + totalSpentManual;
 
     // Next month start = Day 1 balance + all income - all cash expenses
     // If there are appState.checkpoints, use the last checkpoint's balance as the base
@@ -702,12 +730,9 @@ function renderPaymentPlan() {
             rowBgClass  = 'schedule-income';
 
         } else if (item.type === 'recurring') {
-            const isCard = item.paymentMethod === 'card' || item.isCard;
-            icon = isCard ? '💳' : '🏦';
+            icon = '🏦';
 
-            const methodBadge = isCard
-                ? '<span class="schedule-badge card-badge" style="border: 1px solid rgba(99, 102, 241, 0.45);">💳 Card</span>'
-                : '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🏦 Direct</span>';
+            const methodBadge = '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🏦 Direct</span>';
 
             const amtBadge = item.amountType === 'flexible'
                 ? '<span class="schedule-badge flexible-badge">〜 Flexible</span>'
@@ -721,7 +746,14 @@ function renderPaymentPlan() {
 
             amountClass = 'schedule-amount-expense';
             dayLabel    = formatOrdinal(item.day);
-            rowBgClass  = isCard ? 'schedule-recurring-card' : 'schedule-recurring-direct';
+            rowBgClass  = 'schedule-recurring-direct';
+
+        } else if (item.type === 'expense') {
+            icon        = '🛒';
+            typeBadge   = `<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🛒 ${escHtml(item.budgetName || 'Budget')}</span>`;
+            amountClass = 'schedule-amount-expense';
+            dayLabel    = formatOrdinal(item.day);
+            rowBgClass  = 'schedule-expense schedule-row-paid';
 
         } else {
             icon        = '🧾';
@@ -750,7 +782,9 @@ function renderPaymentPlan() {
         if (item.unpaid)   statusBadges += '<span class="schedule-badge schedule-badge-unpaid">❌ Unpaid</span>';
 
         let paidBadge = '';
-        if (item.type !== 'income' && item.type !== 'checkpoint') {
+        if (item.type === 'expense') {
+            paidBadge = '<span class="schedule-badge schedule-badge-paid">✓ Logged</span>';
+        } else if (item.type !== 'income' && item.type !== 'checkpoint') {
             if (itemPaid) paidBadge = '<span class="schedule-badge schedule-badge-paid">✓ Paid</span>';
         }
 
@@ -759,15 +793,17 @@ function renderPaymentPlan() {
 
         const amountLabel = item.type === 'income'           ? 'Deposit'
             : item.type === 'checkpoint'                       ? 'Synced to'
+            : item.type === 'expense'                          ? 'Spent'
             : 'Payment';
 
         // Archive view is read-only — no edit or mark-paid buttons
-        const editBtnHtml = (!isArchiveView)
+        // Budget expenses are managed from the Budgets tab, not here
+        const editBtnHtml = (!isArchiveView && item.type !== 'expense')
             ? `<button class="btn-edit-inline" data-id="${item.id}" data-type="${item.type}" title="Edit entry">Edit</button>`
             : '';
 
         let paidBtnHtml = '';
-        if (!isArchiveView && item.type !== 'income' && item.type !== 'checkpoint') {
+        if (!isArchiveView && item.type !== 'income' && item.type !== 'checkpoint' && item.type !== 'expense') {
             const isPastDue = (item.day || 1) <= currentDay;
 
             if (itemPaid) {
@@ -806,8 +842,8 @@ function renderPaymentPlan() {
 
         const detailText = item.type === 'debt' && item.isSnowballTarget ? 'Minimum + Snowball Extra'
             : item.type === 'debt' ? 'Minimum Payment'
-            : item.type === 'recurring' && (item.isCard || item.paymentMethod === 'card') ? 'Charged to credit card'
             : item.type === 'recurring' ? 'Paid from bank account'
+            : item.type === 'expense' ? 'Logged budget spending — deducted from cash'
             : item.type === 'checkpoint' ? 'Resets the running balance for calculations below'
             : '';
 

@@ -17,6 +17,13 @@ function updateCostModalIntervalVisibility() {
         custGrp.style.display  = val === 'custom' ? '' : 'none';
         startGrp.style.display = isMultiMonth ? '' : 'none';
     }
+
+    // Budget routing + card linking only apply to card-charged costs
+    const method = appState._root.getElementById('cost-payment-method').value;
+    ['cost-budget-group', 'cost-card-debt-group'].forEach(id => {
+        const grp = appState._root.getElementById(id);
+        if (grp) grp.style.display = method === 'card' ? '' : 'none';
+    });
 }
 
 // ─── Archive Viewer ───────────────────────────────────────────────────────────

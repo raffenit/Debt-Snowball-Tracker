@@ -260,6 +260,7 @@ function setupEventListeners() {
     // Cost modal: show/hide interval fields based on category and interval select
     appState._root.getElementById('cost-category').addEventListener('change', updateCostModalIntervalVisibility);
     appState._root.getElementById('cost-interval').addEventListener('change', updateCostModalIntervalVisibility);
+    appState._root.getElementById('cost-payment-method').addEventListener('change', updateCostModalIntervalVisibility);
 
     // Auto min-payment calc
     appState._root.getElementById('auto-min-btn').addEventListener('click', autoCalcMinPaymentCC);

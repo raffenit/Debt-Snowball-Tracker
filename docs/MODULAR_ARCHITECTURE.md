@@ -107,6 +107,7 @@ User Action → events.js → mutates state (state-shim.js)
 | `rollover.js` | `tests/rollover.test.js` — 13 tests covering archive, final balance, cost pruning, interval advancement, income regeneration, budget reset, one-time cost handling |
 | `date-utils.js` | `tests/date-utils.test.js` — round-trip tests for `keyToHtmlMonth` / `htmlMonthToKey` |
 | `simulation.js` | `tests/app.extended.test.js` — windfall allocation, strategy ordering, effective budget |
+| `card-expenses.js` | `tests/card-expenses.test.js` — card-charge → budget sync, budget matching, due-day gating, tombstones, pay-in-full sustainability, per-card totals |
 | `advance.js` | Integration via `calculateMonthRollover()` tests; async HA API calls mocked |
 | `storage.js` | Mock `_root._hass.connection.sendMessagePromise` |
 | Render modules | Build the dist file, assert it loads without syntax errors; `tests/build.test.js` verifies module presence and marker order |

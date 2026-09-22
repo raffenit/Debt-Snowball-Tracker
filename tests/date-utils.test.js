@@ -14,6 +14,7 @@ import {
     isCostDueInMonth,
     generateBiweeklyForMonth,
     generateRecurringIncomeForMonth,
+    shiftBiweeklySeries,
     intervalLabel,
     keyToHtmlMonth,
     htmlMonthToKey,
@@ -312,6 +313,131 @@ describe('generateRecurringIncomeForMonth', () => {
         assert.equal(result[0].date, '2026-06-15');
         assert.equal(result[0].scheduleType, 'monthly');
         assert.equal(result[0].scheduleDay, 15);
+    });
+
+    test('does not duplicate when month already has materialized biweekly rows', () => {
+        // Bug: materialized biweekly rows each carry the anchor, so each one
+        // regenerated the full series — income doubled every rollover.
+        const entries = [
+            { id: 'bw1_2026-10-09', label: 'Paycheck', amount: 2000, date: '2026-10-09', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-09', seriesId: 'bw1' },
+            { id: 'bw1_2026-10-23', label: 'Paycheck', amount: 2000, date: '2026-10-23', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-09', seriesId: 'bw1' },
+        ];
+        const nov = generateRecurringIncomeForMonth(entries, '2026-10'); // November
+        const expected = generateBiweeklyForMonth('Paycheck', 2000, '2026-10-09', '2026-10');
+        assert.equal(nov.length, expected.length, 'series should generate once, not once per stored row');
+    });
+
+    test('legacy rows without seriesId still dedupe by anchor+label+amount', () => {
+        const entries = [
+            { id: 'x_2026-10-09', label: 'Paycheck', amount: 2000, date: '2026-10-09', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-09' },
+            { id: 'y_2026-10-23', label: 'Paycheck', amount: 2000, date: '2026-10-23', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-09' },
+        ];
+        const nov = generateRecurringIncomeForMonth(entries, '2026-10');
+        const expected = generateBiweeklyForMonth('Paycheck', 2000, '2026-10-09', '2026-10');
+        assert.equal(nov.length, expected.length);
+    });
+
+    test('two distinct biweekly series both generate', () => {
+        const entries = [
+            { id: 'a_2026-10-09', label: 'Job A', amount: 2000, date: '2026-10-09', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-09', seriesId: 'a' },
+            { id: 'b_2026-10-02', label: 'Job B', amount: 800, date: '2026-10-02', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-02', seriesId: 'b' },
+        ];
+        const nov = generateRecurringIncomeForMonth(entries, '2026-10');
+        const a = nov.filter(e => e.label === 'Job A');
+        const b = nov.filter(e => e.label === 'Job B');
+        assert.ok(a.length >= 2 && b.length >= 2);
+        assert.ok(a.every(e => e.seriesId === 'a'));
+        assert.ok(b.every(e => e.seriesId === 'b'));
+    });
+
+    test('income stays stable across repeated rollovers', () => {
+        let entries = generateRecurringIncomeForMonth([
+            { id: 'bw1', label: 'Paycheck', amount: 2000, date: '2026-10-09', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-09', seriesId: 'bw1' },
+        ], '2026-10');
+        const total = () => entries.reduce((s, e) => s + e.amount, 0);
+        // Every month's total must be a normal 2-or-3-paycheck month, never growing
+        let key = '2026-10';
+        for (let i = 0; i < 6; i++) {
+            key = addMonthsToKey(key, 1);
+            entries = generateRecurringIncomeForMonth(entries, key);
+            assert.ok(total() >= 2 * 2000 && total() <= 3 * 2000,
+                `month ${key} income ${total()} must stay in the 2-3 paycheck range`);
+        }
+    });
+});
+
+// ─── 3-paycheck months ────────────────────────────────────────────────────────
+
+describe('biweekly 3-paycheck months', () => {
+    test('a month can contain three biweekly occurrences', () => {
+        // Anchor Friday Jan 2, 2026 → Jan 2, 16, 30 = 3 paychecks
+        const result = generateBiweeklyForMonth('Paycheck', 2000, '2026-01-02', '2026-0');
+        assert.equal(result.length, 3);
+        assert.deepEqual(result.map(e => e.date), ['2026-01-02', '2026-01-16', '2026-01-30']);
+    });
+
+    test('occurrences are always exactly 14 days apart', () => {
+        const result = generateBiweeklyForMonth('Paycheck', 2000, '2026-01-02', '2026-0');
+        for (let i = 1; i < result.length; i++) {
+            const diff = (Date.parse(result[i].date + 'T00:00:00Z') - Date.parse(result[i - 1].date + 'T00:00:00Z')) / 86400000;
+            assert.equal(diff, 14);
+        }
+    });
+});
+
+// ─── shiftBiweeklySeries ──────────────────────────────────────────────────────
+
+describe('shiftBiweeklySeries', () => {
+    const octEntries = () => [
+        { id: 'other1', label: 'Side gig', amount: 300, date: '2026-10-05', scheduleType: 'one-time' },
+        { id: 'bw1_2026-10-09', label: 'Paycheck', amount: 2000, date: '2026-10-09', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-09', seriesId: 'bw1' },
+        { id: 'bw1_2026-10-23', label: 'Paycheck', amount: 2000, date: '2026-10-23', scheduleType: 'biweekly', scheduleAnchorDate: '2026-10-09', seriesId: 'bw1' },
+    ];
+
+    test('shifts edited paycheck and future occurrences, preserves past', () => {
+        const result = shiftBiweeklySeries(octEntries(), 'bw1_2026-10-23',
+            { label: 'Paycheck', amount: 2000, date: '2026-10-26' }, '2026-9');
+
+        const dates = result.filter(e => e.seriesId === 'bw1').map(e => e.date);
+        assert.deepEqual(dates, ['2026-10-09', '2026-10-26'],
+            'Oct 9 already happened (kept); Oct 23 → Oct 26 on the new cycle');
+        // Kept row carries the new anchor so future months regenerate correctly
+        const kept = result.find(e => e.id === 'bw1_2026-10-09');
+        assert.equal(kept.scheduleAnchorDate, '2026-10-26');
+        // Non-series entries untouched
+        assert.ok(result.some(e => e.id === 'other1' && e.date === '2026-10-05'));
+    });
+
+    test('moving a paycheck earlier pulls new-cycle occurrences into the month', () => {
+        const result = shiftBiweeklySeries(octEntries(), 'bw1_2026-10-23',
+            { label: 'Paycheck', amount: 2000, date: '2026-10-05' }, '2026-9');
+        const dates = result.filter(e => e.seriesId === 'bw1').map(e => e.date).sort();
+        // New cycle from Oct 5: Oct 5, Oct 19 — plus the kept past check Oct 9
+        assert.deepEqual(dates, ['2026-10-05', '2026-10-09', '2026-10-19']);
+    });
+
+    test('propagates label and amount to the whole series', () => {
+        const result = shiftBiweeklySeries(octEntries(), 'bw1_2026-10-23',
+            { label: 'Paycheck (new job)', amount: 2200, date: '2026-10-23' }, '2026-9');
+        const rows = result.filter(e => e.seriesId === 'bw1');
+        assert.ok(rows.every(e => e.label === 'Paycheck (new job)' && e.amount === 2200));
+    });
+
+    test('future months regenerate on the new anchor', () => {
+        const shifted = shiftBiweeklySeries(octEntries(), 'bw1_2026-10-23',
+            { label: 'Paycheck', amount: 2000, date: '2026-10-26' }, '2026-9');
+        const nov = generateRecurringIncomeForMonth(shifted, '2026-10');
+        const anchor = Date.parse('2026-10-26T00:00:00Z'); // UTC: DST-safe math
+        for (const e of nov.filter(e => e.seriesId === 'bw1')) {
+            const diff = (Date.parse(e.date + 'T00:00:00Z') - anchor) / 86400000;
+            assert.equal(diff % 14, 0, `${e.date} must be on the new 14-day cycle`);
+        }
+        assert.ok(nov.filter(e => e.seriesId === 'bw1').length >= 2);
+    });
+
+    test('returns entries unchanged when id is not found', () => {
+        const entries = octEntries();
+        assert.equal(shiftBiweeklySeries(entries, 'nope', { label: 'X', amount: 1, date: '2026-10-01' }, '2026-9'), entries);
     });
 });
 

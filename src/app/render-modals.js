@@ -1,6 +1,8 @@
 import { appState } from './state.js';
-import { currentMonthKey, generateBiweeklyForMonth, htmlMonthToKey, isCostDueThisMonth, keyToHtmlMonth } from '../core/date-utils.js';
+import { currentMonthKey, generateBiweeklyForMonth, htmlMonthToKey, isCostDueThisMonth, keyToHtmlMonth, shiftBiweeklySeries } from '../core/date-utils.js';
+import { escHtml } from '../core/pure-utils.js';
 import { getStrategyOrder, runSimulation } from '../core/simulation.js';
+import { syncCardExpenses, cashExpensesForMonth } from '../core/card-expenses.js';
 import { updateCostModalIntervalVisibility } from './modals.js';
 import { renderCheckpointsList } from './render-checkpoints.js';
 import { renderSpendingBudgets } from './render-budgets.js';
@@ -72,8 +74,24 @@ function openCostModal(costId = null) {
     appState._root.getElementById('cost-id').value = '';
     appState._root.getElementById('cost-autopay-toggle').checked = false;
 
+    // Repopulate the budget routing dropdown (budgets may have changed)
+    const budgetSel = appState._root.getElementById('cost-budget');
+    if (budgetSel) {
+        budgetSel.innerHTML = '<option value="">✨ Auto-match (by name / category)</option>' +
+            appState.spendingBudgets.map(b =>
+                `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
+    }
+
+    // Repopulate the "charged to card" dropdown (debts may have changed)
+    const cardDebtSel = appState._root.getElementById('cost-card-debt');
+    if (cardDebtSel) {
+        const cards = appState.debts.filter(d => d.type === 'credit-card');
+        cardDebtSel.innerHTML = '<option value="">— Unspecified card —</option>' +
+            cards.map(d => `<option value="${d.id}">${escHtml(d.name)}</option>`).join('');
+    }
+
     if (costId) {
-        appState._root.getElementById('cost-modal-title').textContent = 'Edit Cost';
+        appState._root.getElementById('cost-modal-title').textContent = 'Edit Bill';
         const cost = appState.recurringCosts.find(c => c.id === costId) || appState.oneTimeCosts.find(c => c.id === costId);
         if (cost) {
             appState._root.getElementById('cost-id').value              = cost.id;
@@ -83,6 +101,8 @@ function openCostModal(costId = null) {
             appState._root.getElementById('cost-category').value        = cost.category || 'other';
             appState._root.getElementById('cost-payment-method').value  = cost.paymentMethod || 'direct';
             appState._root.getElementById('cost-amount-type').value     = cost.amountType || 'fixed';
+            appState._root.getElementById('cost-budget').value          = cost.budgetId || '';
+            appState._root.getElementById('cost-card-debt').value       = cost.cardDebtId || '';
             appState._root.getElementById('cost-autopay-toggle').checked = !!cost.autoPay;
             // Restore interval
             const n = cost.intervalMonths || 1;
@@ -101,7 +121,7 @@ function openCostModal(costId = null) {
             }
         }
     } else {
-        appState._root.getElementById('cost-modal-title').textContent = 'Add Cost';
+        appState._root.getElementById('cost-modal-title').textContent = 'Add Bill';
         appState._root.getElementById('cost-payment-method').value = 'direct';
         appState._root.getElementById('cost-amount-type').value = 'fixed';
         appState._root.getElementById('cost-interval').value = '1';
@@ -155,7 +175,7 @@ function updateIncomeScheduleHint() {
         hint.textContent = 'This day of the month will be reused each month automatically.';
         hint.style.display = '';
     } else if (sel.value === 'biweekly') {
-        hint.textContent = 'All biweekly occurrences within the current month will be added as separate entries.';
+        hint.textContent = 'Repeats every 14 days (some months will have 3 paychecks). Editing one paycheck\'s date shifts it and all future paychecks.';
         hint.style.display = '';
     } else {
         hint.style.display = 'none';
@@ -236,6 +256,12 @@ function saveCost() {
         const dueDay        = parseInt(appState._root.getElementById('cost-due-day').value) || 1;
         const category      = appState._root.getElementById('cost-category').value || 'other';
         const paymentMethod = appState._root.getElementById('cost-payment-method').value || 'direct';
+        const budgetId      = paymentMethod === 'card'
+            ? (appState._root.getElementById('cost-budget').value || undefined)
+            : undefined;
+        const cardDebtId    = paymentMethod === 'card'
+            ? (appState._root.getElementById('cost-card-debt').value || undefined)
+            : undefined;
         const amountType    = appState._root.getElementById('cost-amount-type').value || 'fixed';
         const autoPay       = appState._root.getElementById('cost-autopay-toggle').checked;
         const intervalSel   = appState._root.getElementById('cost-interval').value;
@@ -243,7 +269,7 @@ function saveCost() {
             ? (parseInt(appState._root.getElementById('cost-interval-custom').value) || 1)
             : parseInt(intervalSel) || 1;
 
-        if (!name.trim())   throw new Error('Please enter a name for this cost.');
+        if (!name.trim())   throw new Error('Please enter a name for this bill.');
         if (isNaN(amount))  throw new Error('Please enter a valid amount.');
         if (intervalMonths < 1) throw new Error('Interval must be at least 1 month.');
 
@@ -264,25 +290,25 @@ function saveCost() {
                 const nextDueMonth = intervalMonths > 1
                     ? (startMonthKey ?? (existing.intervalMonths === intervalMonths ? existing.nextDueMonth : currentMonthKey()))
                     : undefined;
-                targetArray[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth };
+                targetArray[idx] = { id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth, budgetId, cardDebtId };
             } else if (otherIdx !== -1) {
                 // Moved from other array — remove from old, add to new
                 const [moved] = sourceArray.splice(otherIdx, 1);
                 const nextDueMonth = intervalMonths > 1
                     ? (startMonthKey ?? currentMonthKey())
                     : undefined;
-                targetArray.push({ id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
+                targetArray.push({ id, name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth, budgetId, cardDebtId });
             }
         } else {
             const nextDueMonth = intervalMonths > 1 ? (startMonthKey ?? currentMonthKey()) : undefined;
-            targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth });
+            targetArray.push({ id: Date.now().toString(), name, amount, dueDay, category, paymentMethod, amountType, autoPay, intervalMonths, nextDueMonth, addedMonth, budgetId, cardDebtId });
         }
 
         saveDataAndRender();
         closeCostModal();
-        showSavedToast(id ? 'Cost updated ✓' : 'Cost added ✓');
+        showSavedToast(id ? 'Bill updated ✓' : 'Bill added ✓');
     } catch (err) {
-        showErrorToast(err.message || 'Failed to save cost.');
+        showErrorToast(err.message || 'Failed to save bill.');
     }
 }
 
@@ -301,7 +327,7 @@ function deleteCost(id) {
             }
             delete appState.paidStatus[id];
             saveDataAndRender();
-            showUndoToast('Cost deleted', () => {
+            showUndoToast('Bill deleted', () => {
                 if (isRecurring) {
                     appState.recurringCosts = [...appState.recurringCosts, deleted];
                 } else {
@@ -330,13 +356,32 @@ function saveIncome() {
         if (scheduleType === 'monthly')   entryBase.scheduleDay = parseInt(date.split('-')[2]);
         if (scheduleType === 'biweekly')  entryBase.scheduleAnchorDate = date;
 
-        if (id) {
+        const existing = id ? appState.incomeEntries.find(e => e.id === id) : null;
+
+        if (existing && existing.scheduleType === 'biweekly' && scheduleType === 'biweekly') {
+            // Editing a paycheck re-anchors its series: the new date becomes the
+            // anchor, so this paycheck and all future ones follow the new cycle
+            // while paychecks before it keep their dates.
+            appState.incomeEntries = shiftBiweeklySeries(
+                appState.incomeEntries, id, { label, amount, date },
+                appState.workingMonthKey || currentMonthKey()
+            );
+        } else if (id) {
             const idx = appState.incomeEntries.findIndex(e => e.id === id);
             if (idx !== -1) appState.incomeEntries[idx] = { id, ...entryBase };
         } else if (scheduleType === 'biweekly') {
+            const seriesId = 'bw_' + Date.now().toString(36);
             const generated = generateBiweeklyForMonth(label, amount, date, appState.workingMonthKey || currentMonthKey());
             if (generated.length === 0) throw new Error('No occurrences of this schedule fall in the current month. Choose a date within the current month as the starting point.');
-            appState.incomeEntries.push(...generated);
+            appState.incomeEntries.push(...generated.map(g => ({
+                id: seriesId + '_' + g.date,
+                label, amount,
+                date: g.date,
+                day: g.day,
+                scheduleType: 'biweekly',
+                scheduleAnchorDate: date,
+                seriesId,
+            })));
         } else {
             appState.incomeEntries.push({ id: Date.now().toString(), ...entryBase });
         }
@@ -371,12 +416,16 @@ function _getDebtPaymentAmount(debtId) {
     const targetId = sortedDebts[0]?.id;
 
     const totalIncome = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
+    // Card-charged costs are excluded — they're paid by the card, not from cash
     const totalRecurring = [
-        ...appState.recurringCosts.filter(c => isCostDueThisMonth(c)),
-        ...appState.oneTimeCosts,
+        ...appState.recurringCosts.filter(c => isCostDueThisMonth(c) && c.paymentMethod !== 'card'),
+        ...appState.oneTimeCosts.filter(c => c.paymentMethod !== 'card'),
     ].reduce((s, c) => s + c.amount, 0);
     const totalMinPay = sortedDebts.reduce((s, d) => s + (appState.minPayOverrides[d.id] ?? d.minPayment), 0);
-    const extra = Math.max(0, totalIncome - totalRecurring - totalMinPay);
+    // Manual budget expenses are real cash outflows — they shrink the extra
+    const totalSpentManual = cashExpensesForMonth(appState.spendingBudgets, appState.workingMonthKey || currentMonthKey())
+        .reduce((s, e) => s + e.amount, 0);
+    const extra = Math.max(0, totalIncome - totalRecurring - totalMinPay - totalSpentManual);
 
     const effMin = appState.minPayOverrides[debt.id] ?? debt.minPayment;
     const isTarget = debt.id === targetId;
@@ -557,6 +606,24 @@ function updateHASensors(simResults, schedule) {
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 function renderUI() {
+    // Mirror card-charged costs into the spending budgets before rendering.
+    // In the real current month, only charges whose due day has arrived are
+    // logged; for an early-advanced future month everything due is logged.
+    const _monthKey  = appState.workingMonthKey || currentMonthKey();
+    const _todayDay  = _monthKey === currentMonthKey() ? new Date().getDate() : 31;
+    const cardSync   = syncCardExpenses({
+        recurringCosts:  appState.recurringCosts,
+        oneTimeCosts:    appState.oneTimeCosts,
+        spendingBudgets: appState.spendingBudgets,
+        monthKey:        _monthKey,
+        todayDay:        _todayDay,
+        skips:           appState.cardExpenseSkips,
+    });
+    if (cardSync.changed) {
+        appState.spendingBudgets = cardSync.budgets;
+        saveData().catch(err => console.error('Debt Snowball: card-expense sync save failed —', err));
+    }
+
     // Render checkpoints list
     renderCheckpointsList();
 

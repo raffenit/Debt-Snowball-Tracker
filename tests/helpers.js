@@ -20,6 +20,7 @@ export {
     isCostDueInMonth,
     generateBiweeklyForMonth,
     generateRecurringIncomeForMonth,
+    shiftBiweeklySeries,
     intervalLabel,
     keyToHtmlMonth,
     htmlMonthToKey,
@@ -41,6 +42,17 @@ export {
 export {
     calculateMonthRollover,
 } from '../src/core/rollover.js';
+
+// Card-expense budget sync
+export {
+    findBudgetForCost,
+    syncCardExpenses,
+    computeCardPayoffStatus,
+    cardChargesByDebt,
+    cashExpensesForMonth,
+    CARD_AUTOPAY_BUDGET_ID,
+    CARD_AUTOPAY_BUDGET_NAME,
+} from '../src/core/card-expenses.js';
 
 // Constants
 export {

@@ -2,13 +2,14 @@ import { appState } from './state.js';
 import { addMonthsToKey, currentMonthKey, formatMonthLabel } from '../core/date-utils.js';
 import { calculateMonthRollover } from '../core/rollover.js';
 import { renderUI, showErrorToast, showSavedToast } from './render-modals.js';
+import { ensureStoreDashboard, STORE_URL_PATH } from './storage.js';
 
 async function advanceToNextMonth() {
     const currentKey = appState.workingMonthKey || currentMonthKey();
     const nextKey    = addMonthsToKey(currentKey, 1);
     const nextLabel  = formatMonthLabel(nextKey);
 
-    if (!confirm(`Archive ${formatMonthLabel(currentKey)} and start ${nextLabel} now?\n\nOne-time costs will be removed, income will be cleared, and interval costs will advance. This cannot be undone.`)) return;
+    if (!confirm(`Archive ${formatMonthLabel(currentKey)} and start ${nextLabel} now?\n\nOne-time bills will be removed, income will be cleared, and interval bills will advance. This cannot be undone.`)) return;
 
     const result = calculateMonthRollover({
         debts:          appState.debts,
@@ -51,6 +52,7 @@ async function advanceToNextMonth() {
                 paidMonth:      nextKey,
                 monthlyArchives: appState.monthlyArchives,
                 spendingBudgets: appState.spendingBudgets,
+                cardExpenseSkips: appState.cardExpenseSkips,
             },
         });
         appState.viewingArchiveIndex = null;

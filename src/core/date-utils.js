@@ -89,34 +89,46 @@ export function isCostDueInMonth(cost, monthKey) {
  * @returns {Array<{day: number, amount: number}>} Array of income entries with day numbers
  */
 export function generateBiweeklyForMonth(label, amount, anchorDateStr, monthKey) {
-    const anchor = new Date(anchorDateStr + 'T00:00:00');
+    // All math in UTC: adding 14*msPerDay to a local-midnight Date can drift by
+    // an hour across DST boundaries and corrupt the resulting date.
+    const anchor = Date.parse(anchorDateStr + 'T00:00:00Z');
     const [y, m] = monthKey.split('-').map(Number);
-    const monthStart = new Date(y, m, 1);
-    const monthEnd = new Date(y, m + 1, 0);
+    const monthStart = Date.UTC(y, m, 1);
+    const monthEnd = Date.UTC(y, m + 1, 0);
     const msPerDay = 86400000;
     const entries = [];
 
     // Find first occurrence on or before month start
     const daysDiff = Math.floor((monthStart - anchor) / msPerDay);
     const offset = ((daysDiff % 14) + 14) % 14;
-    let current = new Date(monthStart);
-    current.setDate(current.getDate() - offset);
+    let current = monthStart - offset * msPerDay;
 
     // Generate occurrences within the month
     while (current <= monthEnd) {
         if (current >= monthStart) {
+            const d = new Date(current);
             entries.push({
                 label,
                 amount,
-                day: current.getDate(),
-                date: current.toISOString().split('T')[0],
+                day: d.getUTCDate(),
+                date: d.toISOString().split('T')[0],
                 scheduleType: 'biweekly',
                 scheduleAnchorDate: anchorDateStr,
             });
         }
-        current = new Date(current.getTime() + 14 * msPerDay);
+        current += 14 * msPerDay;
     }
     return entries;
+}
+
+/**
+ * Stable identity for a biweekly paycheck series. Stored rows carry seriesId;
+ * legacy rows (pre-seriesId) fall back to anchor+label+amount.
+ * @param {Object} e - Income entry
+ * @returns {string} Series key
+ */
+function biweeklySeriesKey(e) {
+    return e.seriesId || `${e.scheduleAnchorDate || e.anchorDate}|${e.label}|${e.amount}`;
 }
 
 /**
@@ -128,23 +140,31 @@ export function generateBiweeklyForMonth(label, amount, anchorDateStr, monthKey)
 export function generateRecurringIncomeForMonth(entries, monthKey) {
     const [y, m] = monthKey.split('-').map(Number);
     const out = [];
+    const seenSeries = new Set();
 
     for (const e of entries) {
         const schedule = e.scheduleType || e.schedule || 'monthly';
         if (schedule === 'one-time') continue; // Skip one-time entries
 
         if (schedule === 'biweekly' && (e.scheduleAnchorDate || e.anchorDate)) {
-            // Biweekly: generate all occurrences for this month
+            // Biweekly: generate all occurrences for this month — once per series.
+            // Stored rows are materialized occurrences that all carry the same
+            // anchor; without dedupe each row would regenerate the whole series.
             const anchorDate = e.scheduleAnchorDate || e.anchorDate;
+            const seriesId = biweeklySeriesKey(e);
+            if (seenSeries.has(seriesId)) continue;
+            seenSeries.add(seriesId);
+            const idBase = e.seriesId || e.id || seriesId;
             const biweekly = generateBiweeklyForMonth(e.label, e.amount, anchorDate, monthKey);
             for (const b of biweekly) {
                 out.push({
-                    id: e.id + '_' + b.date,
+                    id: idBase + '_' + b.date,
                     label: e.label,
                     amount: e.amount,
                     date: b.date,
                     scheduleType: 'biweekly',
                     scheduleAnchorDate: anchorDate,
+                    seriesId,
                 });
             }
         } else {
@@ -162,6 +182,51 @@ export function generateRecurringIncomeForMonth(entries, monthKey) {
         }
     }
     return out;
+}
+
+/**
+ * Re-anchor a biweekly paycheck series from a specific occurrence.
+ * The edited paycheck's new date becomes the series anchor: paychecks dated
+ * before the edited one are already in the past and keep their dates; the
+ * edited paycheck and everything after it is regenerated on the new 14-day
+ * cycle. Label/amount changes apply to the whole series.
+ *
+ * @param {Array} entries - Current month's income entries
+ * @param {string} editedId - Id of the paycheck row being edited
+ * @param {{label: string, amount: number, date: string}} updates - New values
+ * @param {string} monthKey - Working month key (YYYY-M)
+ * @returns {Array} New income entries array (sorted by date)
+ */
+export function shiftBiweeklySeries(entries, editedId, updates, monthKey) {
+    const edited = entries.find(e => e.id === editedId);
+    if (!edited) return entries;
+    const oldDate   = edited.date;
+    const newAnchor = updates.date;
+    const seriesId  = biweeklySeriesKey(edited);
+    const inSeries  = e => biweeklySeriesKey(e) === seriesId;
+
+    // Past paychecks keep their dates but adopt the new anchor so future
+    // months regenerate on the new cycle.
+    const past = entries
+        .filter(e => inSeries(e) && e.date < oldDate)
+        .map(e => ({ ...e, label: updates.label, amount: updates.amount, scheduleAnchorDate: newAnchor, seriesId }));
+
+    // The edited paycheck and everything after it follows the new cycle.
+    const future = generateBiweeklyForMonth(updates.label, updates.amount, newAnchor, monthKey)
+        .filter(g => g.date >= newAnchor)
+        .map(g => ({
+            id: seriesId + '_' + g.date,
+            label: updates.label,
+            amount: updates.amount,
+            day: g.day,
+            date: g.date,
+            scheduleType: 'biweekly',
+            scheduleAnchorDate: newAnchor,
+            seriesId,
+        }));
+
+    const rest = entries.filter(e => !inSeries(e));
+    return [...rest, ...past, ...future].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**

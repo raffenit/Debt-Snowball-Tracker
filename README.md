@@ -2,7 +2,7 @@
 
 A fully interactive, theme-aware, full-screen Debt Snowball and Avalanche tracker built natively for Home Assistant.
 
-Track your bank balances, manage recurring costs, visualize your payoff timeline, and run "Windfall" scenarios—all without your financial data ever leaving your local network.
+Track your bank balances, manage bills and spending budgets, visualize your payoff timeline, and run "Windfall" scenarios—all without your financial data ever leaving your local network.
 
 - [Features](#features)
 - [Prerequisites](#prerequisites)
@@ -23,7 +23,9 @@ Track your bank balances, manage recurring costs, visualize your payoff timeline
 - 📊 **Smart Timeline** — Visualizes exactly when you will be debt-free based on your real monthly budget
 - 💵 **Windfall Planner** — See how much time and interest you'll save with extra payments
 - 🏦 **Bank Balance Sync** — Mid-month checkpoints for accurate cash-flow scheduling
-- 📅 **Recurring Costs** — Track bills, subscriptions, utilities with one-time and interval support
+- 📅 **Fixed Bills** — Track bills, subscriptions, utilities with one-time and interval support
+- 💳 **Spending Budgets** — Category limits for day-to-day spending; card-paid bills auto-log as they post, with a pay-in-full sustainability check
+- 📋 **Monthly Cash Flow** — Day-by-day schedule of income, bills, spending, and debt payments against your real bank balance
 - 📱 **Zero-YAML Install** — Runs entirely in the frontend. No `configuration.yaml` editing required!
 - 🔒 **100% Local Data** — All financial data stored securely in your Home Assistant instance
 - 🎨 **Theme Aware** — Automatically adapts to your Home Assistant Light/Dark mode
@@ -264,7 +266,7 @@ All data is saved locally in the `.storage/` directory of your home assistant se
 
 **"The month navigation buttons don't update the whole view"**
 
-The Previous / Current Month navigation buttons in the Payment Plan tab now correctly trigger a full UI re-render (debts, costs, income, and timeline). If you still see stale data after clicking, reload the page.
+The Previous / Current Month navigation buttons in the Cash Flow tab now correctly trigger a full UI re-render (debts, bills, income, and timeline). If you still see stale data after clicking, reload the page.
 
 **"Sensors are not appearing"**
 
