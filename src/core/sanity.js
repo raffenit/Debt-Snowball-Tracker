@@ -157,7 +157,9 @@ export function checkDataSanity(s) {
     }
 
     // ─── Month-over-month drift (vs most recent archive) ────────────────────
-    const prev = archives[0];
+    // Reconstructed (retro) months are partial rebuilds, not real snapshots —
+    // comparing against them produces false "10× jump" warnings.
+    const prev = archives.find(a => !a.retro) || null;
     if (prev) {
         const countJump = (curr, old, field, noun) => {
             if (old > 0 && curr > Math.max(3, old * 2)) {

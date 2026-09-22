@@ -1,5 +1,5 @@
 import { appState } from './state.js';
-import { monthKeyToIndex } from '../core/date-utils.js';
+import { monthKeyToIndex, keyToHtmlMonth, generateRecurringIncomeForMonth } from '../core/date-utils.js';
 import { calculateMonthRollover } from '../core/rollover.js';
 import { renderUI } from './render-modals.js';
 import { initTabs } from './render-support.js';
@@ -124,8 +124,14 @@ async function loadBackendData() {
                 .map((e, i) => ({
                     ...e,
                     id: e.id || `inc_${i}_${e.date}`,
+                    // A biweekly row's own date is a valid anchor point when
+                    // scheduleAnchorDate is missing — without one the row
+                    // regenerates as monthly (wrong day, wrong count).
+                    ...(e.scheduleType === 'biweekly' && !(e.scheduleAnchorDate || e.anchorDate) && e.date
+                        ? { scheduleAnchorDate: e.date }
+                        : {}),
                     ...(e.scheduleType === 'biweekly' && !e.seriesId
-                        ? { seriesId: `${e.scheduleAnchorDate}|${e.label}|${e.amount}` }
+                        ? { seriesId: `${e.scheduleAnchorDate || e.date}|${e.label}|${e.amount}` }
                         : {}),
                 }))
                 .filter(e => {
@@ -224,6 +230,27 @@ async function loadBackendData() {
                 appState.paidStatus = data.paidStatus;
             } else {
                 appState.paidStatus = {};
+            }
+
+            // Repair: recurring income rows must be materialized for the
+            // working month — stale rows (missed rollover, restored backup)
+            // carry last month's dates and land on the wrong days in the cash
+            // plan. Regeneration is idempotent: monthly rows re-derive from
+            // scheduleDay, biweekly rows from the series anchor.
+            {
+                const wm = appState.workingMonthKey;
+                const htmlMk = wm ? keyToHtmlMonth(wm) : null;
+                const isOneTimeInc = e => (e.scheduleType || e.schedule) === 'one-time';
+                const stale = appState.incomeEntries.filter(e =>
+                    !isOneTimeInc(e) && (e.date || '').slice(0, 7) !== htmlMk);
+                if (htmlMk && stale.length) {
+                    appState.incomeEntries = [
+                        ...generateRecurringIncomeForMonth(appState.incomeEntries, wm),
+                        ...appState.incomeEntries.filter(isOneTimeInc),
+                    ];
+                    needsCleanupSave = true;
+                    console.info(`[DebtSnowball] Regenerated ${stale.length} income entr(ies) with stale dates for the working month.`);
+                }
             }
 
             // If cleanup removed stale data but no rollover occurred, persist the cleaned state

@@ -273,3 +273,29 @@ describe('checkDataSanity — coverage', () => {
         }));
         assert.ok(!ids(ws).includes('card-method-mismatch'));
     });
+
+describe('checkDataSanity — drift baseline', () => {
+    test('retro (reconstructed) archives are skipped as drift baselines', () => {
+        const retro = { month: '2026-7', retro: true, totalIncome: 100, totalCosts: 50,
+            incomeEntries: [{ id: 'r1' }], recurringCosts: [] };
+        const ws = checkDataSanity(base({
+            monthlyArchives: [retro],
+            incomeEntries: [{ id: 'i1', amount: 5000 }],
+            recurringCosts: [{ id: 'c1', amount: 4800 }],
+        }));
+        assert.ok(!ids(ws).some(id => id.includes('jump') || id.includes('count-')),
+            'reconstructed month should not trigger drift warnings');
+    });
+
+    test('a real archive after a retro one is still used as baseline', () => {
+        const retro = { month: '2026-7', retro: true, totalIncome: 100, totalCosts: 50,
+            incomeEntries: [], recurringCosts: [] };
+        const real = { month: '2026-6', totalIncome: 4000, totalCosts: 2000,
+            incomeEntries: [{ id: 'a1' }, { id: 'a2' }], recurringCosts: [{ id: 'r1' }, { id: 'r2' }] };
+        const ws = checkDataSanity(base({
+            monthlyArchives: [retro, real],
+            incomeEntries: [{ id: 'i1', amount: 12000 }],
+        }));
+        assert.ok(ids(ws).includes('income-jump'));
+    });
+});

@@ -169,7 +169,7 @@ export function generateRecurringIncomeForMonth(entries, monthKey) {
             }
         } else {
             // Monthly (default): just adjust date to this month
-            const day = e.scheduleDay || parseInt(e.date.split('-')[2]);
+            const day = e.scheduleDay || parseInt((e.date || '').split('-')[2]) || 1;
             const date = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             out.push({
                 id: e.id,

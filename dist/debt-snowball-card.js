@@ -211,7 +211,7 @@ var DebtSnowballApp = (() => {
           });
         }
       } else {
-        const day = e.scheduleDay || parseInt(e.date.split("-")[2]);
+        const day = e.scheduleDay || parseInt((e.date || "").split("-")[2]) || 1;
         const date = `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
         out.push({
           id: e.id,
@@ -1032,7 +1032,7 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.8.0";
+      PANEL_VERSION = "2.8.1";
       PANEL_BUILD_DATE = "2026-09-22";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
@@ -1538,7 +1538,11 @@ var DebtSnowballApp = (() => {
         appState.incomeEntries = appState.incomeEntries.map((e, i) => ({
           ...e,
           id: e.id || `inc_${i}_${e.date}`,
-          ...e.scheduleType === "biweekly" && !e.seriesId ? { seriesId: `${e.scheduleAnchorDate}|${e.label}|${e.amount}` } : {}
+          // A biweekly row's own date is a valid anchor point when
+          // scheduleAnchorDate is missing — without one the row
+          // regenerates as monthly (wrong day, wrong count).
+          ...e.scheduleType === "biweekly" && !(e.scheduleAnchorDate || e.anchorDate) && e.date ? { scheduleAnchorDate: e.date } : {},
+          ...e.scheduleType === "biweekly" && !e.seriesId ? { seriesId: `${e.scheduleAnchorDate || e.date}|${e.label}|${e.amount}` } : {}
         })).filter((e) => {
           const dupKey = e.scheduleType === "biweekly" ? `${e.seriesId}|${e.date}` : e.id;
           if (seenIncomeRows.has(dupKey)) return false;
@@ -1604,6 +1608,20 @@ var DebtSnowballApp = (() => {
           appState.paidStatus = data.paidStatus;
         } else {
           appState.paidStatus = {};
+        }
+        {
+          const wm = appState.workingMonthKey;
+          const htmlMk = wm ? keyToHtmlMonth(wm) : null;
+          const isOneTimeInc = (e) => (e.scheduleType || e.schedule) === "one-time";
+          const stale = appState.incomeEntries.filter((e) => !isOneTimeInc(e) && (e.date || "").slice(0, 7) !== htmlMk);
+          if (htmlMk && stale.length) {
+            appState.incomeEntries = [
+              ...generateRecurringIncomeForMonth(appState.incomeEntries, wm),
+              ...appState.incomeEntries.filter(isOneTimeInc)
+            ];
+            needsCleanupSave = true;
+            console.info(`[DebtSnowball] Regenerated ${stale.length} income entr(ies) with stale dates for the working month.`);
+          }
         }
         if (needsCleanupSave) {
           saveData().catch((err) => reportError("Cleanup save failed", err));
@@ -3942,7 +3960,7 @@ This replaces ALL current data with that snapshot.`)) {
         `${stray} manual expense(s) dated outside the working month \u2014 they won't count against budgets or cash flow.`
       ));
     }
-    const prev = archives[0];
+    const prev = archives.find((a) => !a.retro) || null;
     if (prev) {
       const countJump = (curr, old, field, noun) => {
         if (old > 0 && curr > Math.max(3, old * 2)) {
