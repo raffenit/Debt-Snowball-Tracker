@@ -2,6 +2,7 @@ import { appState, initDomRefs } from './state.js';
 import { setupEventListeners } from './events.js';
 import { loadBackendData } from './storage.js';
 import { PANEL_CSS, PANEL_HTML } from './template.js';
+import { initErrorReporting, reportError } from './error-report.js';
 
 class DebtSnowballCard extends HTMLElement {
     set hass(hass) {
@@ -48,7 +49,7 @@ class DebtSnowballCard extends HTMLElement {
             script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
             script.onload = resolve;
             script.onerror = () => {
-                console.error('[DebtSnowball] Failed to load Chart.js');
+                reportError('Charts unavailable', new Error('Chart.js failed to load — payoff charts will not render, but all other features still work.'));
                 resolve();
             };
             document.head.appendChild(script);
@@ -57,12 +58,17 @@ class DebtSnowballCard extends HTMLElement {
 
     _initApp() {
         initDomRefs(this);
+        initErrorReporting();
         setupEventListeners();
 
+        const hassWaitStart = Date.now();
         const waitForHass = setInterval(() => {
             if (appState._root._hass) {
                 clearInterval(waitForHass);
                 loadBackendData();
+            } else if (Date.now() - hassWaitStart > 15000) {
+                clearInterval(waitForHass);
+                reportError('Home Assistant connection timeout', new Error('The card could not reach Home Assistant after 15s — saved data is unavailable.'));
             }
         }, 50);
     }

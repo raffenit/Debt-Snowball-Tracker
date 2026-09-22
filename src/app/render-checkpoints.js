@@ -1,6 +1,7 @@
 import { appState } from './state.js';
 import { renderUI, showErrorToast, showSavedToast } from './render-modals.js';
 import { saveData } from './storage.js';
+import { reportError } from './error-report.js';
 
 // ─── Checkpoints ─────────────────────────────────────────────────────────────
 // Focused module for checkpoint list rendering and CRUD modal.
@@ -110,7 +111,7 @@ function saveCheckpoint() {
             renderUI();
             closeCheckpointModal();
             showSavedToast(id ? 'Checkpoint updated ✓' : 'Checkpoint added ✓');
-        }).catch(err => console.error('Debt Snowball: save failed —', err));
+        }).catch(err => reportError('Save failed — your change may not persist after reload', err));
     } catch (err) {
         showErrorToast(err.message || 'Failed to save checkpoint.');
     }

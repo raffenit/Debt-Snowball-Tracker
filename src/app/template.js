@@ -404,6 +404,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     border-radius: var(--radius);
     width: 100%;
     max-width: 450px;
+    max-height: calc(100vh - 3rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 2rem;
     border: 1px solid var(--border-bright);
     box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(91,127,255,0.08);
@@ -1792,6 +1795,35 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     animation: expenseFadeOut 0.3s ease forwards;
     overflow: hidden;
 }
+/* Auto-logged card charges stay visible but recede — they're committed
+   spending the sync manages, not entries the user typed. */
+.budget-expense-row.expense-auto {
+    opacity: 0.55;
+    transition: opacity 0.15s ease;
+}
+.budget-expense-row.expense-auto:hover {
+    opacity: 0.85;
+}
+
+/* ===== Drag & drop ===== */
+.budget-expense-row[draggable="true"],
+.schedule-row[draggable="true"] {
+    cursor: grab;
+}
+.budget-expense-row.dragging,
+.schedule-row.dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+}
+.budget-card.budget-drop-target {
+    outline: 2px dashed var(--accent-color);
+    outline-offset: 3px;
+}
+.schedule-row.drop-target {
+    outline: 2px dashed var(--accent-color);
+    outline-offset: -2px;
+    background: rgba(91, 127, 255, 0.08);
+}
 
 /* ===== Inline Expense Form ===== */
 .inline-expense-form {
@@ -2167,6 +2199,16 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 
+.archive-backups {
+    margin-top: 1.25rem;
+    border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
+    padding-top: 0.75rem;
+}
+.archive-backups-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+}
 .archive-empty {
     text-align: center;
     color: var(--text-secondary);
@@ -3272,6 +3314,23 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
 .undo-toast-btn:hover { background: var(--accent-hover); }
 
+.undo-toast-error {
+    white-space: normal;
+    max-width: min(560px, 92vw);
+}
+
+.undo-toast-close {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0.15rem 0.4rem;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.undo-toast-close:hover { color: var(--text-primary); }
+
 /* ===== Modal backdrop cursor ===== */
 .modal         { cursor: pointer; }
 .modal-content { cursor: default; }
@@ -3803,6 +3862,7 @@ const PANEL_HTML = `<div class="app-container">
                 <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})" style="font-size:0.65rem;color:var(--text-secondary);opacity:0.6;margin-top:0.25rem;">v${PANEL_VERSION}</span>
             </div>
             <div class="header-actions">
+                <button id="sanity-badge" class="btn btn-secondary" style="display:none; background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4); color: #fbbf24;" title="Unusual data patterns detected — click to review">⚠️ <span id="sanity-count">0</span></button>
                 <button id="history-btn" class="btn btn-secondary" style="background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.4); color: #c084fc;">📅 History</button>
                 <label for="import-file" class="btn btn-secondary" style="background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: #60a5fa;">
                     Import Data
@@ -4308,6 +4368,10 @@ const PANEL_HTML = `<div class="app-container">
                 <div class="input-group">
                     <label for="expense-date">Date</label>
                     <input type="date" id="expense-date">
+                </div>
+                <div class="input-group">
+                    <label for="expense-budget-select">Budget</label>
+                    <select id="expense-budget-select"></select>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-expense-modal">Cancel</button>

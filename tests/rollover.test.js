@@ -196,4 +196,110 @@ describe('calculateMonthRollover', () => {
         const { nextState } = calculateMonthRollover(state, closingMonth, nextMonth);
         assert.equal(nextState.checkpoints.length, 0);
     });
+
+    test('tolerates missing state fields (defensive defaults)', () => {
+        // Callers pass appState fields, but a hand-rolled or legacy state
+        // without the newer fields must not crash.
+        const { archive, nextState } = calculateMonthRollover({}, closingMonth, nextMonth);
+        assert.deepEqual(archive.spendingBudgets, []);
+        assert.deepEqual(nextState.spendingBudgets, []);
+        assert.equal(archive.finalBalance, 0);
+    });
+
+    // ── Cash-flow semantics in finalBalance (added in the card/expense audit) ──
+
+    test('card-paid costs do NOT reduce the carried-over balance', () => {
+        // Card bills are autopaid by the card — they never touch bank cash,
+        // so they must not shrink next month's day-1 checkpoint.
+        const state = baseState({
+            incomeEntries: [{ id: 'i1', label: 'Salary', amount: 3000, date: '2026-04-15', scheduleType: 'monthly', scheduleDay: 15 }],
+            recurringCosts: [
+                { id: 'c1', name: 'Rent', amount: 1000, category: 'utility', intervalMonths: 1 },
+                { id: 'c2', name: 'Netflix', amount: 20, category: 'subscription', intervalMonths: 1, paymentMethod: 'card' },
+            ],
+            oneTimeCosts: [
+                { id: 'c3', name: 'Gift card purchase', amount: 50, paymentMethod: 'card' },
+                { id: 'c4', name: 'DMV fee', amount: 40, paymentMethod: 'direct' },
+            ],
+            checkpoints: [{ id: 'cp1', day: 1, amount: 500 }],
+        });
+
+        const { archive, nextState } = calculateMonthRollover(state, closingMonth, nextMonth);
+        // finalBalance = 500 + 3000 − (1000 + 40) = 2460 — card costs excluded
+        assert.equal(archive.finalBalance, 2460);
+        assert.equal(nextState.checkpoints[0].amount, 2460);
+    });
+
+    test('manual budget expenses DO reduce the carried-over balance', () => {
+        const state = baseState({
+            incomeEntries: [{ id: 'i1', label: 'Salary', amount: 3000, date: '2026-04-15', scheduleType: 'monthly', scheduleDay: 15 }],
+            checkpoints: [{ id: 'cp1', day: 1, amount: 500 }],
+            spendingBudgets: [{
+                id: 'b1', name: 'Misc', amount: 400,
+                expenses: [
+                    { id: 'e1', description: 'Zelle purchase', amount: 300, date: '2026-04-10' },
+                    { id: 'e2', description: 'Undated', amount: 100 }, // undated counts
+                ],
+            }],
+        });
+
+        const { archive } = calculateMonthRollover(state, closingMonth, nextMonth);
+        // finalBalance = 500 + 3000 − (300 + 100) = 3100
+        assert.equal(archive.finalBalance, 3100);
+    });
+
+    test('autoCard expenses and other-month expenses do NOT reduce finalBalance', () => {
+        const state = baseState({
+            incomeEntries: [{ id: 'i1', label: 'Salary', amount: 3000, date: '2026-04-15', scheduleType: 'monthly', scheduleDay: 15 }],
+            checkpoints: [{ id: 'cp1', day: 1, amount: 500 }],
+            spendingBudgets: [{
+                id: 'b1', name: 'Misc', amount: 400,
+                expenses: [
+                    { id: 'e1', autoCard: true, description: 'Netflix', amount: 20, date: '2026-04-05' },
+                    { id: 'e2', description: 'March leftover', amount: 60, date: '2026-03-20' },
+                    { id: 'e3', description: 'In-month', amount: 30, date: '2026-04-20' },
+                ],
+            }],
+        });
+
+        const { archive } = calculateMonthRollover(state, closingMonth, nextMonth);
+        // Only e3 counts: 500 + 3000 − 30 = 3470
+        assert.equal(archive.finalBalance, 3470);
+    });
+
+    test('archive captures spendingBudgets with expenses — deep copied', () => {
+        const state = baseState({
+            spendingBudgets: [{
+                id: 'b1', name: 'Groceries', amount: 500,
+                expenses: [{ id: 'e1', description: 'Shop', amount: 120, date: '2026-04-10' }],
+            }],
+        });
+
+        const { archive } = calculateMonthRollover(state, closingMonth, nextMonth);
+        assert.equal(archive.spendingBudgets.length, 1);
+        assert.equal(archive.spendingBudgets[0].expenses.length, 1);
+
+        // Deep copy: mutating the archive must not touch the source state
+        archive.spendingBudgets[0].expenses[0].amount = 999;
+        archive.spendingBudgets[0].name = 'Changed';
+        assert.equal(state.spendingBudgets[0].expenses[0].amount, 120);
+        assert.equal(state.spendingBudgets[0].name, 'Groceries');
+    });
+
+    test('archive totalCosts includes manual expenses, excludes card costs', () => {
+        const state = baseState({
+            recurringCosts: [
+                { id: 'c1', name: 'Rent', amount: 1000, category: 'utility', intervalMonths: 1 },
+                { id: 'c2', name: 'Netflix', amount: 20, category: 'subscription', intervalMonths: 1, paymentMethod: 'card' },
+            ],
+            spendingBudgets: [{
+                id: 'b1', name: 'Misc', amount: 400,
+                expenses: [{ id: 'e1', description: 'Zelle', amount: 50, date: '2026-04-10' }],
+            }],
+        });
+
+        const { archive } = calculateMonthRollover(state, closingMonth, nextMonth);
+        // totalCosts = 1000 + 50 = 1050 (card bill + autoCard excluded)
+        assert.equal(archive.totalCosts, 1050);
+    });
 });

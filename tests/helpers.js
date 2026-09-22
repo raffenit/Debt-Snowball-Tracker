@@ -52,7 +52,21 @@ export {
     cashExpensesForMonth,
     CARD_AUTOPAY_BUDGET_ID,
     CARD_AUTOPAY_BUDGET_NAME,
+    CATEGORY_BUDGETS,
 } from '../src/core/card-expenses.js';
+
+// Backup validation / filtering / slot rotation
+export {
+    pickBackupSlot,
+    validateBackupData,
+    filterBackupFields,
+} from '../src/core/backups.js';
+
+// Budget view helpers (archive-aware)
+export {
+    budgetsForView,
+    budgetAmountForMonth,
+} from '../src/core/budgets.js';
 
 // Constants
 export {

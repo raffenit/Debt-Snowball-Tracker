@@ -10,6 +10,7 @@ import {
     monthKeyToIndex,
     addMonthsToKey,
 } from './date-utils.js';
+import { cashExpensesForMonth } from './card-expenses.js';
 
 /**
  * Calculate the state transition when closing one month and opening the next.
@@ -29,15 +30,26 @@ import {
  */
 export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
     const {
-        debts,
-        recurringCosts,
+        debts = [],
+        recurringCosts = [],
         oneTimeCosts = [],
-        incomeEntries,
-        checkpoints,
-        startingBalance,
-        paidStatus,
-        spendingBudgets,
+        incomeEntries = [],
+        checkpoints = [],
+        startingBalance = 0,
+        paidStatus = {},
+        spendingBudgets = [],
     } = state;
+
+    // Card-paid bills never touch bank cash (autopaid by card), and manual
+    // budget expenses DO leave the account — mirror the cash-flow plan's rules.
+    const isCashCost = c => c.paymentMethod !== 'card';
+    const cashCosts = [
+        ...recurringCosts.filter(c => isCostDueInMonth(c, closingMonthKey) && isCashCost(c)),
+        ...oneTimeCosts.filter(isCashCost),
+    ];
+    const spentCash = cashExpensesForMonth(spendingBudgets || [], closingMonthKey)
+        .reduce((s, e) => s + e.amount, 0);
+    const totalCosts = cashCosts.reduce((s, c) => s + c.amount, 0) + spentCash;
 
     // ── 1. Archive snapshot of the closing month ────────────────────────────
     const archive = {
@@ -48,23 +60,20 @@ export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
         oneTimeCosts: [...oneTimeCosts],
         checkpoints: [...checkpoints],
         debts: debts.map(d => ({ ...d })),
+        spendingBudgets: (spendingBudgets || []).map(b => ({
+            ...b,
+            expenses: (b.expenses || []).map(e => ({ ...e })),
+        })),
         startingBalance,
         paidStatus: { ...paidStatus },
         totalIncome: incomeEntries.reduce((s, e) => s + e.amount, 0),
-        totalCosts: [
-            ...recurringCosts.filter(c => isCostDueInMonth(c, closingMonthKey)),
-            ...oneTimeCosts,
-        ].reduce((s, c) => s + c.amount, 0),
+        totalCosts,
     };
 
-    // ── 2. Final balance = day-1 cash + income − all costs ─────────────────
+    // ── 2. Final balance = day-1 cash + income − all cash out ──────────────
     const day1Cp = checkpoints.find(cp => cp.day === 1);
     let cashPool = day1Cp ? day1Cp.amount : 0;
     const totalIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
-    const totalCosts = [
-        ...recurringCosts.filter(c => isCostDueInMonth(c, closingMonthKey)),
-        ...oneTimeCosts,
-    ].reduce((s, c) => s + c.amount, 0);
     const finalBalance = cashPool + totalIncome - totalCosts;
     archive.finalBalance = finalBalance;
 

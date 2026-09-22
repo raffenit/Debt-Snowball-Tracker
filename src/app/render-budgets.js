@@ -1,6 +1,7 @@
 import { appState } from './state.js';
-import { currentMonthKey } from '../core/date-utils.js';
+import { currentMonthKey, formatMonthLabel, keyToHtmlMonth } from '../core/date-utils.js';
 import { computeCardPayoffStatus } from '../core/card-expenses.js';
+import { budgetsForView, budgetAmountForMonth } from '../core/budgets.js';
 import { escHtml, formatMoney } from '../core/pure-utils.js';
 import { showErrorToast, showSavedToast, showUndoToast } from './render-modals.js';
 import { saveData, saveDataAndRender } from './storage.js';
@@ -9,18 +10,44 @@ import { saveData, saveDataAndRender } from './storage.js';
 // Focused module for budget list rendering, budget/expense modals, and CRUD.
 // Extracted from render-modals.js.
 
+// ─── Archive-aware working set ───────────────────────────────────────────────
+// When viewing an archived month, the Budgets tab operates on that month's
+// snapshot instead of the live budgets. Expense entries stay editable so the
+// historical record can be corrected; budget structure (add/edit/delete/override)
+// stays locked — archives capture what the month actually was.
+
+function getArchive() {
+    const i = appState.viewingArchiveIndex;
+    return (i !== null && appState.monthlyArchives[i]) ? appState.monthlyArchives[i] : null;
+}
+
+function getWorkingBudgets() {
+    return budgetsForView(getArchive(), appState.spendingBudgets);
+}
+
+function getViewedMonthKey() {
+    return getArchive()?.month || appState.workingMonthKey || currentMonthKey();
+}
+
 function getBudgetAmount(budget) {
-    const exc = budget.exception;
-    if (exc && exc.month === (appState.workingMonthKey || currentMonthKey())) return exc.amount;
-    return budget.amount;
+    return budgetAmountForMonth(budget, getViewedMonthKey());
 }
 
 function renderSpendingBudgets() {
     const container = appState._root.getElementById('budgets-list');
     if (!container) return;
 
-    if (appState.spendingBudgets.length === 0) {
-        container.innerHTML = `
+    const archive  = getArchive();
+    const budgets  = getWorkingBudgets();
+    const monthKey = getViewedMonthKey();
+    const monthName = archive
+        ? formatMonthLabel(archive.month)
+        : new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+    if (budgets.length === 0) {
+        container.innerHTML = archive
+            ? `<div class="empty-state">No budget data was recorded for ${escHtml(monthName)}.<br>Archived months preserve the budgets exactly as they stood at rollover.</div>`
+            : `
             <div class="empty-state">
                 No spending budgets yet.<br>Set a monthly limit per category and log spending as it happens — card-charged bills land here automatically too.
                 <br><button class="empty-cta-btn" id="empty-add-budget-btn">+ Add Your First Budget</button>
@@ -30,19 +57,24 @@ function renderSpendingBudgets() {
         return;
     }
 
-    // Budget meta bar — current month + totals across all budgets
-    const now = new Date();
-    const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-    const totalBudgeted = appState.spendingBudgets.reduce((s, b) => s + getBudgetAmount(b), 0);
-    const totalSpent    = appState.spendingBudgets.reduce((s, b) => s + (b.expenses || []).reduce((x, e) => x + e.amount, 0), 0);
+    // Budget meta bar — viewed month + totals across all budgets
+    const totalBudgeted = budgets.reduce((s, b) => s + getBudgetAmount(b), 0);
+    const totalSpent    = budgets.reduce((s, b) => s + (b.expenses || []).reduce((x, e) => x + e.amount, 0), 0);
     const totalOver     = totalSpent - totalBudgeted;
     const metaSpentClass = totalOver > 0 ? 'budget-meta-over' : 'budget-meta-ok';
+
+    const archiveBanner = archive ? `
+        <div class="budget-meta-bar" style="border-color:var(--warning-color);">
+            <span class="budget-meta-month">&#x1F5C4;&#xFE0F; Archived month — ${escHtml(monthName)}</span>
+            <div class="budget-meta-divider"></div>
+            <span style="font-size:0.75rem;color:var(--text-secondary);">Expense edits update the historical record · budget structure is locked</span>
+        </div>` : '';
 
     const metaBar = `
         <div class="budget-meta-bar">
             <span class="budget-meta-month">📅 ${monthName}</span>
             <div class="budget-meta-divider"></div>
-            <span class="budget-meta-budgeted">${appState.spendingBudgets.length} budget${appState.spendingBudgets.length !== 1 ? 's' : ''} · ${formatMoney(totalBudgeted)} total limit</span>
+            <span class="budget-meta-budgeted">${budgets.length} budget${budgets.length !== 1 ? 's' : ''} · ${formatMoney(totalBudgeted)} total limit</span>
             <span class="budget-meta-total">
                 <span class="budget-meta-budgeted">Spent:</span>
                 <span class="${metaSpentClass}">${formatMoney(totalSpent)}</span>
@@ -54,7 +86,8 @@ function renderSpendingBudgets() {
 
     // Card pay-in-full check: everything charged to cards this month should be
     // payable in full from this month's income after direct costs + minimums.
-    const _mk = appState.workingMonthKey || currentMonthKey();
+    // Current month only — archives don't carry the inputs this needs.
+    const _mk = monthKey;
     const payoff = computeCardPayoffStatus({
         recurringCosts:  appState.recurringCosts,
         oneTimeCosts:    appState.oneTimeCosts,
@@ -68,7 +101,7 @@ function renderSpendingBudgets() {
         .map(([debtId, amt]) => `${escHtml(appState.debts.find(d => d.id === debtId)?.name || 'Card')}: ${formatMoney(amt)}`);
     if (payoff.unassigned > 0) perCard.push(`Unlinked: ${formatMoney(payoff.unassigned)}`);
 
-    const cardStrip = payoff.cardCharges > 0 ? `
+    const cardStrip = !archive && payoff.cardCharges > 0 ? `
         <div class="budget-meta-bar" style="margin-top:0.5rem; flex-wrap:wrap; row-gap:0.35rem;">
             <span class="budget-meta-budgeted">💳 Charged to cards this month: ${formatMoney(payoff.cardCharges)}</span>
             ${perCard.length > 0 ? `<span style="font-size:0.75rem; color:var(--text-secondary);">${perCard.join(' · ')}</span>` : ''}
@@ -78,7 +111,7 @@ function renderSpendingBudgets() {
                 : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover — the card balance will grow">⚠ ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
         </div>` : '';
 
-    const cards = appState.spendingBudgets.map((budget, cardIdx) => {
+    const cards = budgets.map((budget, cardIdx) => {
         const budgetAmt  = getBudgetAmount(budget);
         const expenses   = budget.expenses || [];
         const spent      = expenses.reduce((s, e) => s + e.amount, 0);
@@ -88,7 +121,7 @@ function renderSpendingBudgets() {
         const barPct     = Math.min(rawPct, 100);
         const isExpanded = appState.expandedBudgets.has(budget.id);
         const showInline = appState.inlineExpenseBudget === budget.id;
-        const hasExc     = budget.exception?.month === (appState.workingMonthKey || currentMonthKey());
+        const hasExc     = budget.exception?.month === monthKey;
 
         // Gradient fill for premium look
         let fillGradient;
@@ -102,18 +135,27 @@ function renderSpendingBudgets() {
             fillGradient = 'linear-gradient(90deg, #f87171, var(--danger-color))';
         }
 
+        const todayISO = new Date().toISOString().slice(0, 10);
         const expenseRows = expenses.length === 0
             ? `<p class="budget-empty-text">No expenses logged yet.</p>`
-            : [...expenses].sort((a, b) => (b.date || '') > (a.date || '') ? 1 : -1).map(exp => `
-                <div class="budget-expense-row" data-expense-id="${exp.id}">
-                    <span class="expense-description">${escHtml(exp.description)}${exp.autoCard ? ' <span class="expense-auto-badge" title="Auto-logged card charge — edit the bill to change it">⚡</span>' : ''}</span>
+            : [...expenses].sort((a, b) => (b.date || '') > (a.date || '') ? 1 : -1).map(exp => {
+                // Auto card charges log up front — a future date means the
+                // money is committed but hasn't posted to the card yet.
+                const upcoming  = exp.autoCard && exp.date && exp.date > todayISO;
+                const autoBadge = exp.autoCard
+                    ? ` <span class="expense-auto-badge" title="${upcoming ? 'Scheduled card charge — posts on this date · edit the bill to change it' : 'Auto-logged card charge — edit the bill to change it'}">${upcoming ? '⏳' : '⚡'}</span>`
+                    : '';
+                return `
+                <div class="budget-expense-row${exp.autoCard ? ' expense-auto' : ''}" data-expense-id="${exp.id}" data-budget-id="${budget.id}"${exp.autoCard ? '' : ' draggable="true" title="Drag to move to another budget"'}>
+                    <span class="expense-description">${escHtml(exp.description)}${autoBadge}</span>
                     <span class="expense-date">${exp.date ? new Date(exp.date + 'T00:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'}) : ''}</span>
                     <span class="expense-amount" style="color:var(--expense-color);">−${formatMoney(exp.amount)}</span>
                     <div class="expense-actions">
                         ${exp.autoCard ? '' : `<button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">✎</button>`}
                         <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">✕</button>
                     </div>
-                </div>`).join('');
+                </div>`;
+            }).join('');
 
         const totalRow = expenses.length > 0 ? `
             <div class="budget-total-row ${isOver ? 'budget-total-over' : 'budget-total-ok'}">
@@ -176,15 +218,16 @@ function renderSpendingBudgets() {
                 ${inlineForm}
                 <div class="budget-card-actions">
                     ${addExpBtn}
+                    ${archive ? '' : `
                     <button class="btn btn-sm btn-override btn-override-budget" data-budget-id="${budget.id}">${hasExc ? '✎ Edit' : '⚡ Override'}</button>
                     <button class="btn btn-secondary btn-sm btn-edit-budget" data-budget-id="${budget.id}">✎ Edit</button>
-                    <button class="btn btn-secondary btn-sm btn-delete-budget" data-budget-id="${budget.id}" style="margin-left:auto; border-color:var(--danger-color); color:var(--danger-color);">🗑 Delete</button>
+                    <button class="btn btn-secondary btn-sm btn-delete-budget" data-budget-id="${budget.id}" style="margin-left:auto; border-color:var(--danger-color); color:var(--danger-color);">🗑 Delete</button>`}
                 </div>
             </div>` : ''}
         </div>`;
     }).join('');
 
-    container.innerHTML = metaBar + cardStrip + cards;
+    container.innerHTML = archiveBanner + metaBar + cardStrip + cards;
 
     // Auto-focus the inline form description field if open
     if (appState.inlineExpenseBudget) {
@@ -231,6 +274,7 @@ function closeBudgetModal() {
 
 function saveBudget() {
     try {
+        if (getArchive()) throw new Error('Budgets are locked in archived months.');
         const id     = appState._root.getElementById('budget-id').value;
         const name   = appState._root.getElementById('budget-name').value.trim();
         const amount = parseFloat(appState._root.getElementById('budget-amount').value);
@@ -267,6 +311,7 @@ function saveBudget() {
 }
 
 function deleteBudget(id) {
+    if (getArchive()) return; // archived budget structure is locked
     const budget = appState.spendingBudgets.find(b => b.id === id);
     if (!budget) return;
     if (!confirm(`Delete the "${budget.name}" budget and all its expenses for this month?`)) return;
@@ -283,7 +328,17 @@ function openExpenseModal(budgetId, expenseId = null) {
     appState._root.getElementById('expense-budget-id').value = budgetId;
     appState._root.getElementById('expense-id').value = '';
 
-    const budget = appState.spendingBudgets.find(b => b.id === budgetId);
+    const budgets = getWorkingBudgets();
+
+    // Budget picker — defaults to the budget the expense lives in
+    const budgetSel = appState._root.getElementById('expense-budget-select');
+    if (budgetSel) {
+        budgetSel.innerHTML = budgets
+            .map(b => `<option value="${b.id}"${b.id === budgetId ? ' selected' : ''}>${escHtml(b.name)}</option>`)
+            .join('');
+    }
+
+    const budget = budgets.find(b => b.id === budgetId);
     const budgetLabel = budget ? ` — ${budget.name}` : '';
 
     if (expenseId) {
@@ -297,8 +352,11 @@ function openExpenseModal(budgetId, expenseId = null) {
         }
     } else {
         appState._root.getElementById('expense-modal-title').textContent = `Add Expense${budgetLabel}`;
-        // Default date to today
-        appState._root.getElementById('expense-date').value = new Date().toISOString().slice(0, 10);
+        // Default date: today for the live month, the 1st for archives
+        const archive = getArchive();
+        appState._root.getElementById('expense-date').value = archive
+            ? `${keyToHtmlMonth(archive.month)}-01`
+            : new Date().toISOString().slice(0, 10);
     }
 
     appState.expenseModal.style.display = 'flex';
@@ -323,21 +381,38 @@ function saveExpense() {
         if (!description)          throw new Error('Please enter a description.');
         if (isNaN(amount) || amount < 0) throw new Error('Please enter a valid amount.');
 
-        const budget = appState.spendingBudgets.find(b => b.id === budgetId);
+        const budgets = getWorkingBudgets();
+        const budget = budgets.find(b => b.id === budgetId);
         if (!budget) throw new Error('Budget not found.');
 
         if (!budget.expenses) budget.expenses = [];
 
+        const targetBudgetId = appState._root.getElementById('expense-budget-select')?.value || budgetId;
+
         if (expenseId) {
             const idx = budget.expenses.findIndex(e => e.id === expenseId);
-            if (idx !== -1) budget.expenses[idx] = { id: expenseId, description, amount, date };
+            if (idx !== -1) {
+                const updated = { ...budget.expenses[idx], description, amount, date };
+                if (targetBudgetId !== budgetId) {
+                    // Reassigned to a different budget
+                    const target = budgets.find(b => b.id === targetBudgetId);
+                    if (!target) throw new Error('Target budget not found.');
+                    if (!target.expenses) target.expenses = [];
+                    budget.expenses.splice(idx, 1);
+                    target.expenses.push(updated);
+                } else {
+                    budget.expenses[idx] = updated;
+                }
+            }
         } else {
-            budget.expenses.push({ id: Date.now().toString(), description, amount, date });
+            const target = budgets.find(b => b.id === targetBudgetId) || budget;
+            if (!target.expenses) target.expenses = [];
+            target.expenses.push({ id: Date.now().toString(), description, amount, date });
         }
 
         saveDataAndRender();
         closeExpenseModal();
-        appState.expandedBudgets.add(budgetId);
+        appState.expandedBudgets.add(targetBudgetId);
         renderSpendingBudgets();
         showSavedToast(expenseId ? 'Expense updated ✓' : 'Expense added ✓');
     } catch (err) {
@@ -345,13 +420,32 @@ function saveExpense() {
     }
 }
 
+// Move a manual expense from one budget to another (drag & drop).
+// Auto-logged card expenses can't move — they mirror the bill's routing.
+function moveExpenseToBudget(expenseId, fromBudgetId, toBudgetId) {
+    if (fromBudgetId === toBudgetId) return false;
+    const budgets = getWorkingBudgets();
+    const from = budgets.find(b => b.id === fromBudgetId);
+    const to   = budgets.find(b => b.id === toBudgetId);
+    const exp  = from?.expenses?.find(e => e.id === expenseId);
+    if (!from || !to || !exp || exp.autoCard) return false;
+    from.expenses = from.expenses.filter(e => e.id !== expenseId);
+    if (!to.expenses) to.expenses = [];
+    to.expenses.push(exp);
+    saveDataAndRender();
+    renderSpendingBudgets();
+    showSavedToast(`Moved to ${to.name} ✓`);
+    return true;
+}
+
 function deleteExpense(budgetId, expenseId) {
-    const budget = appState.spendingBudgets.find(b => b.id === budgetId);
+    const budget = getWorkingBudgets().find(b => b.id === budgetId);
     if (!budget) return;
     const deleted = budget.expenses.find(e => e.id === expenseId);
     if (!deleted) return;
-    // Tombstone auto card expenses so the sync doesn't resurrect them next render
-    const skipKey = deleted.autoCard && deleted.costId
+    // Tombstone auto card expenses so the sync doesn't resurrect them next
+    // render — live month only; archives aren't synced.
+    const skipKey = !getArchive() && deleted.autoCard && deleted.costId
         ? `${appState.workingMonthKey || currentMonthKey()}:${deleted.costId}`
         : null;
     if (skipKey && !appState.cardExpenseSkips.includes(skipKey)) {
@@ -368,4 +462,4 @@ function deleteExpense(budgetId, expenseId) {
     });
 }
 
-export { closeBudgetModal, closeExpenseModal, deleteBudget, deleteExpense, getBudgetAmount, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense };
+export { closeBudgetModal, closeExpenseModal, deleteBudget, deleteExpense, getBudgetAmount, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense };

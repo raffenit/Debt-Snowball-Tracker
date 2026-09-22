@@ -1,13 +1,15 @@
 import { appState } from './state.js';
 import { currentMonthKey } from '../core/date-utils.js';
+import { formatOrdinal } from '../core/pure-utils.js';
 import { advanceToNextMonth } from './advance.js';
 import { closeArchiveModal, openArchiveModal, updateCostModalIntervalVisibility } from './modals.js';
-import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSavedToast, togglePaid, updateIncomeScheduleHint } from './render-modals.js';
+import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSanityWarningsModal, showSavedToast, togglePaid, updateIncomeScheduleHint } from './render-modals.js';
 import { closeCheckpointModal, openCheckpointModal, renderCheckpointsList, saveCheckpoint } from './render-checkpoints.js';
-import { closeBudgetModal, closeExpenseModal, deleteBudget, deleteExpense, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
+import { closeBudgetModal, closeExpenseModal, deleteBudget, deleteExpense, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
 import { renderRecurringCostsList } from './render-lists.js';
 import { exportData, importData } from './render-export.js';
-import { saveData, saveDataAndRender } from './storage.js';
+import { saveData, saveDataAndRender, createServerBackup } from './storage.js';
+import { reportError } from './error-report.js';
 import { renderPaymentPlan } from './render-payment.js';
 import { autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, openWindfallModal, updateAutoMinHint } from './render-support.js';
 
@@ -96,7 +98,8 @@ function setupEventListeners() {
             const date   = form.querySelector('.inline-date').value;
             if (!desc)              { showErrorToast('Please enter a description.'); return; }
             if (isNaN(amount) || amount < 0) { showErrorToast('Please enter a valid amount.'); return; }
-            const budget = appState.spendingBudgets.find(b => b.id === bid);
+            // Archive-aware: budget cards may belong to an archived month
+            const budget = getWorkingBudgets().find(b => b.id === bid);
             if (!budget) return;
             if (!budget.expenses) budget.expenses = [];
             budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date });
@@ -141,6 +144,98 @@ function setupEventListeners() {
 
         const delBudget = e.target.closest('.btn-delete-budget');
         if (delBudget) { deleteBudget(delBudget.dataset.budgetId); return; }
+    });
+
+    // ── Drag & drop: move expenses between budgets ────────────────────────────
+    const budgetsList = appState._root.getElementById('budgets-list');
+
+    budgetsList.addEventListener('dragstart', e => {
+        const row = e.target.closest('.budget-expense-row[draggable="true"]');
+        if (!row) return;
+        e.dataTransfer.setData('text/plain', JSON.stringify({
+            expenseId: row.dataset.expenseId,
+            budgetId:  row.dataset.budgetId,
+        }));
+        e.dataTransfer.effectAllowed = 'move';
+        row.classList.add('dragging');
+    });
+    budgetsList.addEventListener('dragend', e => {
+        e.target.closest('.budget-expense-row')?.classList.remove('dragging');
+        budgetsList.querySelectorAll('.budget-drop-target').forEach(c => c.classList.remove('budget-drop-target'));
+    });
+    budgetsList.addEventListener('dragover', e => {
+        const card = e.target.closest('.budget-card');
+        if (!card) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        budgetsList.querySelectorAll('.budget-drop-target').forEach(c => { if (c !== card) c.classList.remove('budget-drop-target'); });
+        card.classList.add('budget-drop-target');
+    });
+    budgetsList.addEventListener('dragleave', e => {
+        const card = e.target.closest('.budget-card');
+        if (card && !card.contains(e.relatedTarget)) card.classList.remove('budget-drop-target');
+    });
+    budgetsList.addEventListener('drop', e => {
+        const card = e.target.closest('.budget-card');
+        if (!card) return;
+        e.preventDefault();
+        card.classList.remove('budget-drop-target');
+        let payload;
+        try { payload = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+        if (!payload?.expenseId) return;
+        moveExpenseToBudget(payload.expenseId, payload.budgetId, card.dataset.budgetId);
+    });
+
+    // ── Drag & drop: re-date expenses in the cash flow plan ──────────────────
+    const planList = appState._root.getElementById('payment-plan-list');
+
+    planList.addEventListener('dragstart', e => {
+        const row = e.target.closest('.schedule-row[draggable="true"]');
+        if (!row) return;
+        e.dataTransfer.setData('text/plain', JSON.stringify({
+            expenseId: row.dataset.expenseId,
+            budgetId:  row.dataset.budgetId,
+        }));
+        e.dataTransfer.effectAllowed = 'move';
+        row.classList.add('dragging');
+    });
+    planList.addEventListener('dragend', e => {
+        e.target.closest('.schedule-row')?.classList.remove('dragging');
+        planList.querySelectorAll('.drop-target').forEach(r => r.classList.remove('drop-target'));
+    });
+    planList.addEventListener('dragover', e => {
+        const row = e.target.closest('.schedule-row');
+        if (!row) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        planList.querySelectorAll('.drop-target').forEach(r => { if (r !== row) r.classList.remove('drop-target'); });
+        row.classList.add('drop-target');
+    });
+    planList.addEventListener('dragleave', e => {
+        const row = e.target.closest('.schedule-row');
+        if (row && !row.contains(e.relatedTarget)) row.classList.remove('drop-target');
+    });
+    planList.addEventListener('drop', e => {
+        const row = e.target.closest('.schedule-row');
+        if (!row) return;
+        e.preventDefault();
+        row.classList.remove('drop-target');
+        let payload;
+        try { payload = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+        if (!payload?.expenseId || !payload?.budgetId) return;
+        const day = parseInt(row.dataset.day);
+        if (!day) return;
+        const budget = getWorkingBudgets().find(b => b.id === payload.budgetId);
+        const exp = budget?.expenses?.find(x => x.id === payload.expenseId);
+        if (!exp || exp.autoCard) return;
+        const mk = appState.workingMonthKey || currentMonthKey();
+        const [y, m] = mk.split('-').map(Number);
+        const lastDay = new Date(y, m + 1, 0).getDate();
+        const newDate = `${y}-${String(m + 1).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+        if (exp.date === newDate) return;
+        exp.date = newDate;
+        saveDataAndRender();
+        showSavedToast(`Expense moved to ${formatOrdinal(day)} ✓`);
     });
 
     // Inline expense form — keyboard handling
@@ -201,7 +296,7 @@ function setupEventListeners() {
             renderUI();
             amountInput.value = '';
             showSavedToast('Checkpoint added ✓');
-        }).catch(err => console.error("Debt Snowball: save failed —", err));
+        }).catch(err => reportError("Save failed — your change may not persist after reload", err));
     });
 
     // Delete checkpoint handler (delegated)
@@ -214,7 +309,7 @@ function setupEventListeners() {
                 renderCheckpointsList();
                 renderUI();
                 showSavedToast('Checkpoint removed ✓');
-            }).catch(err => console.error("Debt Snowball: save failed —", err));
+            }).catch(err => reportError("Save failed — your change may not persist after reload", err));
         }
     });
 
@@ -222,7 +317,18 @@ function setupEventListeners() {
     appState._root.getElementById('plan-prev-month-btn').addEventListener('click', () => {
         const btn = appState._root.getElementById('plan-prev-month-btn');
         const idx = parseInt(btn.dataset.archiveIdx ?? '0');
-        if (idx < appState.monthlyArchives.length) { appState.viewingArchiveIndex = idx; renderUI(); }
+        if (idx < appState.monthlyArchives.length) {
+            appState.viewingArchiveIndex = idx;
+            // Archive months are editable (expense corrections) — take one
+            // server backup per session before first entering archive view,
+            // so there's a restore point if an edit goes wrong.
+            if (!appState._archiveBackupDone) {
+                appState._archiveBackupDone = true;
+                createServerBackup('archive view')
+                    .catch(err => reportError('Automatic backup failed — archive edits will not have a restore point', err));
+            }
+            renderUI();
+        }
     });
     appState._root.getElementById('plan-next-month-btn').addEventListener('click', () => {
         appState.viewingArchiveIndex = null;
@@ -231,6 +337,9 @@ function setupEventListeners() {
 
     // Income schedule type hint
     appState._root.getElementById('income-schedule').addEventListener('change', updateIncomeScheduleHint);
+
+    // Sanity warnings badge — reopens the anomaly review modal
+    appState._root.getElementById('sanity-badge')?.addEventListener('click', showSanityWarningsModal);
 
     // Archive / History
     appState._root.getElementById('history-btn').addEventListener('click', openArchiveModal);
@@ -270,7 +379,7 @@ function setupEventListeners() {
     // Mortgage toggle
     appState._root.getElementById('mortgage-toggle-btn').addEventListener('click', () => {
         appState.showMortgage = !appState.showMortgage;
-        saveData().then(() => renderUI()).catch(err => console.error("Debt Snowball: save failed —", err));
+        saveData().then(() => renderUI()).catch(err => reportError("Save failed — your change may not persist after reload", err));
     });
 
     // Strategy toggle
@@ -279,7 +388,7 @@ function setupEventListeners() {
             appState.strategy = btn.dataset.strategy;
             appState._root.querySelectorAll('.strategy-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            saveData().then(() => renderUI()).catch(err => console.error("Debt Snowball: save failed —", err));
+            saveData().then(() => renderUI()).catch(err => reportError("Save failed — your change may not persist after reload", err));
         });
     });
 

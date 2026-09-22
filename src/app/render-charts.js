@@ -22,6 +22,7 @@ function renderPaydownChart(monthlyTotals, perDebtMonthly) {
     const canvas = appState._root.getElementById('paydown-chart');
     if (!canvas) return;
 
+    // destroy() can throw if the chart is already torn down — safe to ignore
     if (appState.paydownChart) { try { appState.paydownChart.destroy(); } catch(e) {} appState.paydownChart = null; }
 
     const maxLen = monthlyTotals.length;

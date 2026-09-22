@@ -420,9 +420,9 @@ function renderPaymentPlan() {
     // Manual budget expenses (Zelle/cash/debit purchases) are real cash
     // outflows — they draw down the pool on their logged date. Auto-logged
     // card expenses are excluded (they're card charges, not cash).
-    // Archives don't store budgets, so this is empty in archive view.
+    // Archives store the month's budgets as they stood at rollover.
     const _budgetExpenses = cashExpensesForMonth(
-        archiveData ? [] : appState.spendingBudgets, _monthKey);
+        archiveData ? (archiveData.spendingBudgets || []) : appState.spendingBudgets, _monthKey);
     _budgetExpenses.forEach(exp => {
         const day = exp.date ? (parseInt(exp.date.split('-')[2]) || 1) : 1;
         events.push({
@@ -432,6 +432,7 @@ function renderPaymentPlan() {
             day,
             amount: exp.amount,
             budgetName: exp.budgetName,
+            budgetId: exp.budgetId,
             settled: true,
             sortKey: day * 1000 + 1.5
         });
@@ -649,11 +650,12 @@ function renderPaymentPlan() {
     const ovBudgetsContainer = appState._root.getElementById('month-overview-budgets');
     const ovBudgetsGrid = appState._root.getElementById('month-overview-budgets-grid');
 
-    if (ovBudgetsContainer && ovBudgetsGrid && appState.spendingBudgets.length > 0) {
+    const ovBudgets = archiveData ? (archiveData.spendingBudgets || []) : appState.spendingBudgets;
+    if (ovBudgetsContainer && ovBudgetsGrid && ovBudgets.length > 0) {
         ovBudgetsContainer.style.display = 'block';
 
         // Calculate budget status for each
-        const budgetSummaries = appState.spendingBudgets.map(budget => {
+        const budgetSummaries = ovBudgets.map(budget => {
             const budgeted = getBudgetAmount(budget);
             const spent = (budget.expenses || []).reduce((s, e) => s + e.amount, 0);
             const remaining = budgeted - spent;
@@ -775,6 +777,15 @@ function renderPaymentPlan() {
 
         row.className  = `schedule-row ${rowBgClass}${itemPaid ? ' schedule-row-paid' : ''}`;
         row.style.animation = `fadeIn 0.4s ease backwards ${index * 0.04}s`;
+        row.dataset.day = item.day || 1;
+
+        // Logged budget expenses can be dragged onto another row to re-date them
+        if (item.type === 'expense' && !isArchiveView) {
+            row.draggable = true;
+            row.dataset.expenseId = item.id;
+            row.dataset.budgetId  = item.budgetId || '';
+            row.title = 'Drag onto another row to move this expense to that day';
+        }
 
         let statusBadges = '';
         if (item.deferred) statusBadges += '<span class="schedule-badge schedule-badge-deferred">⏳ Deferred</span>';
@@ -843,7 +854,7 @@ function renderPaymentPlan() {
         const detailText = item.type === 'debt' && item.isSnowballTarget ? 'Minimum + Snowball Extra'
             : item.type === 'debt' ? 'Minimum Payment'
             : item.type === 'recurring' ? 'Paid from bank account'
-            : item.type === 'expense' ? 'Logged budget spending — deducted from cash'
+            : item.type === 'expense' ? (isArchiveView ? 'Logged budget spending — deducted from cash' : 'Logged budget spending — deducted from cash · drag to re-date')
             : item.type === 'checkpoint' ? 'Resets the running balance for calculations below'
             : '';
 
