@@ -925,7 +925,7 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.4.0";
+      PANEL_VERSION = "2.5.0";
       PANEL_BUILD_DATE = "2026-09-22";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
