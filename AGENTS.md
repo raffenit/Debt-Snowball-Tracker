@@ -10,6 +10,10 @@ Home Assistant custom Lovelace card (vanilla JS ES modules, esbuild bundle,
 - `npm run build` — rebuild `dist/debt-snowball-card.js` (required after any
   src change; `tests/build.test.js` verifies the bundle)
 - `node --test tests/<file>.test.js` — run a single suite
+- `npm run release` — tests → build → tag → GitHub release. Bump the version
+  in BOTH `package.json` and `PANEL_VERSION`/`PANEL_BUILD_DATE` in
+  `src/app/header.js` first (never `npm version`); see
+  `.devin/workflows/hacs-deployment.md`.
 
 ## Conventions
 

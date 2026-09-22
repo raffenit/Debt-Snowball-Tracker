@@ -229,7 +229,7 @@ The test page mocks the HA API and stores data in browser `localStorage`.
 ### Running Tests
 
 ```bash
-npm test            # All 180 tests across 37 suites
+npm test            # All 308 tests across 60 suites
 npm run test:unit   # Core simulation engine only
 npm run test:dates  # Date utility functions
 npm run test:build  # Build system validation
@@ -237,10 +237,20 @@ npm run test:build  # Build system validation
 
 ### Releasing to Home Assistant
 
+The version lives in **two places** — bump both, then rebuild:
+
+1. `package.json` → `"version"` (the tag name)
+2. `src/app/header.js` → `PANEL_VERSION` + `PANEL_BUILD_DATE` (the version badge / console banner)
+
 ```bash
-npm version patch   # Bump version (patch|minor|major)
-npm run release     # Tests → Build → Git tag → GitHub Release
+npm run build         # bake the new version into the bundle
+git add -u && git commit -m "chore: bump version to X.Y.Z" && git push origin main
+npm run release       # Tests → Build → Git tag → GitHub Release
 ```
+
+⚠️ Do **not** use `npm version patch` — it only bumps `package.json` (leaving
+the UI version stale) and creates its own tag that collides with the release
+script.
 
 Then in Home Assistant:
 1. **HACS → Frontend → Debt Snowball Tracker → Update**
