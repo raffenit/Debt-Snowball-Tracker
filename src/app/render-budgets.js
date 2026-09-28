@@ -317,7 +317,7 @@ function closeBudgetModal() {
     setTimeout(() => { appState.budgetModal.style.display = 'none'; }, 300);
 }
 
-function saveBudget() {
+async function saveBudget() {
     try {
         if (getArchive()) throw new Error('Budgets are locked in archived months.');
         const id     = appState._root.getElementById('budget-id').value;
@@ -346,7 +346,7 @@ function saveBudget() {
             appState.spendingBudgets.push({ id: Date.now().toString(), name, amount, exception, expenses: [] });
         }
 
-        saveDataAndRender();
+        await saveDataAndRender();
         closeBudgetModal();
         renderSpendingBudgets();
         showSavedToast(id ? 'Budget updated ✓' : 'Budget added ✓');
@@ -355,14 +355,14 @@ function saveBudget() {
     }
 }
 
-function deleteBudget(id) {
+async function deleteBudget(id) {
     if (getArchive()) return; // archived budget structure is locked
     const budget = appState.spendingBudgets.find(b => b.id === id);
     if (!budget) return;
     if (!confirm(`Delete the "${budget.name}" budget and all its expenses for this month?`)) return;
     appState.spendingBudgets = appState.spendingBudgets.filter(b => b.id !== id);
     appState.expandedBudgets.delete(id);
-    saveDataAndRender();
+    await saveDataAndRender();
     renderSpendingBudgets();
     showSavedToast('Budget deleted ✓');
 }
@@ -472,7 +472,7 @@ function closeExpenseModal() {
     setTimeout(() => { appState.expenseModal.style.display = 'none'; }, 300);
 }
 
-function saveExpense() {
+async function saveExpense() {
     try {
         const budgetId    = appState._root.getElementById('expense-budget-id').value;
         const expenseId   = appState._root.getElementById('expense-id').value;
@@ -516,7 +516,7 @@ function saveExpense() {
             target.expenses.push({ id: Date.now().toString(), description, amount, date, paymentMethod, cardDebtId });
         }
 
-        saveDataAndRender();
+        await saveDataAndRender();
         closeExpenseModal();
         appState.expandedBudgets.add(targetBudgetId);
         renderSpendingBudgets();
@@ -528,7 +528,7 @@ function saveExpense() {
 
 // Move a manual expense from one budget to another (drag & drop).
 // Auto-logged card expenses can't move — they mirror the bill's routing.
-function moveExpenseToBudget(expenseId, fromBudgetId, toBudgetId) {
+async function moveExpenseToBudget(expenseId, fromBudgetId, toBudgetId) {
     if (fromBudgetId === toBudgetId) return false;
     const budgets = getWorkingBudgets();
     const from = budgets.find(b => b.id === fromBudgetId);
@@ -538,13 +538,13 @@ function moveExpenseToBudget(expenseId, fromBudgetId, toBudgetId) {
     from.expenses = from.expenses.filter(e => e.id !== expenseId);
     if (!to.expenses) to.expenses = [];
     to.expenses.push(exp);
-    saveDataAndRender();
+    await saveDataAndRender();
     renderSpendingBudgets();
     showSavedToast(`Moved to ${to.name} ✓`);
     return true;
 }
 
-function deleteExpense(budgetId, expenseId) {
+async function deleteExpense(budgetId, expenseId) {
     const budget = getWorkingBudgets().find(b => b.id === budgetId);
     if (!budget) return;
     const deleted = budget.expenses.find(e => e.id === expenseId);
@@ -558,12 +558,12 @@ function deleteExpense(budgetId, expenseId) {
         appState.cardExpenseSkips.push(skipKey);
     }
     budget.expenses = budget.expenses.filter(e => e.id !== expenseId);
-    saveDataAndRender();
+    await saveDataAndRender();
     renderSpendingBudgets();
-    showUndoToast('Expense deleted', () => {
+    showUndoToast('Expense deleted', async () => {
         if (skipKey) appState.cardExpenseSkips = appState.cardExpenseSkips.filter(k => k !== skipKey);
         budget.expenses.push(deleted);
-        saveDataAndRender();
+        await saveDataAndRender();
         renderSpendingBudgets();
     });
 }

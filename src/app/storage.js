@@ -411,13 +411,41 @@ async function listServerBackups() {
 // always reflects the latest state without callers needing to manually render.
 // We render even on save failure because the in-memory appState is already
 // mutated by the caller — the user should see their change immediately.
+// Archive-aware: when viewing an archived month, writes changes back to that
+// specific archive entry instead of the live state.
 function saveDataAndRender() {
+    if (appState.viewingArchiveIndex !== null && appState.monthlyArchives[appState.viewingArchiveIndex]) {
+        return saveArchiveEdit();
+    }
     return saveData()
         .then(() => renderUI())
         .catch(err => {
             reportError('Save failed — your change may not persist after reload', err);
             renderUI();
         });
+}
+
+// Archive-aware save: when viewing an archived month, writes changes back to
+// that specific archive entry instead of the live state. Called by budget
+// expense edit/delete in archive view.
+async function saveArchiveEdit() {
+    const idx = appState.viewingArchiveIndex;
+    if (idx === null || !appState.monthlyArchives[idx]) {
+        throw new Error('Not viewing an archive — use saveData() instead.');
+    }
+    // Take a server backup before the edit persists (already taken on first
+    // archive entry, but it's cheap and safe to back up again on save).
+    await createServerBackup('archive edit');
+    const archive = appState.monthlyArchives[idx];
+    // The in-memory archive was already mutated by the caller — persist it.
+    const payload = buildSavePayload();
+    await ensureStoreDashboard();
+    await appState._root._hass.connection.sendMessagePromise({
+        type:     'lovelace/config/save',
+        url_path: STORE_URL_PATH,
+        config:   payload,
+    });
+    renderUI();
 }
 
 function currentMonthKey() {
@@ -427,4 +455,4 @@ function currentMonthKey() {
 
 // ─── Manual Month Advance ─────────────────────────────────────────────────────
 
-export { STORE_URL_PATH, ensureStoreDashboard, loadBackendData, saveData, saveDataAndRender, currentMonthKey, buildSavePayload, createServerBackup, preserveRawConfig, listServerBackups };
+export { STORE_URL_PATH, ensureStoreDashboard, loadBackendData, saveData, saveDataAndRender, saveArchiveEdit, currentMonthKey, buildSavePayload, createServerBackup, preserveRawConfig, listServerBackups };

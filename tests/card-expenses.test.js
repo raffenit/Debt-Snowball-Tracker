@@ -261,13 +261,17 @@ describe('syncCardExpenses', () => {
         assert.equal(second.changed, false);
     });
 
-    test('ignores direct-payment costs entirely', () => {
+    test('syncs direct-payment costs as autoDirect expenses', () => {
         const { budgets, changed } = sync({
-            recurringCosts: [cardCost({ paymentMethod: 'direct' })],
+            recurringCosts: [cardCost({ paymentMethod: 'direct', category: 'utility' })],
             spendingBudgets: [budget()],
         });
-        assert.equal(changed, false);
-        assert.equal(budgets[0].expenses.length, 0);
+        assert.equal(changed, true);
+        // Direct costs with category route to the auto-generated category budget
+        const util = budgets.find(b => b.id === 'auto_cat_utility');
+        assert.ok(util, 'utility budget should exist');
+        assert.equal(util.expenses.length, 1);
+        assert.equal(util.expenses[0].autoDirect, true);
     });
 
     test('syncs one-time card costs too', () => {
@@ -277,6 +281,7 @@ describe('syncCardExpenses', () => {
         });
         // 'one-time' has no category keyword — lands in the fallback budget
         const auto = budgets.find(b => b.id === CARD_AUTOPAY_BUDGET_ID);
+        assert.ok(auto, 'fallback budget should exist');
         assert.equal(auto.expenses.length, 1);
         assert.equal(auto.expenses[0].costId, 'c1');
     });
@@ -297,13 +302,18 @@ describe('syncCardExpenses', () => {
         assert.equal(second.budgets[0].expenses.length, 0);
     });
 
-    test('removes auto expense when cost switches to direct pay', () => {
-        const first = sync({ recurringCosts: [cardCost()], spendingBudgets: [budget()] });
+    test('converts autoCard to autoDirect when cost switches to direct pay', () => {
+        const first = sync({ recurringCosts: [cardCost({ category: 'utility' })], spendingBudgets: [budget()] });
         const second = sync({
-            recurringCosts: [cardCost({ paymentMethod: 'direct' })],
+            recurringCosts: [cardCost({ paymentMethod: 'direct', category: 'utility' })],
             spendingBudgets: first.budgets,
         });
-        assert.equal(second.budgets[0].expenses.length, 0);
+        // Direct costs now create autoDirect expenses instead of removing
+        const util = second.budgets.find(b => b.id === 'auto_cat_utility');
+        assert.ok(util, 'utility budget should exist');
+        assert.equal(util.expenses.length, 1);
+        assert.equal(util.expenses[0].autoDirect, true);
+        assert.equal(util.expenses[0].autoCard, undefined);
     });
 
     test('moves auto expense when the cost is reassigned to another budget', () => {

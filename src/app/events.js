@@ -176,9 +176,9 @@ function setupEventListeners() {
             const row = delExp.closest('.budget-expense-row');
             if (row) {
                 row.classList.add('expense-removing');
-                setTimeout(() => deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId), 280);
+                setTimeout(() => (async () => await deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId))().catch(err => reportError('Delete failed', err)), 280);
             } else {
-                deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId);
+                (async () => await deleteExpense(delExp.dataset.budgetId, delExp.dataset.expenseId))().catch(err => reportError('Delete failed', err));
             }
             return;
         }
@@ -190,7 +190,7 @@ function setupEventListeners() {
         if (editBudget) { openBudgetModal(editBudget.dataset.budgetId); return; }
 
         const delBudget = e.target.closest('.btn-delete-budget');
-        if (delBudget) { deleteBudget(delBudget.dataset.budgetId); return; }
+        if (delBudget) { (async () => await deleteBudget(delBudget.dataset.budgetId))().catch(err => reportError('Delete failed', err)); return; }
     });
 
     // ── Expense-entry defaults (persisted prefs in the Budgets header) ───────
@@ -270,7 +270,7 @@ function setupEventListeners() {
             return;
         }
         if (!payload?.expenseId) return;
-        moveExpenseToBudget(payload.expenseId, payload.budgetId, card.dataset.budgetId);
+        (async () => await moveExpenseToBudget(payload.expenseId, payload.budgetId, card.dataset.budgetId))().catch(err => reportError('Move failed', err));
     });
 
     // ── Drag & drop: re-date expenses in the cash flow plan ──────────────────
