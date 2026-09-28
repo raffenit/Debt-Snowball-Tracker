@@ -16,6 +16,10 @@ import { launchConfetti } from './render-support.js';
 
 // ─── Debt Modal ──────────────────────────────────────────────────────────────
 function openDebtModal(debtId = null) {
+    if (appState.viewingArchiveIndex !== null) {
+        showErrorToast('Debts cannot be edited in archive view. Use the "Current Month →" button to return to the live month.');
+        return;
+    }
     appState.debtForm.reset();
     appState._root.getElementById('debt-id').value = '';
 
@@ -45,6 +49,9 @@ function openDebtModal(debtId = null) {
             appState._root.getElementById('debt-due-day').value     = debt.dueDay || '';
             appState._root.getElementById('debt-autopay-toggle').checked = !!debt.autoPay;
             appState._root.getElementById('debt-url').value = debt.paymentUrl || '';
+            // Show "Pay Off in Full" button only for existing debts with balance > 0
+            const payoffBtn = appState._root.getElementById('payoff-debt-btn');
+            if (payoffBtn) payoffBtn.style.display = debt.balance > 0 ? 'inline-block' : 'none';
             if (debt.promoZeroInterest) {
                 promoToggle.checked = true;
                 promoExpiryGroup.style.display = 'block';
@@ -58,6 +65,8 @@ function openDebtModal(debtId = null) {
     } else {
         appState._root.getElementById('modal-title').textContent = 'Add New Debt';
         appState._root.getElementById('debt-type').value = 'credit-card';
+        const payoffBtn = appState._root.getElementById('payoff-debt-btn');
+        if (payoffBtn) payoffBtn.style.display = 'none';
     }
 
     appState.debtModal.style.display = 'flex';
@@ -259,6 +268,26 @@ function deleteDebt(id) {
         delete appState.paidStatus[id];
         saveDataAndRender();
         showUndoToast('Debt deleted', () => { appState.debts.push(deleted); saveDataAndRender(); });
+    });
+}
+
+function payoffDebt() {
+    const id = appState._root.getElementById('debt-id').value;
+    if (!id) return;
+    const debt = appState.debts.find(d => d.id === id);
+    if (!debt) return;
+    if (!confirm(`Pay off "${debt.name}" in full? This will set the balance to $0 and mark it as paid for the current month.`)) return;
+    
+    const originalBalance = debt.balance;
+    debt.balance = 0;
+    appState.paidStatus[id] = true;
+    saveDataAndRender();
+    closeDebtModal();
+    launchConfetti();
+    showUndoToast('Debt paid off', () => {
+        debt.balance = originalBalance;
+        delete appState.paidStatus[id];
+        saveDataAndRender();
     });
 }
 
@@ -753,4 +782,4 @@ function renderUI() {
     if (schedule !== null) updateHASensors(simResults, schedule);
 }
 
-export { closeCostModal, closeDebtModal, closeIncomeModal, deleteCost, deleteDebt, deleteIncome, dismissToast, openCostModal, openDebtModal, openIncomeModal, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showInlineConfirm, showSanityWarningsModal, showSavedToast, showUndoToast, togglePaid, updateHASensors, updateIncomeScheduleHint };
+export { closeCostModal, closeDebtModal, closeIncomeModal, deleteCost, deleteDebt, deleteIncome, dismissToast, openCostModal, openDebtModal, openIncomeModal, payoffDebt, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showInlineConfirm, showSanityWarningsModal, showSavedToast, showUndoToast, togglePaid, updateHASensors, updateIncomeScheduleHint };

@@ -1135,6 +1135,25 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     box-shadow: none;
 }
 
+.btn-payoff-full {
+    background-color: var(--warning-color);
+    color: #07061a;
+    font-weight: 600;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-payoff-full:hover {
+    background-color: var(--warning-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.btn-payoff-full:active {
+    transform: scale(0.97) translateY(0);
+    box-shadow: none;
+}
+
 /* ===== Success Button ===== */
 .btn-success {
     background-color: var(--success-color);
@@ -4318,6 +4337,7 @@ const PANEL_HTML = `<div class="app-container">
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-debt-modal">Cancel</button>
+                    <button type="button" id="payoff-debt-btn" class="btn btn-warning" style="display:none;">Pay Off in Full</button>
                     <button type="submit" class="btn btn-primary">Save Debt</button>
                 </div>
             </form>
@@ -4573,6 +4593,7 @@ const PANEL_HTML = `<div class="app-container">
                 </div>
                 <div id="windfall-savings-banner" class="windfall-savings-banner"></div>
                 <div id="windfall-allocation" class="windfall-allocation"></div>
+                <button id="windfall-apply-btn" class="btn btn-success" style="width:100%;margin-top:1rem;display:none;">Apply This Payment</button>
             </div>
         </div>
     </div>

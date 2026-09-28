@@ -139,6 +139,10 @@ function calcWindfall() {
         banner.innerHTML   = `This windfall would fully eliminate your debt — congratulations!`;
     }
 
+    // Show apply button
+    const applyBtn = appState._root.getElementById('windfall-apply-btn');
+    if (applyBtn) applyBtn.style.display = 'block';
+
     // Show per-debt allocation
     const alloc = appState._root.getElementById('windfall-allocation');
     alloc.innerHTML = '<div class="windfall-alloc-title">Optimal allocation:</div>';
@@ -153,6 +157,37 @@ function calcWindfall() {
     });
 
     appState._root.getElementById('windfall-results').style.display = 'block';
+}
+
+function applyWindfall() {
+    const amount = parseFloat(appState._root.getElementById('windfall-amount').value);
+    if (!amount || amount <= 0) { showNotificationToast('Enter a windfall amount first.', 'error'); return; }
+
+    const result = runSimulationWithWindfall(amount, appState.strategy);
+    if (!result.valid) { showNotificationToast('Cannot apply payment — simulation failed.', 'error'); return; }
+
+    // Apply the windfall to actual debt balances
+    // result.allocation contains { name, applied } for each debt in strategy order
+    const ordered = getStrategyOrder(appState.debts, appState.strategy);
+    const originalBalances = {};
+    result.allocation.forEach((a, idx) => {
+        const debt = ordered[idx];
+        if (debt) {
+            originalBalances[debt.id] = debt.balance;
+            debt.balance = Math.max(0, debt.balance - a.applied);
+        }
+    });
+
+    saveDataAndRender();
+    closeWindfallModal();
+    launchConfetti();
+    showUndoToast('Windfall applied', () => {
+        Object.entries(originalBalances).forEach(([id, bal]) => {
+            const debt = appState.debts.find(d => d.id === id);
+            if (debt) debt.balance = bal;
+        });
+        saveDataAndRender();
+    });
 }
 
 function runSimulationWithWindfall(windfall, strat) {
@@ -305,4 +340,4 @@ function initTabs() {
 }
 
 
-export { autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, initTabs, launchConfetti, maybeShowCheckin, openWindfallModal, runSimulationWithWindfall, showAutoMinHint, startCountdown, stopCountdown, updateAutoMinHint, updateCountdownDisplay };
+export { applyWindfall, autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, initTabs, launchConfetti, maybeShowCheckin, openWindfallModal, runSimulationWithWindfall, showAutoMinHint, startCountdown, stopCountdown, updateAutoMinHint, updateCountdownDisplay };

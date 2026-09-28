@@ -3,7 +3,8 @@ import { currentMonthKey, formatMonthLabel, intervalLabel, isCostDueThisMonth, k
 import { cardChargesByDebt } from '../core/card-expenses.js';
 import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
 import { getStrategyOrder } from '../core/simulation.js';
-import { deleteCost, deleteDebt, deleteIncome, openCostModal, openDebtModal, openIncomeModal, togglePaid } from './render-modals.js';
+import { deleteCost, deleteDebt, deleteIncome, openCostModal, openDebtModal, openIncomeModal, showErrorToast, togglePaid } from './render-modals.js';
+import { launchConfetti } from './render-support.js';
 
 // ─── Income List ─────────────────────────────────────────────────────────────
 function renderIncomeList() {
@@ -425,9 +426,41 @@ function renderDebtsList(simResults) {
         appendSection(regularDebts, promoDebts.length, header);
     }
 
-    appState.debtsListContainer.querySelectorAll('.btn-edit').forEach(b   => b.addEventListener('click', e => openDebtModal(e.target.dataset.id)));
-    appState.debtsListContainer.querySelectorAll('.btn-delete').forEach(b => b.addEventListener('click', e => deleteDebt(e.target.dataset.id)));
-    appState.debtsListContainer.querySelectorAll('.btn-mark-paid').forEach(b => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === 'true')));
+    appState.debtsListContainer.querySelectorAll('.btn-edit').forEach(b   => b.addEventListener('click', e => {
+        if (isArchiveView) {
+            showErrorToast('Debts cannot be edited in archive view. Use the "Current Month →" button to return to the live month.');
+            return;
+        }
+        openDebtModal(e.target.dataset.id);
+    }));
+    appState.debtsListContainer.querySelectorAll('.btn-delete').forEach(b => b.addEventListener('click', e => {
+        if (isArchiveView) {
+            showErrorToast('Debts cannot be deleted in archive view. Use the "Current Month →" button to return to the live month.');
+            return;
+        }
+        deleteDebt(e.target.dataset.id);
+    }));
+    appState.debtsListContainer.querySelectorAll('.btn-mark-paid').forEach(b => b.addEventListener('click', e => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === '1')));
+    appState.debtsListContainer.querySelectorAll('.btn-payoff-full').forEach(b => b.addEventListener('click', e => {
+        if (isArchiveView) {
+            showErrorToast('Debts cannot be paid off in archive view. Use the "Current Month →" button to return to the live month.');
+            return;
+        }
+        const id = e.target.dataset.id;
+        const debt = appState.debts.find(d => d.id === id);
+        if (!debt) return;
+        if (!confirm(`Pay off "${debt.name}" in full? This will set the balance to $0 and mark it as paid for the current month.`)) return;
+        const originalBalance = debt.balance;
+        debt.balance = 0;
+        appState.paidStatus[id] = true;
+        saveDataAndRender();
+        launchConfetti();
+        showUndoToast('Debt paid off', () => {
+            debt.balance = originalBalance;
+            delete appState.paidStatus[id];
+            saveDataAndRender();
+        });
+    }));
 }
 
 function buildPaidButton(id, autoPay, paidState, isPastDue) {
@@ -441,7 +474,12 @@ function buildPaidButton(id, autoPay, paidState, isPastDue) {
             return `<button class="btn" disabled style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); width: 100%; font-size: 0.8rem; padding: 0.5rem 1rem; cursor: not-allowed;">⚡ Scheduled for Auto-Pay</button>`;
         }
     }
-    return `<button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false">Mark as Paid This Month</button>`;
+    // Two buttons: mark paid this month, or pay off in full
+    return `
+        <div style="display:flex; gap:0.5rem; width:100%;">
+            <button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false" style="flex:1;">Mark Paid</button>
+            <button class="btn btn-warning btn-payoff-full" data-id="${id}" style="flex:1;">Pay Off Full</button>
+        </div>`;
 }
 
 function buildPaidOverlay(autoPay) {

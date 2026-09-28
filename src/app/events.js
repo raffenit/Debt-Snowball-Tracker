@@ -3,7 +3,8 @@ import { currentMonthKey } from '../core/date-utils.js';
 import { formatOrdinal } from '../core/pure-utils.js';
 import { advanceToNextMonth } from './advance.js';
 import { closeArchiveModal, openArchiveModal, updateCostModalIntervalVisibility } from './modals.js';
-import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSanityWarningsModal, showSavedToast, togglePaid, updateIncomeScheduleHint } from './render-modals.js';
+import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, payoffDebt, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSanityWarningsModal, showSavedToast, togglePaid, updateIncomeScheduleHint } from './render-modals.js';
+import { applyWindfall, autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, openWindfallModal, updateAutoMinHint } from './render-support.js';
 import { closeCheckpointModal, openCheckpointModal, renderCheckpointsList, saveCheckpoint } from './render-checkpoints.js';
 import { closeBudgetModal, closeExpenseModal, convertExpenseToBill, deleteBudget, deleteExpense, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
 import { reorderBudgets } from '../core/budgets.js';
@@ -12,7 +13,6 @@ import { exportData, importData } from './render-export.js';
 import { saveData, saveDataAndRender, createServerBackup } from './storage.js';
 import { reportError } from './error-report.js';
 import { renderPaymentPlan } from './render-payment.js';
-import { autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, openWindfallModal, updateAutoMinHint } from './render-support.js';
 
 // ─── Event Listeners ─────────────────────────────────────────────────────────
 function setupEventListeners() {
@@ -345,6 +345,7 @@ function setupEventListeners() {
     appState._root.querySelectorAll('.close-checkpoint-modal').forEach(b  => b.addEventListener('click', closeCheckpointModal));
 
     appState.debtForm.addEventListener('submit',       e => { e.preventDefault(); saveDebt(); });
+    appState._root.getElementById('payoff-debt-btn')?.addEventListener('click', payoffDebt);
     appState.checkpointForm.addEventListener('submit', e => { e.preventDefault(); saveCheckpoint(); });
     appState.costForm.addEventListener('submit',       e => { e.preventDefault(); saveCost(); });
     appState.incomeForm.addEventListener('submit',     e => { e.preventDefault(); saveIncome(); });
@@ -440,6 +441,7 @@ function setupEventListeners() {
     appState._root.getElementById('windfall-btn').addEventListener('click', openWindfallModal);
     appState._root.getElementById('close-windfall-modal').addEventListener('click', closeWindfallModal);
     appState._root.getElementById('windfall-calc-btn').addEventListener('click', calcWindfall);
+    appState._root.getElementById('windfall-apply-btn')?.addEventListener('click', applyWindfall);
     appState.windfallModal.addEventListener('click', e => { if (e.target === appState.windfallModal) closeWindfallModal(); });
 
     // Check-in modal

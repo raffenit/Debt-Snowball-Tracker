@@ -1386,6 +1386,8 @@ var DebtSnowballApp = (() => {
       banner.className = "windfall-savings-banner";
       banner.innerHTML = `This windfall would fully eliminate your debt \u2014 congratulations!`;
     }
+    const applyBtn = appState._root.getElementById("windfall-apply-btn");
+    if (applyBtn) applyBtn.style.display = "block";
     const alloc = appState._root.getElementById("windfall-allocation");
     alloc.innerHTML = '<div class="windfall-alloc-title">Optimal allocation:</div>';
     windfallResult.allocation.forEach((a) => {
@@ -1398,6 +1400,37 @@ var DebtSnowballApp = (() => {
             </div>`;
     });
     appState._root.getElementById("windfall-results").style.display = "block";
+  }
+  function applyWindfall() {
+    const amount = parseFloat(appState._root.getElementById("windfall-amount").value);
+    if (!amount || amount <= 0) {
+      showNotificationToast("Enter a windfall amount first.", "error");
+      return;
+    }
+    const result = runSimulationWithWindfall(amount, appState.strategy);
+    if (!result.valid) {
+      showNotificationToast("Cannot apply payment \u2014 simulation failed.", "error");
+      return;
+    }
+    const ordered = getStrategyOrder(appState.debts, appState.strategy);
+    const originalBalances = {};
+    result.allocation.forEach((a, idx) => {
+      const debt = ordered[idx];
+      if (debt) {
+        originalBalances[debt.id] = debt.balance;
+        debt.balance = Math.max(0, debt.balance - a.applied);
+      }
+    });
+    saveDataAndRender();
+    closeWindfallModal();
+    launchConfetti();
+    showUndoToast("Windfall applied", () => {
+      Object.entries(originalBalances).forEach(([id, bal]) => {
+        const debt = appState.debts.find((d) => d.id === id);
+        if (debt) debt.balance = bal;
+      });
+      saveDataAndRender();
+    });
   }
   function runSimulationWithWindfall(windfall, strat) {
     let simDebts = appState.debts.map((d) => ({ ...d }));
@@ -1522,7 +1555,7 @@ var DebtSnowballApp = (() => {
     preserveRawConfig: () => preserveRawConfig,
     saveArchiveEdit: () => saveArchiveEdit,
     saveData: () => saveData,
-    saveDataAndRender: () => saveDataAndRender
+    saveDataAndRender: () => saveDataAndRender2
   });
   async function ensureDashboard(urlPath, title) {
     const conn = appState._root._hass.connection;
@@ -1789,7 +1822,7 @@ var DebtSnowballApp = (() => {
     }
     return out.sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
   }
-  function saveDataAndRender() {
+  function saveDataAndRender2() {
     if (appState.viewingArchiveIndex !== null && appState.monthlyArchives[appState.viewingArchiveIndex]) {
       return saveArchiveEdit();
     }
@@ -1997,8 +2030,8 @@ var DebtSnowballApp = (() => {
       const idx = appState.monthlyArchives.findIndex((a) => monthKeyToIndex(a.month) < monthKeyToIndex(monthKey));
       if (idx === -1) appState.monthlyArchives.push(archive);
       else appState.monthlyArchives.splice(idx, 0, archive);
-      const { saveDataAndRender: saveDataAndRender2 } = await Promise.resolve().then(() => (init_storage(), storage_exports));
-      await saveDataAndRender2();
+      const { saveDataAndRender: saveDataAndRender3 } = await Promise.resolve().then(() => (init_storage(), storage_exports));
+      await saveDataAndRender3();
       openArchiveModal();
       showSavedToast2(`${archive.label} added \u2014 open it via \u2039 Prev Month to fill in details \u2713`);
     });
@@ -2524,7 +2557,7 @@ This replaces ALL current data with that snapshot.`)) {
       } else {
         appState.spendingBudgets.push({ id: Date.now().toString(), name, amount, exception, expenses: [] });
       }
-      await saveDataAndRender();
+      await saveDataAndRender2();
       closeBudgetModal();
       renderSpendingBudgets();
       showSavedToast(id ? "Budget updated \u2713" : "Budget added \u2713");
@@ -2539,7 +2572,7 @@ This replaces ALL current data with that snapshot.`)) {
     if (!confirm(`Delete the "${budget.name}" budget and all its expenses for this month?`)) return;
     appState.spendingBudgets = appState.spendingBudgets.filter((b) => b.id !== id);
     appState.expandedBudgets.delete(id);
-    await saveDataAndRender();
+    await saveDataAndRender2();
     renderSpendingBudgets();
     showSavedToast("Budget deleted \u2713");
   }
@@ -2653,7 +2686,7 @@ This replaces ALL current data with that snapshot.`)) {
         if (!target.expenses) target.expenses = [];
         target.expenses.push({ id: Date.now().toString(), description, amount, date, paymentMethod, cardDebtId });
       }
-      await saveDataAndRender();
+      await saveDataAndRender2();
       closeExpenseModal();
       appState.expandedBudgets.add(targetBudgetId);
       renderSpendingBudgets();
@@ -2672,7 +2705,7 @@ This replaces ALL current data with that snapshot.`)) {
     from.expenses = from.expenses.filter((e) => e.id !== expenseId);
     if (!to.expenses) to.expenses = [];
     to.expenses.push(exp);
-    await saveDataAndRender();
+    await saveDataAndRender2();
     renderSpendingBudgets();
     showSavedToast(`Moved to ${to.name} \u2713`);
     return true;
@@ -2687,12 +2720,12 @@ This replaces ALL current data with that snapshot.`)) {
       appState.cardExpenseSkips.push(skipKey);
     }
     budget.expenses = budget.expenses.filter((e) => e.id !== expenseId);
-    await saveDataAndRender();
+    await saveDataAndRender2();
     renderSpendingBudgets();
-    showUndoToast("Expense deleted", async () => {
+    showUndoToast2("Expense deleted", async () => {
       if (skipKey) appState.cardExpenseSkips = appState.cardExpenseSkips.filter((k) => k !== skipKey);
       budget.expenses.push(deleted);
-      await saveDataAndRender();
+      await saveDataAndRender2();
       renderSpendingBudgets();
     });
   }
@@ -3026,9 +3059,41 @@ This replaces ALL current data with that snapshot.`)) {
       }
       appendSection(regularDebts, promoDebts.length, header);
     }
-    appState.debtsListContainer.querySelectorAll(".btn-edit").forEach((b) => b.addEventListener("click", (e) => openDebtModal(e.target.dataset.id)));
-    appState.debtsListContainer.querySelectorAll(".btn-delete").forEach((b) => b.addEventListener("click", (e) => deleteDebt(e.target.dataset.id)));
-    appState.debtsListContainer.querySelectorAll(".btn-mark-paid").forEach((b) => b.addEventListener("click", (e) => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === "true")));
+    appState.debtsListContainer.querySelectorAll(".btn-edit").forEach((b) => b.addEventListener("click", (e) => {
+      if (isArchiveView) {
+        showErrorToast('Debts cannot be edited in archive view. Use the "Current Month \u2192" button to return to the live month.');
+        return;
+      }
+      openDebtModal(e.target.dataset.id);
+    }));
+    appState.debtsListContainer.querySelectorAll(".btn-delete").forEach((b) => b.addEventListener("click", (e) => {
+      if (isArchiveView) {
+        showErrorToast('Debts cannot be deleted in archive view. Use the "Current Month \u2192" button to return to the live month.');
+        return;
+      }
+      deleteDebt(e.target.dataset.id);
+    }));
+    appState.debtsListContainer.querySelectorAll(".btn-mark-paid").forEach((b) => b.addEventListener("click", (e) => togglePaid(e.currentTarget.dataset.id, e.currentTarget.dataset.autopay === "1")));
+    appState.debtsListContainer.querySelectorAll(".btn-payoff-full").forEach((b) => b.addEventListener("click", (e) => {
+      if (isArchiveView) {
+        showErrorToast('Debts cannot be paid off in archive view. Use the "Current Month \u2192" button to return to the live month.');
+        return;
+      }
+      const id = e.target.dataset.id;
+      const debt = appState.debts.find((d) => d.id === id);
+      if (!debt) return;
+      if (!confirm(`Pay off "${debt.name}" in full? This will set the balance to $0 and mark it as paid for the current month.`)) return;
+      const originalBalance = debt.balance;
+      debt.balance = 0;
+      appState.paidStatus[id] = true;
+      saveDataAndRender();
+      launchConfetti();
+      showUndoToast("Debt paid off", () => {
+        debt.balance = originalBalance;
+        delete appState.paidStatus[id];
+        saveDataAndRender();
+      });
+    }));
   }
   function buildPaidButton(id, autoPay, paidState, isPastDue) {
     if (paidState) {
@@ -3041,7 +3106,11 @@ This replaces ALL current data with that snapshot.`)) {
         return `<button class="btn" disabled style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); width: 100%; font-size: 0.8rem; padding: 0.5rem 1rem; cursor: not-allowed;">\u26A1 Scheduled for Auto-Pay</button>`;
       }
     }
-    return `<button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false">Mark as Paid This Month</button>`;
+    return `
+        <div style="display:flex; gap:0.5rem; width:100%;">
+            <button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false" style="flex:1;">Mark Paid</button>
+            <button class="btn btn-warning btn-payoff-full" data-id="${id}" style="flex:1;">Pay Off Full</button>
+        </div>`;
   }
   function buildPaidOverlay(autoPay) {
     return `
@@ -3058,6 +3127,7 @@ This replaces ALL current data with that snapshot.`)) {
       init_pure_utils();
       init_simulation();
       init_render_modals();
+      init_render_support();
     }
   });
 
@@ -4126,6 +4196,7 @@ This replaces ALL current data with that snapshot.`)) {
     openCostModal: () => openCostModal,
     openDebtModal: () => openDebtModal,
     openIncomeModal: () => openIncomeModal,
+    payoffDebt: () => payoffDebt,
     renderUI: () => renderUI,
     saveCost: () => saveCost,
     saveDebt: () => saveDebt,
@@ -4134,12 +4205,16 @@ This replaces ALL current data with that snapshot.`)) {
     showInlineConfirm: () => showInlineConfirm,
     showSanityWarningsModal: () => showSanityWarningsModal,
     showSavedToast: () => showSavedToast,
-    showUndoToast: () => showUndoToast,
+    showUndoToast: () => showUndoToast2,
     togglePaid: () => togglePaid,
     updateHASensors: () => updateHASensors,
     updateIncomeScheduleHint: () => updateIncomeScheduleHint
   });
   function openDebtModal(debtId = null) {
+    if (appState.viewingArchiveIndex !== null) {
+      showErrorToast('Debts cannot be edited in archive view. Use the "Current Month \u2192" button to return to the live month.');
+      return;
+    }
     appState.debtForm.reset();
     appState._root.getElementById("debt-id").value = "";
     const promoToggle = appState._root.getElementById("debt-promo-toggle");
@@ -4166,6 +4241,8 @@ This replaces ALL current data with that snapshot.`)) {
         appState._root.getElementById("debt-due-day").value = debt.dueDay || "";
         appState._root.getElementById("debt-autopay-toggle").checked = !!debt.autoPay;
         appState._root.getElementById("debt-url").value = debt.paymentUrl || "";
+        const payoffBtn = appState._root.getElementById("payoff-debt-btn");
+        if (payoffBtn) payoffBtn.style.display = debt.balance > 0 ? "inline-block" : "none";
         if (debt.promoZeroInterest) {
           promoToggle.checked = true;
           promoExpiryGroup.style.display = "block";
@@ -4179,6 +4256,8 @@ This replaces ALL current data with that snapshot.`)) {
     } else {
       appState._root.getElementById("modal-title").textContent = "Add New Debt";
       appState._root.getElementById("debt-type").value = "credit-card";
+      const payoffBtn = appState._root.getElementById("payoff-debt-btn");
+      if (payoffBtn) payoffBtn.style.display = "none";
     }
     appState.debtModal.style.display = "flex";
     void appState.debtModal.offsetWidth;
@@ -4342,7 +4421,7 @@ This replaces ALL current data with that snapshot.`)) {
       } else {
         appState.debts.push({ id: Date.now().toString(), ...debtData });
       }
-      saveDataAndRender();
+      saveDataAndRender2();
       closeDebtModal();
       showSavedToast(id ? "Debt updated \u2713" : "Debt added \u2713");
     } catch (err) {
@@ -4354,11 +4433,29 @@ This replaces ALL current data with that snapshot.`)) {
       const deleted = appState.debts.find((d) => d.id === id);
       appState.debts = appState.debts.filter((d) => d.id !== id);
       delete appState.paidStatus[id];
-      saveDataAndRender();
-      showUndoToast("Debt deleted", () => {
+      saveDataAndRender2();
+      showUndoToast2("Debt deleted", () => {
         appState.debts.push(deleted);
-        saveDataAndRender();
+        saveDataAndRender2();
       });
+    });
+  }
+  function payoffDebt() {
+    const id = appState._root.getElementById("debt-id").value;
+    if (!id) return;
+    const debt = appState.debts.find((d) => d.id === id);
+    if (!debt) return;
+    if (!confirm(`Pay off "${debt.name}" in full? This will set the balance to $0 and mark it as paid for the current month.`)) return;
+    const originalBalance = debt.balance;
+    debt.balance = 0;
+    appState.paidStatus[id] = true;
+    saveDataAndRender2();
+    closeDebtModal();
+    launchConfetti();
+    showUndoToast2("Debt paid off", () => {
+      debt.balance = originalBalance;
+      delete appState.paidStatus[id];
+      saveDataAndRender2();
     });
   }
   function saveCost() {
@@ -4415,7 +4512,7 @@ This replaces ALL current data with that snapshot.`)) {
           }
         }
       }
-      saveDataAndRender();
+      saveDataAndRender2();
       closeCostModal();
       showSavedToast(id ? "Bill updated \u2713" : "Bill added \u2713");
     } catch (err) {
@@ -4436,14 +4533,14 @@ This replaces ALL current data with that snapshot.`)) {
           appState.oneTimeCosts = appState.oneTimeCosts.filter((c) => c.id !== id);
         }
         delete appState.paidStatus[id];
-        saveDataAndRender();
-        showUndoToast("Bill deleted", () => {
+        saveDataAndRender2();
+        showUndoToast2("Bill deleted", () => {
           if (isRecurring) {
             appState.recurringCosts = [...appState.recurringCosts, deleted];
           } else {
             appState.oneTimeCosts = [...appState.oneTimeCosts, deleted];
           }
-          saveDataAndRender();
+          saveDataAndRender2();
         });
       }
     });
@@ -4489,7 +4586,7 @@ This replaces ALL current data with that snapshot.`)) {
       } else {
         appState.incomeEntries.push({ id: Date.now().toString(), ...entryBase });
       }
-      saveDataAndRender();
+      saveDataAndRender2();
       closeIncomeModal();
       showSavedToast(id ? "Income updated \u2713" : "Income added \u2713");
     } catch (err) {
@@ -4500,10 +4597,10 @@ This replaces ALL current data with that snapshot.`)) {
     showInlineConfirm(id, "income", () => {
       const deleted = appState.incomeEntries.find((e) => e.id === id);
       appState.incomeEntries = appState.incomeEntries.filter((e) => e.id !== id);
-      saveDataAndRender();
-      showUndoToast("Income entry deleted", () => {
+      saveDataAndRender2();
+      showUndoToast2("Income entry deleted", () => {
         appState.incomeEntries.push(deleted);
-        saveDataAndRender();
+        saveDataAndRender2();
       });
     });
   }
@@ -4558,7 +4655,7 @@ This replaces ALL current data with that snapshot.`)) {
         card.style.opacity = "";
       }, 160);
     }
-    saveDataAndRender();
+    saveDataAndRender2();
   }
   function showInlineConfirm(id, type, onConfirm) {
     const selector = type === "debt" ? ".btn-delete" : type === "cost" ? ".btn-delete-cost" : ".btn-delete-income";
@@ -4585,7 +4682,7 @@ This replaces ALL current data with that snapshot.`)) {
       }
     });
   }
-  function showUndoToast(message, onUndo) {
+  function showUndoToast2(message, onUndo) {
     const existing = appState._root.getElementById("undo-toast");
     if (existing) existing.remove();
     if (undoToastTimer) clearTimeout(undoToastTimer);
@@ -4855,6 +4952,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
   // src/app/events.js
   init_modals();
   init_render_modals();
+  init_render_support();
   init_render_checkpoints();
   init_render_budgets();
   init_budgets();
@@ -4863,7 +4961,6 @@ One-time bills will be removed, income will be cleared, and interval bills will 
   init_storage();
   init_error_report();
   init_render_payment();
-  init_render_support();
   function setupEventListeners() {
     appState._root.addEventListener("click", (e) => {
       const btn = e.target.closest(".btn");
@@ -4966,7 +5063,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
         budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date, paymentMethod: method, cardDebtId });
         appState.inlineExpenseBudget = null;
         appState.expandedBudgets.add(bid);
-        saveDataAndRender().then(() => {
+        saveDataAndRender2().then(() => {
           renderSpendingBudgets();
           showSavedToast("Expense added \u2713");
         }).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
@@ -4991,7 +5088,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
           const cardId = cards.some((d) => d.id === prefCard) ? prefCard : cards.length === 1 ? cards[0].id : void 0;
           if (cardId) exp.cardDebtId = cardId;
         }
-        saveDataAndRender();
+        saveDataAndRender2();
         showSavedToast(toCard ? "Marked as card charge \u2014 removed from cash flow \u{1F4B3}" : "Marked as cash/debit \u2014 back in cash flow \u{1F3E6}");
         return;
       }
@@ -5034,11 +5131,11 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     });
     appState._root.getElementById("expense-default-method")?.addEventListener("change", (e) => {
       appState.expenseDefaults = { ...appState.expenseDefaults || {}, paymentMethod: e.target.value };
-      saveDataAndRender();
+      saveDataAndRender2();
     });
     appState._root.getElementById("expense-default-card")?.addEventListener("change", (e) => {
       appState.expenseDefaults = { ...appState.expenseDefaults || {}, cardDebtId: e.target.value || null };
-      saveDataAndRender();
+      saveDataAndRender2();
     });
     const budgetsList = appState._root.getElementById("budgets-list");
     budgetsList.addEventListener("dragstart", (e) => {
@@ -5106,7 +5203,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
         const next = reorderBudgets(appState.spendingBudgets, payload.budgetDragId, card.dataset.budgetId);
         if (next === appState.spendingBudgets) return;
         appState.spendingBudgets = next;
-        saveDataAndRender().then(() => showSavedToast("Budget order updated \u2713")).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
+        saveDataAndRender2().then(() => showSavedToast("Budget order updated \u2713")).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
         return;
       }
       if (!payload?.expenseId) return;
@@ -5164,7 +5261,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       const newDate = `${y}-${String(m + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
       if (exp.date === newDate) return;
       exp.date = newDate;
-      saveDataAndRender();
+      saveDataAndRender2();
       showSavedToast(`Expense moved to ${formatOrdinal(day)} \u2713`);
     });
     appState._root.getElementById("budgets-list").addEventListener("keydown", (e) => {
@@ -5187,6 +5284,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       e.preventDefault();
       saveDebt();
     });
+    appState._root.getElementById("payoff-debt-btn")?.addEventListener("click", payoffDebt);
     appState.checkpointForm.addEventListener("submit", (e) => {
       e.preventDefault();
       saveCheckpoint();
@@ -5267,6 +5365,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     appState._root.getElementById("windfall-btn").addEventListener("click", openWindfallModal);
     appState._root.getElementById("close-windfall-modal").addEventListener("click", closeWindfallModal);
     appState._root.getElementById("windfall-calc-btn").addEventListener("click", calcWindfall);
+    appState._root.getElementById("windfall-apply-btn")?.addEventListener("click", applyWindfall);
     appState.windfallModal.addEventListener("click", (e) => {
       if (e.target === appState.windfallModal) closeWindfallModal();
     });
@@ -5343,13 +5442,13 @@ One-time bills will be removed, income will be cleared, and interval bills will 
           return;
         }
         appState.minPayOverrides[id] = val;
-        saveDataAndRender();
+        saveDataAndRender2();
         return;
       }
       const clearBtn = e.target.closest(".btn-override-clear");
       if (clearBtn) {
         delete appState.minPayOverrides[clearBtn.dataset.id];
-        saveDataAndRender();
+        saveDataAndRender2();
         return;
       }
     });
@@ -6553,6 +6652,25 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 .btn-warning:active {
+    transform: scale(0.97) translateY(0);
+    box-shadow: none;
+}
+
+.btn-payoff-full {
+    background-color: var(--warning-color);
+    color: #07061a;
+    font-weight: 600;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-payoff-full:hover {
+    background-color: var(--warning-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.btn-payoff-full:active {
     transform: scale(0.97) translateY(0);
     box-shadow: none;
 }
@@ -9739,6 +9857,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-debt-modal">Cancel</button>
+                    <button type="button" id="payoff-debt-btn" class="btn btn-warning" style="display:none;">Pay Off in Full</button>
                     <button type="submit" class="btn btn-primary">Save Debt</button>
                 </div>
             </form>
@@ -9994,6 +10113,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                 </div>
                 <div id="windfall-savings-banner" class="windfall-savings-banner"></div>
                 <div id="windfall-allocation" class="windfall-allocation"></div>
+                <button id="windfall-apply-btn" class="btn btn-success" style="width:100%;margin-top:1rem;display:none;">Apply This Payment</button>
             </div>
         </div>
     </div>
