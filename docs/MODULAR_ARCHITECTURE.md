@@ -25,6 +25,11 @@ src/app/                →   esbuild (bundle: true)   →   dist/debt-snowball-
 
 ## Module Reference
 
+### `src/core/cash-flow.js` — Cash-Flow Summary Aggregation
+- **Purpose**: Totals income and expenditures from the complete planned cash-flow event stream used by Month Overview.
+- **Dependencies**: None; pure and directly unit tested.
+- **Why extract**: Keeps fixed bills, one-time costs, manual cash expenses, debt overrides, and pay-in-full events in one summary source instead of rebuilding totals from the Budgets tab.
+
 ### `header.js` — Version & Installation Detection
 - **Purpose**: Sets `PANEL_VERSION`, `PANEL_BUILD_DATE`, and detects whether the card was loaded via HACS or manual install. Logs to console for debugging.
 - **Dependencies**: None

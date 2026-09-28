@@ -2467,6 +2467,115 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border: 1px solid rgba(91, 127, 255, 0.3);
 }
 
+/* ===== Month Overview ===== */
+.month-overview {
+    margin-bottom: 1.25rem;
+    padding: 1rem;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.05));
+    border: 1px solid rgba(99, 102, 241, 0.24);
+    border-radius: 12px;
+}
+
+.month-overview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 0.85rem;
+}
+
+.month-overview-title {
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.month-overview-subtitle {
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    text-align: right;
+}
+
+.month-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+.month-overview-metric {
+    min-width: 0;
+    padding: 0.75rem;
+    background: rgba(7, 6, 26, 0.38);
+    border: 1px solid rgba(99, 102, 241, 0.16);
+    border-radius: 8px;
+}
+
+.month-overview-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+}
+
+.month-overview-value {
+    display: block;
+    overflow-wrap: anywhere;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.month-overview-value.income {
+    color: var(--success-color);
+}
+
+.month-overview-value.expense {
+    color: var(--expense-color);
+}
+
+.month-overview-value.ending {
+    color: var(--primary-light);
+}
+
+.month-overview-carryover {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    padding: 0.75rem 0.9rem;
+    background: rgba(91, 127, 255, 0.1);
+    border: 1px solid rgba(91, 127, 255, 0.24);
+    border-radius: 8px;
+}
+
+.month-overview-carryover-label {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.month-overview-carryover-value {
+    color: var(--primary-light);
+    font-size: 1.2rem;
+    font-weight: 800;
+}
+
+@media (max-width: 760px) {
+    .month-overview-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.2rem;
+    }
+
+    .month-overview-subtitle {
+        text-align: left;
+    }
+
+    .month-overview-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 /* ===== Compact Forecast Bar ===== */
 .forecast-bar {
     display: flex;
@@ -4073,43 +4182,40 @@ const PANEL_HTML = `<div class="app-container">
 
                 <section id="payment-plan-section" class="card" style="display: none; margin-bottom: 1.5rem;">
                     <!-- Month Overview Dashboard (at top) -->
-                    <div style="margin-bottom: 1.25rem; padding: 1rem; background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(168,85,247,0.05) 100%); border-radius: 12px; border: 1px solid rgba(99,102,241,0.2);">
-                        <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; font-weight: 600;">📊 Month Overview</div>
-                        <div style="display: grid; grid-template-columns: repeat(2, 1fr) auto; gap: 1rem;">
-                            <!-- Start Balance -->
-                            <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                                <span style="font-size: 0.7rem; color: var(--text-secondary);">Day 1 Start</span>
-                                <span id="month-overview-start" style="font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">-</span>
+                    <div class="month-overview">
+                        <div class="month-overview-header">
+                            <div class="month-overview-title">📊 Month Overview</div>
+                            <div class="month-overview-subtitle">From the complete Cash Flow schedule</div>
+                        </div>
+
+                        <div class="month-overview-grid">
+                            <div class="month-overview-metric">
+                                <span class="month-overview-label">Starting balance</span>
+                                <span id="month-overview-start" class="month-overview-value">-</span>
                             </div>
-                            <!-- Income -->
-                            <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                                <span style="font-size: 0.7rem; color: var(--text-secondary);">+ Income</span>
-                                <span id="month-overview-income" style="font-size: 1.1rem; font-weight: 600; color: var(--success-color);">-</span>
+                            <div class="month-overview-metric">
+                                <span class="month-overview-label">Income</span>
+                                <span id="month-overview-income" class="month-overview-value income">-</span>
                             </div>
-                            <!-- Expenditures -->
-                            <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                                <span style="font-size: 0.7rem; color: var(--text-secondary);">− Cash Out</span>
-                                <span id="month-overview-expenses" style="font-size: 1.1rem; font-weight: 600; color: var(--expense-color);">-</span>
+                            <div class="month-overview-metric">
+                                <span class="month-overview-label">Expenditures</span>
+                                <span id="month-overview-expenses" class="month-overview-value expense">-</span>
                             </div>
+                            <div class="month-overview-metric">
+                                <span class="month-overview-label">Ending balance</span>
+                                <span id="month-overview-end" class="month-overview-value ending">-</span>
+                            </div>
+                        </div>
+
+                        <div class="month-overview-carryover">
+                            <span id="month-overview-next-label" class="month-overview-carryover-label">Next month starting balance</span>
+                            <span id="month-overview-next-start" class="month-overview-carryover-value">-</span>
                         </div>
 
                         <!-- Spending Budgets Summary (only shows if budgets exist) -->
                         <div id="month-overview-budgets" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(99,102,241,0.15);">
-                            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">💳 Spending Budgets (incl. auto-logged card charges)</div>
+                            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">💳 Budget status (including auto-logged card charges)</div>
                             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem;" id="month-overview-budgets-grid">
-                            </div>
-                        </div>
-
-                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(99,102,241,0.15); display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                            <!-- Next Month Start -->
-                            <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                                <span style="font-size: 0.7rem; color: var(--text-secondary);">= Next Month Start</span>
-                                <span id="month-overview-next-start" style="font-size: 1.2rem; font-weight: 700; color: var(--primary-light);">-</span>
-                            </div>
-                            <!-- Buffer -->
-                            <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                                <span style="font-size: 0.7rem; color: var(--text-secondary);">🛡️ Buffer (before 1st paycheck)</span>
-                                <span id="month-overview-buffer" style="font-size: 1.2rem; font-weight: 700; color: var(--success-color);">-</span>
                             </div>
                         </div>
                     </div>

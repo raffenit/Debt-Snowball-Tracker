@@ -1,8 +1,9 @@
 import { appState } from './state.js';
-import { addMonthsToKey, currentMonthKey, formatMonthLabel, generateRecurringIncomeForMonth, isCostDueInMonth, isCostDueThisMonth, keyToHtmlMonth } from '../core/date-utils.js';
+import { addMonthsToKey, currentMonthKey, formatMonthLabel, isCostDueInMonth, isCostDueThisMonth, keyToHtmlMonth } from '../core/date-utils.js';
 import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
 import { getStrategyOrder, simulatePayoff } from '../core/simulation.js';
 import { cashExpensesForMonth } from '../core/card-expenses.js';
+import { summarizeCashFlowEvents } from '../core/cash-flow.js';
 import { getBudgetAmount } from './render-budgets.js';
 import { renderPaydownChart, renderTimelineChart } from './render-charts.js';
 import { startCountdown, stopCountdown } from './render-support.js';
@@ -437,6 +438,7 @@ function renderPaymentPlan() {
     });
 
     events.sort((a,b) => a.sortKey - b.sortKey);
+    const monthTotals = summarizeCashFlowEvents(events);
 
     // Date-aware scheduling with card-passthrough logic
     // Initial cash = first checkpoint on day 1, or 0 if no day 1 checkpoint
@@ -558,69 +560,32 @@ function renderPaymentPlan() {
     }
 
     // --- Month Overview Dashboard ---
-    // Calculate month totals
-    const totalIncomeVal = _income.reduce((s, e) => s + e.amount, 0);
-    // Expenses = direct costs + debt payments (exclude card charges as they don't affect cash)
-    const totalDirectCosts = _costs
-        .filter(c => isCostDueInMonth(c, _monthKey) && c.paymentMethod !== 'card')
-        .reduce((s, c) => s + c.amount, 0);
-    const totalDebtPayments = sortedDebts
-        .reduce((s, d) => s + (_overrides[d.id] ?? d.minPayment), 0);
-    const totalExpensesVal = totalDirectCosts + totalDebtPayments + totalSpentManual;
-
-    // Next month start = Day 1 balance + all income - all cash expenses
-    // If there are appState.checkpoints, use the last checkpoint's balance as the base
-    const lastCheckpoint = _checkpoints.length > 0
-        ? [..._checkpoints].sort((a, b) => b.day - a.day)[0]
-        : null;
-
-    // Calculate final balance through the schedule
+    // Totals come from the complete planned cash-flow event stream. This keeps
+    // fixed and one-time bills, manual cash expenses, snowball payments,
+    // overrides, and pay-in-full events in one source of truth.
     const finalBalance = schedule.length > 0
         ? schedule[schedule.length - 1].balance
         : _startBal;
-
-    // Buffer = cash available before first income of NEXT month
-    // Find first income date of next month
     const nextMonthKey = addMonthsToKey(_monthKey, 1);
-    const nextMonthFirstDay = new Date(nextMonthKey.split('-')[0], parseInt(nextMonthKey.split('-')[1]), 1);
-
-    // Get income entries that would appear in next month
-    const nextMonthIncome = generateRecurringIncomeForMonth(_income, nextMonthKey);
-    const firstNextMonthIncome = nextMonthIncome.length > 0
-        ? [...nextMonthIncome].sort((a, b) => parseInt(a.date.split('-')[2]) - parseInt(b.date.split('-')[2]))[0]
-        : null;
-
-    // Buffer = final balance of this month (this is what carries over)
-    const bufferAmount = finalBalance;
 
     // Populate Month Overview
     const ovStart = appState._root.getElementById('month-overview-start');
     const ovIncome = appState._root.getElementById('month-overview-income');
     const ovExpenses = appState._root.getElementById('month-overview-expenses');
+    const ovEnd = appState._root.getElementById('month-overview-end');
     const ovNextStart = appState._root.getElementById('month-overview-next-start');
-    const ovBuffer = appState._root.getElementById('month-overview-buffer');
+    const ovNextLabel = appState._root.getElementById('month-overview-next-label');
 
-    // Get day 1 checkpoint amount (or 0 if none)
+    // A Day 1 bank sync is the strongest starting-balance signal. Fall back to
+    // the carried starting balance when no checkpoint exists.
     const day1Cp = _checkpoints.find(cp => cp.day === 1);
-    const day1Amount = day1Cp ? day1Cp.amount : 0;
-    if (ovStart) ovStart.textContent = formatMoney(day1Amount);
-    if (ovIncome) ovIncome.textContent = formatMoney(totalIncomeVal);
-    if (ovExpenses) ovExpenses.textContent = formatMoney(totalExpensesVal);
+    const monthStartBalance = day1Cp ? day1Cp.amount : _startBal;
+    if (ovStart) ovStart.textContent = formatMoney(monthStartBalance);
+    if (ovIncome) ovIncome.textContent = formatMoney(monthTotals.income);
+    if (ovExpenses) ovExpenses.textContent = formatMoney(monthTotals.expenditures);
+    if (ovEnd) ovEnd.textContent = formatMoney(finalBalance);
     if (ovNextStart) ovNextStart.textContent = formatMoney(finalBalance);
-
-    if (ovBuffer) {
-        // Color-code the buffer
-        let bufferColor = 'var(--success-color)';
-        let bufferIcon = '🛡️';
-        if (bufferAmount < 0) {
-            bufferColor = 'var(--danger-color)';
-            bufferIcon = '⚠️';
-        } else if (bufferAmount < 100) {
-            bufferColor = 'var(--warning-color)';
-            bufferIcon = '⚡';
-        }
-        ovBuffer.innerHTML = `<span style="color:${bufferColor};">${bufferIcon} ${formatMoney(bufferAmount)}</span>`;
-    }
+    if (ovNextLabel) ovNextLabel.textContent = `${formatMonthLabel(nextMonthKey)} starting balance`;
 
     // --- Spending Budgets Summary ---
     const ovBudgetsContainer = appState._root.getElementById('month-overview-budgets');
