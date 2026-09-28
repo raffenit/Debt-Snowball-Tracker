@@ -129,9 +129,10 @@ function setupEventListeners() {
             budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date, paymentMethod: method, cardDebtId });
             appState.inlineExpenseBudget = null;
             appState.expandedBudgets.add(bid);
-            saveDataAndRender();
-            renderSpendingBudgets();
-            showSavedToast('Expense added ✓');
+            saveDataAndRender().then(() => {
+                renderSpendingBudgets();
+                showSavedToast('Expense added ✓');
+            }).catch(err => reportError('Save failed — your change may not persist after reload', err));
             return;
         }
 
@@ -265,8 +266,7 @@ function setupEventListeners() {
             const next = reorderBudgets(appState.spendingBudgets, payload.budgetDragId, card.dataset.budgetId);
             if (next === appState.spendingBudgets) return;
             appState.spendingBudgets = next;
-            saveDataAndRender();
-            showSavedToast('Budget order updated ✓');
+            saveDataAndRender().then(() => showSavedToast('Budget order updated ✓')).catch(err => reportError('Save failed — your change may not persist after reload', err));
             return;
         }
         if (!payload?.expenseId) return;

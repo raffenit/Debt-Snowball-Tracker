@@ -1079,7 +1079,7 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.8.2";
+      PANEL_VERSION = "2.8.3";
       PANEL_BUILD_DATE = "2026-09-28";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
@@ -4880,9 +4880,10 @@ One-time bills will be removed, income will be cleared, and interval bills will 
         budget.expenses.push({ id: Date.now().toString(), description: desc, amount, date, paymentMethod: method, cardDebtId });
         appState.inlineExpenseBudget = null;
         appState.expandedBudgets.add(bid);
-        saveDataAndRender();
-        renderSpendingBudgets();
-        showSavedToast("Expense added \u2713");
+        saveDataAndRender().then(() => {
+          renderSpendingBudgets();
+          showSavedToast("Expense added \u2713");
+        }).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
         return;
       }
       const inlineCancel = e.target.closest(".btn-inline-cancel");
@@ -5019,8 +5020,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
         const next = reorderBudgets(appState.spendingBudgets, payload.budgetDragId, card.dataset.budgetId);
         if (next === appState.spendingBudgets) return;
         appState.spendingBudgets = next;
-        saveDataAndRender();
-        showSavedToast("Budget order updated \u2713");
+        saveDataAndRender().then(() => showSavedToast("Budget order updated \u2713")).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
         return;
       }
       if (!payload?.expenseId) return;
