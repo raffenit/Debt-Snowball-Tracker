@@ -1414,11 +1414,16 @@ var DebtSnowballApp = (() => {
     }
     const ordered = getStrategyOrder(appState.debts, appState.strategy);
     const originalBalances = {};
+    const originalOverrides = {};
     result.allocation.forEach((a, idx) => {
       const debt = ordered[idx];
       if (debt) {
         originalBalances[debt.id] = debt.balance;
+        originalOverrides[debt.id] = appState.minPayOverrides[debt.id];
         debt.balance = Math.max(0, debt.balance - a.applied);
+        if (debt.balance === 0 && a.applied > 0) {
+          appState.minPayOverrides[debt.id] = a.applied;
+        }
       }
     });
     saveDataAndRender();
@@ -1428,6 +1433,11 @@ var DebtSnowballApp = (() => {
       Object.entries(originalBalances).forEach(([id, bal]) => {
         const debt = appState.debts.find((d) => d.id === id);
         if (debt) debt.balance = bal;
+        if (originalOverrides[id] !== void 0) {
+          appState.minPayOverrides[id] = originalOverrides[id];
+        } else {
+          delete appState.minPayOverrides[id];
+        }
       });
       saveDataAndRender();
     });
@@ -3084,13 +3094,21 @@ This replaces ALL current data with that snapshot.`)) {
       if (!debt) return;
       if (!confirm(`Pay off "${debt.name}" in full? This will set the balance to $0 and mark it as paid for the current month.`)) return;
       const originalBalance = debt.balance;
+      const hadOverride = id in appState.minPayOverrides;
+      const originalOverride = appState.minPayOverrides[id];
       debt.balance = 0;
       appState.paidStatus[id] = true;
+      appState.minPayOverrides[id] = originalBalance;
       saveDataAndRender();
       launchConfetti();
       showUndoToast("Debt paid off", () => {
         debt.balance = originalBalance;
         delete appState.paidStatus[id];
+        if (hadOverride) {
+          appState.minPayOverrides[id] = originalOverride;
+        } else {
+          delete appState.minPayOverrides[id];
+        }
         saveDataAndRender();
       });
     }));
@@ -4447,14 +4465,22 @@ This replaces ALL current data with that snapshot.`)) {
     if (!debt) return;
     if (!confirm(`Pay off "${debt.name}" in full? This will set the balance to $0 and mark it as paid for the current month.`)) return;
     const originalBalance = debt.balance;
+    const hadOverride = id in appState.minPayOverrides;
+    const originalOverride = appState.minPayOverrides[id];
     debt.balance = 0;
     appState.paidStatus[id] = true;
+    appState.minPayOverrides[id] = originalBalance;
     saveDataAndRender2();
     closeDebtModal();
     launchConfetti();
     showUndoToast2("Debt paid off", () => {
       debt.balance = originalBalance;
       delete appState.paidStatus[id];
+      if (hadOverride) {
+        appState.minPayOverrides[id] = originalOverride;
+      } else {
+        delete appState.minPayOverrides[id];
+      }
       saveDataAndRender2();
     });
   }

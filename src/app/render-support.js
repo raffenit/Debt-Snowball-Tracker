@@ -170,11 +170,18 @@ function applyWindfall() {
     // result.allocation contains { name, applied } for each debt in strategy order
     const ordered = getStrategyOrder(appState.debts, appState.strategy);
     const originalBalances = {};
+    const originalOverrides = {};
     result.allocation.forEach((a, idx) => {
         const debt = ordered[idx];
         if (debt) {
             originalBalances[debt.id] = debt.balance;
+            originalOverrides[debt.id] = appState.minPayOverrides[debt.id];
             debt.balance = Math.max(0, debt.balance - a.applied);
+            // If this fully pays off the debt, set the override to the payment amount
+            // so it shows in cash flow for this month
+            if (debt.balance === 0 && a.applied > 0) {
+                appState.minPayOverrides[debt.id] = a.applied;
+            }
         }
     });
 
@@ -185,6 +192,11 @@ function applyWindfall() {
         Object.entries(originalBalances).forEach(([id, bal]) => {
             const debt = appState.debts.find(d => d.id === id);
             if (debt) debt.balance = bal;
+            if (originalOverrides[id] !== undefined) {
+                appState.minPayOverrides[id] = originalOverrides[id];
+            } else {
+                delete appState.minPayOverrides[id];
+            }
         });
         saveDataAndRender();
     });

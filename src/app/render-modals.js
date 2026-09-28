@@ -277,16 +277,25 @@ function payoffDebt() {
     const debt = appState.debts.find(d => d.id === id);
     if (!debt) return;
     if (!confirm(`Pay off "${debt.name}" in full? This will set the balance to $0 and mark it as paid for the current month.`)) return;
-    
+
     const originalBalance = debt.balance;
+    const hadOverride = id in appState.minPayOverrides;
+    const originalOverride = appState.minPayOverrides[id];
+
     debt.balance = 0;
     appState.paidStatus[id] = true;
+    appState.minPayOverrides[id] = originalBalance; // Show full payment in cash flow
     saveDataAndRender();
     closeDebtModal();
     launchConfetti();
     showUndoToast('Debt paid off', () => {
         debt.balance = originalBalance;
         delete appState.paidStatus[id];
+        if (hadOverride) {
+            appState.minPayOverrides[id] = originalOverride;
+        } else {
+            delete appState.minPayOverrides[id];
+        }
         saveDataAndRender();
     });
 }
