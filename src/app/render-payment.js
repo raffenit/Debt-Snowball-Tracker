@@ -587,7 +587,7 @@ function renderPaymentPlan() {
     if (ovNextStart) ovNextStart.textContent = formatMoney(finalBalance);
     if (ovNextLabel) ovNextLabel.textContent = `${formatMonthLabel(nextMonthKey)} starting balance`;
 
-    // --- Spending Budgets Summary ---
+    // --- Spending Budgets Summary (collapsed drawer; only shown if budgets exist) ---
     const ovBudgetsContainer = appState._root.getElementById('month-overview-budgets');
     const ovBudgetsGrid = appState._root.getElementById('month-overview-budgets-grid');
 
@@ -628,6 +628,14 @@ function renderPaymentPlan() {
         const totalBudgeted = budgetSummaries.reduce((s, b) => s + b.budgeted, 0);
         const totalSpent = budgetSummaries.reduce((s, b) => s + b.spent, 0);
         const totalRemaining = totalBudgeted - totalSpent;
+        const ovBudgetsTotals = appState._root.getElementById('month-overview-budgets-totals');
+        if (ovBudgetsTotals) {
+            ovBudgetsTotals.textContent = `${formatMoney(totalSpent)} / ${formatMoney(totalBudgeted)}`;
+            const usedPct = totalBudgeted > 0 ? (totalSpent / totalBudgeted) * 100 : 0;
+            ovBudgetsTotals.style.color = usedPct > 100 ? 'var(--danger-color)'
+                : usedPct > 80 ? 'var(--warning-color)'
+                : 'var(--text-primary)';
+        }
 
         ovBudgetsGrid.innerHTML += `
             <div style="background: rgba(168,85,247,0.1); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(168,85,247,0.3);">

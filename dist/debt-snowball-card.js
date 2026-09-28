@@ -3791,6 +3791,12 @@ This replaces ALL current data with that snapshot.`)) {
       const totalBudgeted = budgetSummaries.reduce((s, b) => s + b.budgeted, 0);
       const totalSpent = budgetSummaries.reduce((s, b) => s + b.spent, 0);
       const totalRemaining = totalBudgeted - totalSpent;
+      const ovBudgetsTotals = appState._root.getElementById("month-overview-budgets-totals");
+      if (ovBudgetsTotals) {
+        ovBudgetsTotals.textContent = `${formatMoney(totalSpent)} / ${formatMoney(totalBudgeted)}`;
+        const usedPct = totalBudgeted > 0 ? totalSpent / totalBudgeted * 100 : 0;
+        ovBudgetsTotals.style.color = usedPct > 100 ? "var(--danger-color)" : usedPct > 80 ? "var(--warning-color)" : "var(--text-primary)";
+      }
       ovBudgetsGrid.innerHTML += `
             <div style="background: rgba(168,85,247,0.1); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(168,85,247,0.3);">
                 <div style="font-size: 0.65rem; color: var(--text-secondary);">TOTAL BUDGETS</div>
@@ -8107,6 +8113,53 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     font-weight: 800;
 }
 
+.month-overview-budgets {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+.month-overview-budgets > summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+}
+
+.month-overview-budgets > summary::-webkit-details-marker {
+    display: none;
+}
+
+.month-overview-budgets > summary::before {
+    content: '\u25B8';
+    margin-right: 0.35rem;
+    color: var(--text-secondary);
+}
+
+.month-overview-budgets[open] > summary::before {
+    content: '\u25BE';
+}
+
+.month-overview-budgets-totals {
+    margin-left: auto;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.month-overview-budgets-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-top: 0.65rem;
+}
+
 @media (max-width: 760px) {
     .month-overview-header {
         align-items: flex-start;
@@ -8120,6 +8173,14 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
     .month-overview-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .month-overview-budgets-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .month-overview-budgets > summary {
+        flex-wrap: wrap;
     }
 }
 
@@ -9758,12 +9819,13 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                             <span id="month-overview-next-start" class="month-overview-carryover-value">-</span>
                         </div>
 
-                        <!-- Spending Budgets Summary (only shows if budgets exist) -->
-                        <div id="month-overview-budgets" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(99,102,241,0.15);">
-                            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.5rem;">\u{1F4B3} Budget status (including auto-logged card charges)</div>
-                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem;" id="month-overview-budgets-grid">
-                            </div>
-                        </div>
+                        <details id="month-overview-budgets" class="month-overview-budgets" style="display: none;">
+                            <summary>
+                                <span>\u{1F4B3} Budget status</span>
+                                <span id="month-overview-budgets-totals" class="month-overview-budgets-totals">-</span>
+                            </summary>
+                            <div id="month-overview-budgets-grid" class="month-overview-budgets-grid"></div>
+                        </details>
                     </div>
 
                     <!-- Runway Dashboard -->

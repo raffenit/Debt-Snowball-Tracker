@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Debt Snowball Tracker — Local Test</title>
     <style>
-        /* Minimal layout to host the card */
         body {
             margin: 0;
             padding: 2rem;
@@ -30,42 +29,48 @@
             border-radius: 8px;
             margin-bottom: 1rem;
         }
+        .test-banner button {
+            margin-left: 0.5rem;
+            padding: 0.2rem 0.55rem;
+            font-size: 0.75rem;
+            border-radius: 6px;
+            border: 1px solid #555;
+            background: #333;
+            color: #eee;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
     <div id="card-host">
         <div class="test-banner">
-            ⚠️ Local Test Mode — Data saved to browser localStorage, not Home Assistant
+            Local Test Mode — demo data in browser localStorage, not Home Assistant
+            <button type="button" id="reset-demo-data">Reset demo data</button>
         </div>
         <debt-snowball-card></debt-snowball-card>
     </div>
 
-    <script>
-        // ─── Mock Home Assistant API ─────────────────────────────────────────
+    <script src="dist/debt-snowball-card.js"></script>
+    <script type="module">
+        import { buildLocalTestData } from './tests/fixtures/local-test-data.js';
+        import { sanitizeData, countRepairs } from './src/core/health.js';
+
         const STORAGE_KEY = 'debt-snowball-test-data';
 
         const mockHass = {
             config: { currency: 'USD' },
             locale: { language: 'en' },
             language: 'en',
-
-            // HA sensor API — no-op in test mode
             callApi: (method, endpoint, payload) => {
                 console.log('[Test] HA sensor call:', endpoint, payload);
                 return Promise.resolve({ success: true });
             },
-
             connection: {
-                // Redirect Lovelace config API to localStorage
                 sendMessagePromise: (msg) => {
                     return new Promise((resolve) => {
                         if (msg.type === 'lovelace/config') {
-                            // Load
-                            const raw = localStorage.getItem(STORAGE_KEY);
-                            const stored = raw ? JSON.parse(raw) : {};
-                            resolve(stored);
+                            resolve(loadTestConfig());
                         } else if (msg.type === 'lovelace/config/save') {
-                            // Save
                             localStorage.setItem(STORAGE_KEY, JSON.stringify(msg.config));
                             resolve({ success: true });
                         } else if (msg.type === 'lovelace/dashboards/list') {
@@ -80,34 +85,69 @@
             }
         };
 
-        // ─── Wait for card to register, then inject mock HA ───────────────────
+        function readStored() {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return null;
+            try {
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+                return parsed;
+            } catch {
+                return null;
+            }
+        }
+
+        function isUsableConfig(stored) {
+            if (!stored) return false;
+            const { data, issues } = sanitizeData(stored);
+            if (!data) return false;
+            if (issues.some(i => i.severity === 'fatal')) return false;
+            if (countRepairs(issues) > 0) return false;
+            return true;
+        }
+
+        function loadTestConfig() {
+            const params = new URLSearchParams(location.search);
+            if (params.has('reset')) {
+                const demo = buildLocalTestData();
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(demo));
+                return demo;
+            }
+            const stored = readStored();
+            if (isUsableConfig(stored)) return stored;
+            const demo = buildLocalTestData();
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(demo));
+            return demo;
+        }
+
+        document.getElementById('reset-demo-data').addEventListener('click', () => {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(buildLocalTestData()));
+            location.assign(location.pathname);
+        });
+
+        // Skip the new-month check-in on the local harness unless ?checkin is set.
+        const params = new URLSearchParams(location.search);
+        if (!params.has('checkin')) {
+            const now = new Date();
+            localStorage.setItem('snowball_checkin_dismissed', `${now.getFullYear()}-${now.getMonth()}`);
+        }
+
         const init = () => {
             const card = document.querySelector('debt-snowball-card');
             if (!card) {
                 console.error('Card element not found');
                 return;
             }
-
-            // Simulate the Lovelace lifecycle: setConfig → set hass → connectedCallback
-            if (card.setConfig) {
-                card.setConfig({});
-            }
-
-            // Inject mock HA object (triggers _initApp via the set hass setter)
+            if (card.setConfig) card.setConfig({});
             card.hass = mockHass;
-
             console.log('[Test] Debt Snowball card initialized with mock HA');
         };
 
-        // Try immediately (if already loaded) or wait for load event
         if (document.readyState === 'complete') {
             setTimeout(init, 100);
         } else {
             window.addEventListener('load', () => setTimeout(init, 100));
         }
     </script>
-
-    <!-- Load the built card bundle -->
-    <script src="dist/debt-snowball-card.js"></script>
 </body>
 </html>
