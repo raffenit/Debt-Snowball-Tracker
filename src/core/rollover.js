@@ -83,7 +83,7 @@ export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
     // counted (minimums/overrides + snowball extra on the target, capped at
     // balance — same math the schedule uses).
     const totalIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
-    const orderedDebts = getStrategyOrder(debts.filter(d => d.balance > 0), strategy);
+    const orderedDebts = getStrategyOrder(debts.filter(d => d.balance > 0 || minPayOverrides[d.id]), strategy);
     const totalMinPay = orderedDebts.reduce((s, d) => s + (minPayOverrides[d.id] ?? d.minPayment ?? 0), 0);
     const extra = Math.max(0, totalIncome - totalCosts - totalMinPay);
     const targetId = orderedDebts[0]?.id;

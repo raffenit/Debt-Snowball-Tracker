@@ -411,8 +411,8 @@ function renderPaymentPlan() {
         });
     });
 
-    const sortedDebts   = getStrategyOrder(_debts.filter(d => d.balance > 0), appState.strategy);
     const _overrides    = isArchiveView ? {} : appState.minPayOverrides;
+    const sortedDebts   = getStrategyOrder(_debts.filter(d => d.balance > 0 || _overrides[d.id]), appState.strategy);
     const totalMinPay   = sortedDebts.reduce((s,d) => s + (_overrides[d.id] ?? d.minPayment), 0);
     const totalInc      = _income.reduce((s,e) => s + e.amount, 0);
     const totalRec      = [

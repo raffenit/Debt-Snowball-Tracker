@@ -483,7 +483,7 @@ function _getDebtPaymentAmount(debtId) {
     const debt = appState.debts.find(d => d.id === debtId);
     if (!debt || debt.balance <= 0) return 0;
 
-    const aliveDebts = appState.debts.filter(d => d.balance > 0);
+    const aliveDebts = appState.debts.filter(d => d.balance > 0 || appState.minPayOverrides[d.id]);
     const sortedDebts = getStrategyOrder(aliveDebts, appState.strategy);
     const targetId = sortedDebts[0]?.id;
 

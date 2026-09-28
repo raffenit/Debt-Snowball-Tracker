@@ -705,7 +705,7 @@ var DebtSnowballApp = (() => {
       totalCosts
     };
     const totalIncome = incomeEntries2.reduce((s, e) => s + e.amount, 0);
-    const orderedDebts = getStrategyOrder(debts2.filter((d) => d.balance > 0), strategy);
+    const orderedDebts = getStrategyOrder(debts2.filter((d) => d.balance > 0 || minPayOverrides[d.id]), strategy);
     const totalMinPay = orderedDebts.reduce((s, d) => s + (minPayOverrides[d.id] ?? d.minPayment ?? 0), 0);
     const extra = Math.max(0, totalIncome - totalCosts - totalMinPay);
     const targetId = orderedDebts[0]?.id;
@@ -3616,8 +3616,8 @@ This replaces ALL current data with that snapshot.`)) {
         sortKey: day * 1e3 + 1.5
       });
     });
-    const sortedDebts = getStrategyOrder(_debts.filter((d) => d.balance > 0), appState.strategy);
     const _overrides = isArchiveView ? {} : appState.minPayOverrides;
+    const sortedDebts = getStrategyOrder(_debts.filter((d) => d.balance > 0 || _overrides[d.id]), appState.strategy);
     const totalMinPay = sortedDebts.reduce((s, d) => s + (_overrides[d.id] ?? d.minPayment), 0);
     const totalInc = _income.reduce((s, e) => s + e.amount, 0);
     const totalRec = [
@@ -4633,7 +4633,7 @@ This replaces ALL current data with that snapshot.`)) {
   function _getDebtPaymentAmount(debtId) {
     const debt = appState.debts.find((d) => d.id === debtId);
     if (!debt || debt.balance <= 0) return 0;
-    const aliveDebts = appState.debts.filter((d) => d.balance > 0);
+    const aliveDebts = appState.debts.filter((d) => d.balance > 0 || appState.minPayOverrides[d.id]);
     const sortedDebts = getStrategyOrder(aliveDebts, appState.strategy);
     const targetId = sortedDebts[0]?.id;
     const _wmKey = appState.workingMonthKey || currentMonthKey();
