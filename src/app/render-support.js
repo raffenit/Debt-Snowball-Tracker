@@ -99,7 +99,11 @@ function calcWindfall() {
     if (!amount || amount <= 0) { showNotificationToast('Enter a windfall amount first.', 'error'); return; }
 
     const baseResult = runSimulation(appState.strategy);
-    if (!baseResult.valid) { showNotificationToast('Fix your budget setup first.', 'error'); return; }
+    // Allow windfall calculation even when base simulation is invalid — the windfall
+    // itself might be enough to make the scenario work (budget too low is exactly when
+    // this tool is most useful: "what if I add a lump sum to make this work?")
+    const baseMonths = baseResult.valid ? baseResult.monthsElapsed : null;
+    const baseInterest = baseResult.valid ? baseResult.totalInterestPaid : null;
 
     // Run simulation with windfall applied optimally:
     // Distribute across debts in strategy order (strategy target gets it all first,
@@ -107,23 +111,27 @@ function calcWindfall() {
     const windfallResult = runSimulationWithWindfall(amount, appState.strategy);
 
     const today = new Date();
-    const baseDateStr   = new Date(today.getFullYear(), today.getMonth() + baseResult.monthsElapsed, 1)
-        .toLocaleDateString(undefined, { month:'short', year:'numeric' });
+    const baseDateStr   = baseMonths
+        ? new Date(today.getFullYear(), today.getMonth() + baseMonths, 1).toLocaleDateString(undefined, { month:'short', year:'numeric' })
+        : 'Unknown (budget too low)';
     const afterDateStr  = new Date(today.getFullYear(), today.getMonth() + windfallResult.monthsElapsed, 1)
         .toLocaleDateString(undefined, { month:'short', year:'numeric' });
 
     appState._root.getElementById('wf-before-date').textContent     = baseDateStr;
-    appState._root.getElementById('wf-before-interest').textContent = formatMoney(baseResult.totalInterestPaid);
-    appState._root.getElementById('wf-before-months').textContent   = baseResult.monthsElapsed;
+    appState._root.getElementById('wf-before-interest').textContent = baseInterest ? formatMoney(baseInterest) : 'N/A';
+    appState._root.getElementById('wf-before-months').textContent   = baseMonths ? baseMonths : 'N/A';
     appState._root.getElementById('wf-after-date').textContent      = afterDateStr;
-    appState._root.getElementById('wf-after-interest').textContent  = formatMoney(windfallResult.totalInterestPaid);
+    appState._root.getElementById('wf-after-interest').textContent = formatMoney(windfallResult.totalInterestPaid);
     appState._root.getElementById('wf-after-months').textContent    = windfallResult.monthsElapsed;
 
-    const monthsSaved    = baseResult.monthsElapsed - windfallResult.monthsElapsed;
-    const interestSaved  = baseResult.totalInterestPaid - windfallResult.totalInterestPaid;
+    const monthsSaved    = baseMonths ? (baseMonths - windfallResult.monthsElapsed) : 0;
+    const interestSaved  = baseInterest ? (baseInterest - windfallResult.totalInterestPaid) : 0;
     const banner         = appState._root.getElementById('windfall-savings-banner');
 
-    if (monthsSaved > 0 || interestSaved > 0.01) {
+    if (baseMonths === null) {
+        banner.className   = 'windfall-savings-banner';
+        banner.innerHTML   = `Your current budget is too low to calculate a baseline. The windfall may be enough to get you on track.`;
+    } else if (monthsSaved > 0 || interestSaved > 0.01) {
         banner.className   = 'windfall-savings-banner windfall-savings-positive';
         banner.innerHTML   = `🎉 You'd be debt-free <strong>${monthsSaved} month${monthsSaved !== 1 ? 's' : ''} sooner</strong> and save <strong>${formatMoney(interestSaved)}</strong> in interest!`;
     } else {
