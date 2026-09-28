@@ -103,11 +103,13 @@ export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
         ...cashCosts.map(c => ({ day: c.dueDay || 1, amount: c.amount })),
         ...cashExpensesForMonth(spendingBudgets || [], closingMonthKey)
             .map(e => ({ day: e.date ? dayOf(e) : 1, amount: e.amount })),
-        ...orderedDebts.map(d => ({
-            day: d.dueDay || 1,
-            amount: Math.min(d.balance,
-                (minPayOverrides[d.id] ?? d.minPayment ?? 0) + (d.id === targetId ? extra : 0)),
-        })),
+        ...orderedDebts.map(d => {
+            const effMin = minPayOverrides[d.id] ?? d.minPayment ?? 0;
+            const amount = (d.balance === 0 && minPayOverrides[d.id])
+                ? effMin
+                : Math.min(d.balance, effMin + (d.id === targetId ? extra : 0));
+            return { day: d.dueDay || 1, amount };
+        }),
     ].filter(x => x.day >= syncDay)
      .reduce((s, x) => s + x.amount, 0);
 

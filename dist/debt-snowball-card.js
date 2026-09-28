@@ -716,13 +716,11 @@ var DebtSnowballApp = (() => {
     const outflowsAfter = [
       ...cashCosts.map((c) => ({ day: c.dueDay || 1, amount: c.amount })),
       ...cashExpensesForMonth(spendingBudgets || [], closingMonthKey).map((e) => ({ day: e.date ? dayOf(e) : 1, amount: e.amount })),
-      ...orderedDebts.map((d) => ({
-        day: d.dueDay || 1,
-        amount: Math.min(
-          d.balance,
-          (minPayOverrides[d.id] ?? d.minPayment ?? 0) + (d.id === targetId ? extra : 0)
-        )
-      }))
+      ...orderedDebts.map((d) => {
+        const effMin = minPayOverrides[d.id] ?? d.minPayment ?? 0;
+        const amount = d.balance === 0 && minPayOverrides[d.id] ? effMin : Math.min(d.balance, effMin + (d.id === targetId ? extra : 0));
+        return { day: d.dueDay || 1, amount };
+      })
     ].filter((x) => x.day >= syncDay).reduce((s, x) => s + x.amount, 0);
     const finalBalance = poolAtSync + incomeAfter - outflowsAfter;
     archive.finalBalance = finalBalance;
@@ -3631,7 +3629,7 @@ This replaces ALL current data with that snapshot.`)) {
       const day = debt.dueDay || 1;
       const isTarget = debt.id === targetId;
       const effMin = _overrides[debt.id] ?? debt.minPayment;
-      const amount = isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
+      const amount = debt.balance === 0 && _overrides[debt.id] ? effMin : isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
       const hasOverride = debt.id in _overrides;
       events.push({ type: "debt", id: debt.id, name: debt.name, day, amount, minPayment: debt.minPayment, effMin, hasOverride, balance: debt.balance, isSnowballTarget: isTarget, autoPay: !!debt.autoPay, sortKey: day * 1e3 + 2 });
     });

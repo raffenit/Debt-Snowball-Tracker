@@ -428,7 +428,10 @@ function renderPaymentPlan() {
         const day      = debt.dueDay || 1;
         const isTarget = debt.id === targetId;
         const effMin   = _overrides[debt.id] ?? debt.minPayment;
-        const amount   = isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
+        // If balance is 0 but there's an override, use the override amount (payoff scenario)
+        const amount   = (debt.balance === 0 && _overrides[debt.id])
+            ? effMin
+            : isTarget ? Math.min(debt.balance, effMin + extra) : Math.min(debt.balance, effMin);
         const hasOverride = debt.id in _overrides;
         events.push({ type:'debt', id: debt.id, name: debt.name, day, amount, minPayment: debt.minPayment, effMin, hasOverride, balance: debt.balance, isSnowballTarget: isTarget, autoPay: !!debt.autoPay, sortKey: day * 1000 + 2 });
     });
