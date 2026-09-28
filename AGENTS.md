@@ -78,6 +78,16 @@ All payoff actions have undo toasts because setting balance to $0 is
 destructive and users may change their mind. Undo restores both the balance
 and the original `minPayOverride` state.
 
+**Cash flow visibility (v2.8.8 fix):**
+Debts with `minPayOverride` are included in the cash flow schedule even if
+their balance is 0. This ensures the final payment shows in the schedule for
+the current month when you pay off a debt. Without this, paid-off debts were
+filtered out entirely and the payment didn't appear in cash flow. The fix
+applies to:
+- `render-payment.js` schedule generation
+- `render-modals.js` snowball extra calculation
+- `rollover.js` month rollover calculations
+
 ## Enhanced error cards (v2.8.5+)
 
 The "budget too low" error cards now show detailed breakdowns and
