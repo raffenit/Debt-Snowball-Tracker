@@ -21,7 +21,8 @@ Track your bank balances, manage bills and spending budgets, visualize your payo
 
 - 💰 **Two Strategies** — Instantly toggle between Debt Snowball (lowest balance first) and Debt Avalanche (highest interest first)
 - 📊 **Smart Timeline** — Visualizes exactly when you will be debt-free based on your real monthly budget
-- 💵 **Windfall Planner** — See how much time and interest you'll save with extra payments
+- 💵 **Windfall Planner** — See how much time and interest you'll save with extra payments, and apply them directly to your balances
+- 🎉 **Pay Off in Full** — Quick options to pay off debts entirely from the debt card, debt modal, or windfall planner
 - 🏦 **Bank Balance Sync** — Mid-month checkpoints for accurate cash-flow scheduling
 - 📅 **Fixed Bills** — Track bills, subscriptions, utilities with one-time and interval support
 - 💳 **Spending Budgets** — Category limits for day-to-day spending; card-paid bills auto-log as they post, with a pay-in-full sustainability check
@@ -31,6 +32,7 @@ Track your bank balances, manage bills and spending budgets, visualize your payo
 - 🎨 **Theme Aware** — Automatically adapts to your Home Assistant Light/Dark mode
 - 📈 **Home Assistant Sensors** — Exposes total debt, payoff date, and next payment sensors
 - 🔔 **Payment Reminders** — Optional blueprint for actionable due-date notifications
+- 📜 **Archive History** — Browse past months to see historical debt balances, spending, and cash flow
 
 ---
 

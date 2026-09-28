@@ -61,13 +61,13 @@ src/app/                →   esbuild (bundle: true)   →   dist/debt-snowball-
 - **Why extract**: Centralizes all user interaction entry points. Makes it clear which user actions trigger which state mutations and re-renders.
 
 ### `render-modals.js` — Modals, CRUD, Toasts, Export/Import, HA Sensors, `renderUI`
-- **Purpose**: All modal open/close functions (`openDebtModal`, `closeDebtModal`, etc.), CRUD operations (`saveDebt`, `deleteDebt`, etc.), inline confirm & undo toasts, export/import data, HA sensor bridge (`updateHASensors`), and the main `renderUI()` orchestrator.
+- **Purpose**: All modal open/close functions (`openDebtModal`, `closeDebtModal`, etc.), CRUD operations (`saveDebt`, `deleteDebt`, `payoffDebt`), inline confirm & undo toasts, export/import data, HA sensor bridge (`updateHASensors`), and the main `renderUI()` orchestrator. Includes archive view protection in modal openers.
 - **Dependencies**: All global state, `_root`, DOM refs, `formatMoney()`, `escHtml()`, `saveData()`, `runSimulation()`, `renderPaymentPlan()`, `renderDebtsList()`, etc.
 - **Why extract**: Contains the coordination layer (`renderUI`) plus all modal/CRUD logic. Separated from pure rendering to keep each file focused.
 
 ### `render-lists.js` — List Renderers
-- **Purpose**: `renderIncomeList()`, `renderRecurringCostsList()`, `renderDebtsList()`.
-- **Dependencies**: Global state, `_root`, DOM refs, `formatMoney()`, `escHtml()`, `getStrategyOrder()`, `runSimulation()`.
+- **Purpose**: `renderIncomeList()`, `renderRecurringCostsList()`, `renderDebtsList()`. Debt cards include "Mark Paid" and "Pay Off Full" buttons. Archive view guards edit/delete/payoff actions.
+- **Dependencies**: Global state, `_root`, DOM refs, `formatMoney()`, `escHtml()`, `getStrategyOrder()`, `runSimulation()`, `launchConfetti()`, `showErrorToast()`.
 - **Why extract**: These three functions collectively render ~400 lines of HTML list generation. Isolating them makes list-specific styling and logic easier to maintain.
 
 ### `render-payment.js` — Payment Plan, Visualization, Simulation
@@ -81,7 +81,7 @@ src/app/                →   esbuild (bundle: true)   →   dist/debt-snowball-
 - **Why extract**: Isolates the custom element class so the build entry point can import it as a single dependency.
 
 ### `render-support.js` — Support Functions
-- **Purpose**: Countdown timer, windfall planner, monthly check-in prompt, confetti animation, tab navigation, and `autoCalcMinPayment()`.
+- **Purpose**: Countdown timer, windfall planner (including `applyWindfall()` to actually reduce balances), monthly check-in prompt, confetti animation, tab navigation, and `autoCalcMinPayment()`.
 - **Dependencies**: `state.js`, `pure.js`, other render modules.
 - **Why extract**: Miscellaneous UI support features that don't fit into the other render categories.
 
@@ -169,3 +169,4 @@ User Action → events.js → mutates state (state-shim.js)
 - **Sync `runSimulation` implementations**: The simulation engine exists in both `src/core/simulation.js` (ES module for Node tests) and `render-payment.js` (browser bundle). A future build step could transpile `src/core/simulation.js` into the bundle instead of maintaining two copies.
 - **Further subdivide `render-modals.js`**: At ~1030 lines, this module still contains modals, CRUD, and `renderUI`. Could be split into `80-render-ui.js` and `85-modals-crud.js` if it grows further.
 - **Add a standalone HTML test page**: For browser-level testing without HA, create `test.html` that loads `dist/debt-snowball-card.js` in a mock environment.
+- **Avoid duplicate imports**: esbuild fails with "The symbol 'X' has already been declared" if the same symbol is imported from the same module twice. When adding imports, always check existing imports first to avoid this build error.
