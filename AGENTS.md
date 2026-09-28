@@ -60,19 +60,23 @@ Three ways to pay off debts:
 
 1. **Debt modal "Pay Off in Full"** — When editing a debt, a warning button
    appears (only for debts with balance > 0). Sets balance to $0, marks paid
-   for current month, confetti celebration, undo toast.
+   for current month, sets `minPayOverride` to the full balance (so the
+   payment appears in cash flow), confetti celebration, undo toast.
 
 2. **Debt card "Pay Off Full"** — On each debt card, the paid button is split:
    - "Mark Paid" — mark minimum payment as paid this month
-   - "Pay Off Full" — set entire balance to $0
+   - "Pay Off Full" — set entire balance to $0 and set override for cash flow
    - Archive view blocks this action
 
 3. **Windfall "Apply This Payment"** — After calculating a windfall, an
    "Apply This Payment" button appears. Actually reduces debt balances per
-   optimal allocation (follows strategy order). Undo toast to revert.
+   optimal allocation (follows strategy order). If a debt is fully paid off,
+   sets its `minPayOverride` to the payment amount for cash flow visibility.
+   Undo toast to revert.
 
 All payoff actions have undo toasts because setting balance to $0 is
-destructive and users may change their mind.
+destructive and users may change their mind. Undo restores both the balance
+and the original `minPayOverride` state.
 
 ## Enhanced error cards (v2.8.5+)
 
