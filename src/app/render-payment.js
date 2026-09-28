@@ -106,43 +106,129 @@ function renderVisualization(simResults) {
         // Keep windfall bar visible when there are debts — it can help explore "what if I add a lump sum?"
         if (appState.debts.length > 0) windfallBar.style.display = 'flex';
         stopCountdown();
-        
+
+        const _active = appState.recurringCosts.filter(c => isCostDueThisMonth(c, appState.workingMonthKey || currentMonthKey()));
+        const totalRecurringDirect = _active.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
+        const totalRecurringCard   = _active.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
+        const shortage = totalMinPayments - (effectiveBudget || 0);
+
         let icon = '⚠️';
         let title = '';
         let message = '';
+        let breakdown = '';
         let primaryAction = '';
         let secondaryAction = '';
-        
+        let tertiaryAction = '';
+
         if ((totalIncome || 0) <= 0) {
             icon = '💰';
             title = 'No Income Added';
             message = 'You need to add income entries before we can calculate your payoff timeline. Tell us about your paychecks, deposits, or any other monthly income.';
+            breakdown = `
+                <div style="margin-top: 0.75rem; padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 0.85rem;">
+                    <div style="color: var(--text-secondary); margin-bottom: 0.5rem;">To get started, add:</div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>• Regular paychecks</span>
+                        <span style="color: var(--success-color);">Monthly or biweekly</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>• Side income / freelance</span>
+                        <span style="color: var(--success-color);">One-time or recurring</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>• Other deposits</span>
+                        <span style="color: var(--success-color);">Any cash inflow</span>
+                    </div>
+                </div>`;
             primaryAction = `<button class="btn btn-success" data-goto-tab="income" data-then-click="add-income-btn">➕ Add Income</button>`;
         } else if ((effectiveBudget || 0) <= 0) {
-            const _active              = appState.recurringCosts.filter(c => isCostDueThisMonth(c, appState.workingMonthKey || currentMonthKey()));
-            const totalRecurringDirect = _active.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-            const totalRecurringCard   = _active.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
             icon = '📉';
             title = 'Budget Over-Committed';
-            message = `Your income of ${formatMoney(totalIncome)} is entirely consumed by direct recurring costs of ${formatMoney(totalRecurringDirect)}.${totalRecurringCard > 0 ? ` (Card-charged costs of ${formatMoney(totalRecurringCard)} are already factored into card payments.)` : ''} You need to either increase income or reduce costs to free up money for debt payoff.`;
+            message = `Your income of ${formatMoney(totalIncome)} is entirely consumed by direct recurring costs of ${formatMoney(totalRecurringDirect)}. No money is left for debt payoff.`;
+            breakdown = `
+                <div style="margin-top: 0.75rem; padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 0.85rem;">
+                    <div style="color: var(--text-secondary); margin-bottom: 0.5rem;">Monthly breakdown:</div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>💰 Income</span>
+                        <span style="color: var(--success-color);">${formatMoney(totalIncome)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>🏦 Direct costs (bills, rent, etc.)</span>
+                        <span style="color: var(--danger-color);">−${formatMoney(totalRecurringDirect)}</span>
+                    </div>
+                    ${totalRecurringCard > 0 ? `
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>💳 Card charges (in minimums)</span>
+                        <span style="color: var(--warning-color);">−${formatMoney(totalRecurringCard)}</span>
+                    </div>` : ''}
+                    <div style="display: flex; justify-content: space-between; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.1); font-weight: 600;">
+                        <span>Available for debt payoff</span>
+                        <span style="color: var(--danger-color);">$0.00</span>
+                    </div>
+                </div>
+                <div style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-secondary);">
+                    <strong>Options:</strong>
+                    <ul style="margin: 0.5rem 0 0 1.25rem; padding: 0;">
+                        <li>Add ${formatMoney(totalRecurringDirect - totalIncome + 100)}+ in income to free up cash</li>
+                        <li>Reduce recurring costs by ${formatMoney(totalRecurringDirect - totalIncome + 100)}+</li>
+                        <li>Use a windfall to jump-start payoff</li>
+                    </ul>
+                </div>`;
             primaryAction = `<button class="btn btn-success" data-goto-tab="income">💰 Add Income</button>`;
             secondaryAction = `<button class="btn btn-warning" data-goto-tab="income">📝 Review Costs</button>`;
+            tertiaryAction = `<button class="btn btn-secondary" data-goto-tab="timeline" data-then-click="windfall-btn">💰 Try Windfall Planner</button>`;
         } else {
             icon = '💳';
             title = 'Can\'t Cover Minimum Payments';
-            message = `Your effective budget of ${formatMoney(effectiveBudget)} is less than your total minimum payments of ${formatMoney(totalMinPayments)}. You need more available cash to make progress on your debts.`;
-            primaryAction = `<button class="btn btn-success" data-goto-tab="income">💰 Increase Income</button>`;
+            message = `Your effective budget of ${formatMoney(effectiveBudget)} is less than your total minimum payments of ${formatMoney(totalMinPayments)}. You're short by ${formatMoney(shortage)} each month.`;
+            breakdown = `
+                <div style="margin-top: 0.75rem; padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 0.85rem;">
+                    <div style="color: var(--text-secondary); margin-bottom: 0.5rem;">Monthly breakdown:</div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>💰 Income</span>
+                        <span style="color: var(--success-color);">${formatMoney(totalIncome)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>🏦 Direct costs</span>
+                        <span style="color: var(--danger-color);">−${formatMoney(totalRecurringDirect)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>💳 Available for debt payoff</span>
+                        <span style="color: var(--text-primary);">${formatMoney(effectiveBudget)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>💳 Required minimum payments</span>
+                        <span style="color: var(--danger-color);">${formatMoney(totalMinPayments)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.1); font-weight: 600;">
+                        <span>Shortfall</span>
+                        <span style="color: var(--danger-color);">−${formatMoney(shortage)}</span>
+                    </div>
+                </div>
+                <div style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-secondary);">
+                    <strong>Options:</strong>
+                    <ul style="margin: 0.5rem 0 0 1.25rem; padding: 0;">
+                        <li>Add ${formatMoney(shortage + 50)}+ in monthly income</li>
+                        <li>Reduce recurring costs by ${formatMoney(shortage + 50)}+</li>
+                        <li>Consider debt consolidation to lower rates</li>
+                        <li>Use a windfall to pay down balances</li>
+                    </ul>
+                </div>`;
+            primaryAction = `<button class="btn btn-success" data-goto-tab="income">💰 Add Income</button>`;
             secondaryAction = `<button class="btn btn-secondary" data-goto-tab="debts">📉 Review Debts</button>`;
+            tertiaryAction = `<button class="btn btn-secondary" data-goto-tab="timeline" data-then-click="windfall-btn">💰 Try Windfall Planner</button>`;
         }
-        
+
         timelineChart.innerHTML = `
             <div class="timeline-error-card">
                 <span class="timeline-error-icon">${icon}</span>
                 <div class="timeline-error-title">${title}</div>
                 <div class="timeline-error-message">${message}</div>
+                ${breakdown}
                 <div class="timeline-error-actions">
                     ${primaryAction}
                     ${secondaryAction}
+                    ${tertiaryAction}
                 </div>
             </div>`;
         renderPaydownChart([], {});
