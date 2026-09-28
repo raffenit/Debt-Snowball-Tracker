@@ -35,6 +35,20 @@ function setupEventListeners() {
         ripple.addEventListener('animationend', () => ripple.remove());
     }, true);
 
+    // ── Declarative navigation buttons (replaces inline onclick — nested
+    // quotes in the old attributes produced malformed HTML and dead buttons) ──
+    appState._root.addEventListener('click', e => {
+        const nav = e.target.closest('[data-goto-tab]');
+        if (nav) {
+            appState._root.querySelector(`[data-tab="${nav.dataset.gotoTab}"]`)?.click();
+            const then = nav.dataset.thenClick;
+            if (then) setTimeout(() => appState._root.getElementById(then)?.click(), 100);
+            return;
+        }
+        const clicker = e.target.closest('[data-click-target]');
+        if (clicker) appState._root.getElementById(clicker.dataset.clickTarget)?.click();
+    });
+
     appState.addDebtBtn.addEventListener('click',   () => openDebtModal());
     appState.addCostBtn.addEventListener('click',   () => openCostModal());
     appState.addIncomeBtn.addEventListener('click', () => openIncomeModal());
@@ -345,11 +359,12 @@ function setupEventListeners() {
         const day = parseInt(dayInput.value);
         const amount = parseFloat(amountInput.value);
 
-        if (!day || !Number.isFinite(amount) || amount < 0) {
+        if (!day || !Number.isFinite(amount)) {
             showErrorToast('Please enter a valid day and amount');
             return;
         }
 
+        if (appState.viewingArchiveIndex !== null) return; // archives are read-only
         // Check for duplicate day
         if (appState.checkpoints.some(cp => cp.day === day)) {
             showErrorToast(`A checkpoint for day ${day} already exists`);
@@ -375,7 +390,7 @@ function setupEventListeners() {
     // Delete checkpoint handler (delegated)
     appState._root.getElementById('checkpoints-list').addEventListener('click', (e) => {
         const deleteBtn = e.target.closest('.delete-checkpoint-btn');
-        if (deleteBtn) {
+        if (deleteBtn && appState.viewingArchiveIndex === null) {
             const id = deleteBtn.dataset.id;
             appState.checkpoints = appState.checkpoints.filter(c => c.id !== id);
             saveData().then(() => {

@@ -449,10 +449,14 @@ function _getDebtPaymentAmount(debtId) {
     const sortedDebts = getStrategyOrder(aliveDebts, appState.strategy);
     const targetId = sortedDebts[0]?.id;
 
-    const totalIncome = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const _wmKey  = appState.workingMonthKey || currentMonthKey();
+    const _wmHtml = keyToHtmlMonth(_wmKey);
+    const totalIncome = appState.incomeEntries
+        .filter(e => (e.date || '').slice(0, 7) === _wmHtml)
+        .reduce((s, e) => s + e.amount, 0);
     // Card-charged costs are excluded — they're paid by the card, not from cash
     const totalRecurring = [
-        ...appState.recurringCosts.filter(c => isCostDueThisMonth(c) && c.paymentMethod !== 'card'),
+        ...appState.recurringCosts.filter(c => isCostDueThisMonth(c, _wmKey) && c.paymentMethod !== 'card'),
         ...appState.oneTimeCosts.filter(c => c.paymentMethod !== 'card'),
     ].reduce((s, c) => s + c.amount, 0);
     const totalMinPay = sortedDebts.reduce((s, d) => s + (appState.minPayOverrides[d.id] ?? d.minPayment), 0);

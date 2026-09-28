@@ -12,13 +12,23 @@ function renderCheckpointsList() {
     const container = appState._root.getElementById('checkpoints-list');
     if (!container) return;
 
-    if (appState.checkpoints.length === 0) {
+    // Archive-aware: browsing a past month shows THAT month's checkpoints,
+    // read-only. The add row hides so edits can't leak into live state.
+    const archive = (appState.viewingArchiveIndex !== null)
+        ? appState.monthlyArchives[appState.viewingArchiveIndex]
+        : null;
+    const cps = archive ? (archive.checkpoints || []) : appState.checkpoints;
+
+    const addRow = appState._root.getElementById('add-checkpoint-row');
+    if (addRow) addRow.style.display = archive ? 'none' : '';
+
+    if (cps.length === 0) {
         container.innerHTML = '';
         return;
     }
 
     // Sort by day
-    const sorted = [...appState.checkpoints].sort((a, b) => a.day - b.day);
+    const sorted = [...cps].sort((a, b) => a.day - b.day);
 
     const formatMoneyLocal = (n) => {
         const currency = appState._root._currency || 'USD';
@@ -34,17 +44,18 @@ function renderCheckpointsList() {
     const listHtml = sorted.map(cp => `
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: rgba(168,85,247,0.06); border-radius: 6px; border: 1px solid rgba(168,85,247,0.2);">
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(168,85,247,0.15); padding: 0.2rem 0.4rem; border-radius: 4px;">Day ${cp.day}</span>
+                <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(168,85,247,0.15); padding: 0.2rem 0.4rem; border-radius: 4px;"${cp.autoRollover ? ' title="Carried over from last month\'s final balance"' : ''}>Day ${cp.day}${cp.autoRollover ? ' · auto' : ''}</span>
                 <span style="font-weight: 500; color: var(--text-primary);">${formatMoneyLocal(cp.amount)}</span>
             </div>
+            ${archive ? '' : `
             <button class="btn btn-icon delete-checkpoint-btn" data-id="${cp.id}" title="Remove checkpoint" style="padding: 0.25rem; font-size: 0.75rem; background: transparent; color: var(--danger-color); border: none; cursor: pointer;">
                 ✕
-            </button>
+            </button>`}
         </div>
     `).join('');
 
     container.innerHTML = `
-        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Mid-month checkpoints:</div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${archive ? 'Checkpoints (archived):' : 'Mid-month checkpoints:'}</div>
         ${listHtml}
     `;
 }
@@ -82,7 +93,7 @@ function saveCheckpoint() {
         const amount  = parseFloat(appState._root.getElementById('checkpoint-amount').value);
 
         if (!day || day < 1 || day > 31) throw new Error('Please select a valid day (1-31).');
-        if (!Number.isFinite(amount) || amount < 0) throw new Error('Please enter a valid amount.');
+        if (!Number.isFinite(amount)) throw new Error('Please enter a valid amount.');
 
         // Check for duplicate day (if adding new or changing day)
         const existingSameDay = appState.checkpoints.find(cp => cp.day === day && cp.id !== id);

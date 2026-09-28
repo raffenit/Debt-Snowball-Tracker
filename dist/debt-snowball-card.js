@@ -512,133 +512,6 @@ var DebtSnowballApp = (() => {
     }
   });
 
-  // src/core/rollover.js
-  function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
-    const {
-      debts: debts2 = [],
-      recurringCosts: recurringCosts2 = [],
-      oneTimeCosts = [],
-      incomeEntries: incomeEntries2 = [],
-      checkpoints = [],
-      startingBalance: startingBalance2 = 0,
-      paidStatus = {},
-      spendingBudgets = []
-    } = state;
-    const isCashCost = (c) => c.paymentMethod !== "card";
-    const cashCosts = [
-      ...recurringCosts2.filter((c) => isCostDueInMonth(c, closingMonthKey) && isCashCost(c)),
-      ...oneTimeCosts.filter(isCashCost)
-    ];
-    const spentCash = cashExpensesForMonth(spendingBudgets || [], closingMonthKey).reduce((s, e) => s + e.amount, 0);
-    const totalCosts = cashCosts.reduce((s, c) => s + c.amount, 0) + spentCash;
-    const archive = {
-      month: closingMonthKey,
-      label: formatMonthLabel(closingMonthKey),
-      incomeEntries: [...incomeEntries2],
-      recurringCosts: [...recurringCosts2],
-      oneTimeCosts: [...oneTimeCosts],
-      checkpoints: [...checkpoints],
-      debts: debts2.map((d) => ({ ...d })),
-      spendingBudgets: (spendingBudgets || []).map((b) => ({
-        ...b,
-        expenses: (b.expenses || []).map((e) => ({ ...e }))
-      })),
-      startingBalance: startingBalance2,
-      paidStatus: { ...paidStatus },
-      totalIncome: incomeEntries2.reduce((s, e) => s + e.amount, 0),
-      totalCosts
-    };
-    const day1Cp = checkpoints.find((cp) => cp.day === 1);
-    let cashPool = day1Cp ? day1Cp.amount : 0;
-    const totalIncome = incomeEntries2.reduce((s, e) => s + e.amount, 0);
-    const finalBalance = cashPool + totalIncome - totalCosts;
-    archive.finalBalance = finalBalance;
-    const nextIncome = generateRecurringIncomeForMonth(incomeEntries2, nextMonthKey);
-    const nextCheckpoints = finalBalance > 0 ? [{ id: "cp_" + Date.now(), day: 1, amount: finalBalance }] : [];
-    const cleanRecurring = recurringCosts2.filter((c) => (c.category || "other") !== "one-time");
-    const nextCosts = cleanRecurring.map((c) => {
-      if ((c.intervalMonths || 1) <= 1) return c;
-      let next = c.nextDueMonth || closingMonthKey;
-      while (monthKeyToIndex(next) <= monthKeyToIndex(closingMonthKey)) {
-        next = addMonthsToKey(next, c.intervalMonths);
-      }
-      return { ...c, nextDueMonth: next };
-    });
-    const nextBudgets = spendingBudgets.map((b) => ({
-      ...b,
-      expenses: [],
-      exception: b.exception?.month === closingMonthKey ? null : b.exception
-    }));
-    return {
-      archive,
-      nextState: {
-        incomeEntries: nextIncome,
-        checkpoints: nextCheckpoints,
-        recurringCosts: nextCosts,
-        oneTimeCosts: [],
-        paidStatus: {},
-        minPayOverrides: {},
-        spendingBudgets: nextBudgets
-      }
-    };
-  }
-  function buildRetroArchive(state, monthKey) {
-    const {
-      debts: debts2 = [],
-      recurringCosts: recurringCosts2 = [],
-      oneTimeCosts = [],
-      incomeEntries: incomeEntries2 = [],
-      spendingBudgets = []
-    } = state;
-    const isCashCost = (c) => c.paymentMethod !== "card";
-    const [y, m] = monthKey.split("-").map(Number);
-    const htmlMk = `${y}-${String(m + 1).padStart(2, "0")}`;
-    const income = [
-      ...generateRecurringIncomeForMonth(incomeEntries2, monthKey),
-      ...incomeEntries2.filter((e) => (e.scheduleType || e.schedule) === "one-time" && (e.date || "").slice(0, 7) === htmlMk)
-    ];
-    const cashCostsDue = [
-      ...recurringCosts2.filter((c) => isCostDueInMonth(c, monthKey) && isCashCost(c)),
-      ...oneTimeCosts.filter((c) => c.addedMonth === monthKey && isCashCost(c))
-    ];
-    const totalIncome = income.reduce((s, e) => s + e.amount, 0);
-    const totalCosts = cashCostsDue.reduce((s, c) => s + c.amount, 0);
-    const shells = (spendingBudgets || []).map((b) => ({
-      ...b,
-      expenses: [],
-      exception: b.exception?.month === monthKey ? b.exception : null
-    }));
-    const { budgets } = syncCardExpenses({
-      recurringCosts: recurringCosts2,
-      oneTimeCosts,
-      spendingBudgets: shells,
-      monthKey,
-      skips: []
-    });
-    return {
-      month: monthKey,
-      label: formatMonthLabel(monthKey),
-      incomeEntries: income,
-      recurringCosts: [...recurringCosts2],
-      oneTimeCosts: oneTimeCosts.filter((c) => c.addedMonth === monthKey),
-      checkpoints: [],
-      debts: debts2.map((d) => ({ ...d })),
-      spendingBudgets: budgets,
-      startingBalance: 0,
-      paidStatus: {},
-      totalIncome,
-      totalCosts,
-      finalBalance: totalIncome - totalCosts,
-      retro: true
-    };
-  }
-  var init_rollover = __esm({
-    "src/core/rollover.js"() {
-      init_date_utils();
-      init_card_expenses();
-    }
-  });
-
   // src/core/constants.js
   var MAX_SIMULATION_MONTHS;
   var init_constants = __esm({
@@ -661,22 +534,27 @@ var DebtSnowballApp = (() => {
     }
     return copy;
   }
-  function runSimulation(strat) {
-    const totalIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
-    const activeCosts = recurringCosts.filter((c) => isCostDueThisMonth(c));
+  function simulatePayoff(state, strat) {
+    const simDebtsInput = state.debts || [];
+    const incomes = state.incomeEntries || [];
+    const costs = state.recurringCosts || [];
+    const monthKey = state.monthKey || void 0;
+    const scopedIncome = monthKey ? incomes.filter((e) => (e.date || "").slice(0, 7) === keyToHtmlMonth(monthKey)) : incomes;
+    const totalIncome = scopedIncome.reduce((s, e) => s + e.amount, 0);
+    const activeCosts = costs.filter((c) => isCostDueThisMonth(c, monthKey));
     const totalRecurringDirect = activeCosts.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
     const totalRecurringCard = activeCosts.filter((c) => c.paymentMethod === "card").reduce((s, c) => s + c.amount, 0);
     const totalRecurring = activeCosts.reduce((s, c) => s + c.amount, 0);
     const effectiveBudget = totalIncome - totalRecurringDirect;
-    if (debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
+    if (simDebtsInput.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
       return { valid: false, totalIncome, totalRecurring, effectiveBudget };
     }
-    const totalMinPayments = debts.reduce((s, d) => s + d.minPayment, 0);
+    const totalMinPayments = simDebtsInput.filter((d) => d.balance > 0).reduce((s, d) => s + d.minPayment, 0);
     if (effectiveBudget < totalMinPayments) {
       return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
     }
-    const incomeDays = [...incomeEntries].map((e) => ({ day: parseInt(e.date.split("-")[2]), amount: e.amount })).sort((a, b) => a.day - b.day);
-    let simDebts = debts.map((d) => ({ ...d, interestPaid: 0 }));
+    const incomeDays = scopedIncome.map((e) => ({ day: parseInt((e.date || "").split("-")[2]) || 1, amount: e.amount })).sort((a, b) => a.day - b.day);
+    let simDebts = simDebtsInput.map((d) => ({ ...d, interestPaid: 0 }));
     let monthsElapsed = 0, totalInterestPaid = 0, payoffLog = [];
     const perDebtMonthly = {};
     simDebts.forEach((d) => {
@@ -755,6 +633,9 @@ var DebtSnowballApp = (() => {
       effectiveBudget
     };
   }
+  function runSimulation(strat) {
+    return simulatePayoff({ debts, incomeEntries, recurringCosts, startingBalance }, strat);
+  }
   var debts, recurringCosts, incomeEntries, startingBalance;
   var init_simulation = __esm({
     "src/core/simulation.js"() {
@@ -764,6 +645,154 @@ var DebtSnowballApp = (() => {
       recurringCosts = [];
       incomeEntries = [];
       startingBalance = 0;
+    }
+  });
+
+  // src/core/rollover.js
+  function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
+    const {
+      debts: debts2 = [],
+      recurringCosts: recurringCosts2 = [],
+      oneTimeCosts = [],
+      incomeEntries: incomeEntries2 = [],
+      checkpoints = [],
+      startingBalance: startingBalance2 = 0,
+      paidStatus = {},
+      spendingBudgets = [],
+      minPayOverrides = {},
+      strategy = "snowball"
+    } = state;
+    const isCashCost = (c) => c.paymentMethod !== "card";
+    const cashCosts = [
+      ...recurringCosts2.filter((c) => isCostDueInMonth(c, closingMonthKey) && isCashCost(c)),
+      ...oneTimeCosts.filter(isCashCost)
+    ];
+    const spentCash = cashExpensesForMonth(spendingBudgets || [], closingMonthKey).reduce((s, e) => s + e.amount, 0);
+    const totalCosts = cashCosts.reduce((s, c) => s + c.amount, 0) + spentCash;
+    const archive = {
+      month: closingMonthKey,
+      label: formatMonthLabel(closingMonthKey),
+      incomeEntries: [...incomeEntries2],
+      recurringCosts: [...recurringCosts2],
+      oneTimeCosts: [...oneTimeCosts],
+      checkpoints: [...checkpoints],
+      debts: debts2.map((d) => ({ ...d })),
+      spendingBudgets: (spendingBudgets || []).map((b) => ({
+        ...b,
+        expenses: (b.expenses || []).map((e) => ({ ...e }))
+      })),
+      startingBalance: startingBalance2,
+      paidStatus: { ...paidStatus },
+      totalIncome: incomeEntries2.reduce((s, e) => s + e.amount, 0),
+      totalCosts
+    };
+    const totalIncome = incomeEntries2.reduce((s, e) => s + e.amount, 0);
+    const orderedDebts = getStrategyOrder(debts2.filter((d) => d.balance > 0), strategy);
+    const totalMinPay = orderedDebts.reduce((s, d) => s + (minPayOverrides[d.id] ?? d.minPayment ?? 0), 0);
+    const extra = Math.max(0, totalIncome - totalCosts - totalMinPay);
+    const targetId = orderedDebts[0]?.id;
+    const syncDay = checkpoints.length ? Math.max(...checkpoints.map((cp) => cp.day)) : 0;
+    const poolAtSync = checkpoints.length ? checkpoints.find((cp) => cp.day === syncDay).amount : 0;
+    const dayOf = (e) => parseInt((e.date || "").split("-")[2]) || 1;
+    const incomeAfter = incomeEntries2.filter((e) => dayOf(e) > syncDay).reduce((s, e) => s + e.amount, 0);
+    const outflowsAfter = [
+      ...cashCosts.map((c) => ({ day: c.dueDay || 1, amount: c.amount })),
+      ...cashExpensesForMonth(spendingBudgets || [], closingMonthKey).map((e) => ({ day: e.date ? dayOf(e) : 1, amount: e.amount })),
+      ...orderedDebts.map((d) => ({
+        day: d.dueDay || 1,
+        amount: Math.min(
+          d.balance,
+          (minPayOverrides[d.id] ?? d.minPayment ?? 0) + (d.id === targetId ? extra : 0)
+        )
+      }))
+    ].filter((x) => x.day >= syncDay).reduce((s, x) => s + x.amount, 0);
+    const finalBalance = poolAtSync + incomeAfter - outflowsAfter;
+    archive.finalBalance = finalBalance;
+    const nextIncome = generateRecurringIncomeForMonth(incomeEntries2, nextMonthKey);
+    const nextCheckpoints = [{ id: "cp_" + Date.now(), day: 1, amount: finalBalance, autoRollover: true }];
+    const cleanRecurring = recurringCosts2.filter((c) => (c.category || "other") !== "one-time");
+    const nextCosts = cleanRecurring.map((c) => {
+      if ((c.intervalMonths || 1) <= 1) return c;
+      let next = c.nextDueMonth || closingMonthKey;
+      while (monthKeyToIndex(next) <= monthKeyToIndex(closingMonthKey)) {
+        next = addMonthsToKey(next, c.intervalMonths);
+      }
+      return { ...c, nextDueMonth: next };
+    });
+    const nextBudgets = spendingBudgets.map((b) => ({
+      ...b,
+      expenses: [],
+      exception: b.exception?.month === closingMonthKey ? null : b.exception
+    }));
+    return {
+      archive,
+      nextState: {
+        incomeEntries: nextIncome,
+        checkpoints: nextCheckpoints,
+        recurringCosts: nextCosts,
+        oneTimeCosts: [],
+        paidStatus: {},
+        minPayOverrides: {},
+        spendingBudgets: nextBudgets,
+        startingBalance: finalBalance
+      }
+    };
+  }
+  function buildRetroArchive(state, monthKey) {
+    const {
+      debts: debts2 = [],
+      recurringCosts: recurringCosts2 = [],
+      oneTimeCosts = [],
+      incomeEntries: incomeEntries2 = [],
+      spendingBudgets = []
+    } = state;
+    const isCashCost = (c) => c.paymentMethod !== "card";
+    const [y, m] = monthKey.split("-").map(Number);
+    const htmlMk = `${y}-${String(m + 1).padStart(2, "0")}`;
+    const income = [
+      ...generateRecurringIncomeForMonth(incomeEntries2, monthKey),
+      ...incomeEntries2.filter((e) => (e.scheduleType || e.schedule) === "one-time" && (e.date || "").slice(0, 7) === htmlMk)
+    ];
+    const cashCostsDue = [
+      ...recurringCosts2.filter((c) => isCostDueInMonth(c, monthKey) && isCashCost(c)),
+      ...oneTimeCosts.filter((c) => c.addedMonth === monthKey && isCashCost(c))
+    ];
+    const totalIncome = income.reduce((s, e) => s + e.amount, 0);
+    const totalCosts = cashCostsDue.reduce((s, c) => s + c.amount, 0);
+    const shells = (spendingBudgets || []).map((b) => ({
+      ...b,
+      expenses: [],
+      exception: b.exception?.month === monthKey ? b.exception : null
+    }));
+    const { budgets } = syncCardExpenses({
+      recurringCosts: recurringCosts2,
+      oneTimeCosts,
+      spendingBudgets: shells,
+      monthKey,
+      skips: []
+    });
+    return {
+      month: monthKey,
+      label: formatMonthLabel(monthKey),
+      incomeEntries: income,
+      recurringCosts: [...recurringCosts2],
+      oneTimeCosts: oneTimeCosts.filter((c) => c.addedMonth === monthKey),
+      checkpoints: [],
+      debts: debts2.map((d) => ({ ...d })),
+      spendingBudgets: budgets,
+      startingBalance: 0,
+      paidStatus: {},
+      totalIncome,
+      totalCosts,
+      finalBalance: totalIncome - totalCosts,
+      retro: true
+    };
+  }
+  var init_rollover = __esm({
+    "src/core/rollover.js"() {
+      init_date_utils();
+      init_card_expenses();
+      init_simulation();
     }
   });
 
@@ -1032,8 +1061,8 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.8.1";
-      PANEL_BUILD_DATE = "2026-09-22";
+      PANEL_VERSION = "2.8.2";
+      PANEL_BUILD_DATE = "2026-09-28";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
       installType = scriptSrc.includes("hacsfiles") ? "HACS" : scriptSrc.includes("local") ? "Manual (/local/)" : scriptSrc.includes("community") ? "HACS (community)" : "Unknown";
@@ -1299,13 +1328,21 @@ var DebtSnowballApp = (() => {
       appState.windfallModal.style.display = "none";
     }, 300);
   }
+  function runSimulation2(strat) {
+    return simulatePayoff({
+      debts: appState.debts,
+      incomeEntries: appState.incomeEntries,
+      recurringCosts: appState.recurringCosts,
+      monthKey: appState.workingMonthKey || currentMonthKey()
+    }, strat);
+  }
   function calcWindfall() {
     const amount = parseFloat(appState._root.getElementById("windfall-amount").value);
     if (!amount || amount <= 0) {
       showNotificationToast("Enter a windfall amount first.", "error");
       return;
     }
-    const baseResult = runSimulation(appState.strategy);
+    const baseResult = runSimulation2(appState.strategy);
     if (!baseResult.valid) {
       showNotificationToast("Fix your budget setup first.", "error");
       return;
@@ -1360,7 +1397,7 @@ var DebtSnowballApp = (() => {
     }
     const originalDebts = appState.debts;
     appState.debts = simDebts.filter((d) => d.balance > 0.01);
-    const result = runSimulation(strat);
+    const result = runSimulation2(strat);
     appState.debts = originalDebts;
     result.allocation = allocation;
     return result;
@@ -1592,7 +1629,9 @@ var DebtSnowballApp = (() => {
             checkpoints: appState.checkpoints,
             startingBalance: appState.startingBalance,
             paidStatus: appState.paidStatus,
-            spendingBudgets: appState.spendingBudgets
+            spendingBudgets: appState.spendingBudgets,
+            minPayOverrides: appState.minPayOverrides,
+            strategy: appState.strategy
           }, prevMonth, thisMonth);
           appState.monthlyArchives.unshift(rollover.archive);
           if (appState.monthlyArchives.length > 24) appState.monthlyArchives.pop();
@@ -1603,6 +1642,7 @@ var DebtSnowballApp = (() => {
           appState.paidStatus = rollover.nextState.paidStatus;
           appState.minPayOverrides = rollover.nextState.minPayOverrides;
           appState.spendingBudgets = rollover.nextState.spendingBudgets;
+          appState.startingBalance = rollover.nextState.startingBalance;
           saveData().catch((err) => reportError("Month rollover save failed", err));
         } else if (data.paidStatus) {
           appState.paidStatus = data.paidStatus;
@@ -1617,7 +1657,11 @@ var DebtSnowballApp = (() => {
           if (htmlMk && stale.length) {
             appState.incomeEntries = [
               ...generateRecurringIncomeForMonth(appState.incomeEntries, wm),
-              ...appState.incomeEntries.filter(isOneTimeInc)
+              // One-time income is month-scoped — only rows dated in
+              // the working month survive; stale ones from other
+              // months must not re-enter (they'd render on wrong days
+              // and inflate income totals forever).
+              ...appState.incomeEntries.filter((e) => isOneTimeInc(e) && (e.date || "").slice(0, 7) === htmlMk)
             ];
             needsCleanupSave = true;
             console.info(`[DebtSnowball] Regenerated ${stale.length} income entr(ies) with stale dates for the working month.`);
@@ -2077,11 +2121,15 @@ This replaces ALL current data with that snapshot.`)) {
   function renderCheckpointsList() {
     const container = appState._root.getElementById("checkpoints-list");
     if (!container) return;
-    if (appState.checkpoints.length === 0) {
+    const archive = appState.viewingArchiveIndex !== null ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
+    const cps = archive ? archive.checkpoints || [] : appState.checkpoints;
+    const addRow = appState._root.getElementById("add-checkpoint-row");
+    if (addRow) addRow.style.display = archive ? "none" : "";
+    if (cps.length === 0) {
       container.innerHTML = "";
       return;
     }
-    const sorted = [...appState.checkpoints].sort((a, b) => a.day - b.day);
+    const sorted = [...cps].sort((a, b) => a.day - b.day);
     const formatMoneyLocal = (n) => {
       const currency = appState._root._currency || "USD";
       const locale = appState._root._locale || "en-US";
@@ -2095,16 +2143,17 @@ This replaces ALL current data with that snapshot.`)) {
     const listHtml = sorted.map((cp) => `
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: rgba(168,85,247,0.06); border-radius: 6px; border: 1px solid rgba(168,85,247,0.2);">
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(168,85,247,0.15); padding: 0.2rem 0.4rem; border-radius: 4px;">Day ${cp.day}</span>
+                <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(168,85,247,0.15); padding: 0.2rem 0.4rem; border-radius: 4px;"${cp.autoRollover ? ` title="Carried over from last month's final balance"` : ""}>Day ${cp.day}${cp.autoRollover ? " \xB7 auto" : ""}</span>
                 <span style="font-weight: 500; color: var(--text-primary);">${formatMoneyLocal(cp.amount)}</span>
             </div>
+            ${archive ? "" : `
             <button class="btn btn-icon delete-checkpoint-btn" data-id="${cp.id}" title="Remove checkpoint" style="padding: 0.25rem; font-size: 0.75rem; background: transparent; color: var(--danger-color); border: none; cursor: pointer;">
                 \u2715
-            </button>
+            </button>`}
         </div>
     `).join("");
     container.innerHTML = `
-        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Mid-month checkpoints:</div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${archive ? "Checkpoints (archived):" : "Mid-month checkpoints:"}</div>
         ${listHtml}
     `;
   }
@@ -2138,7 +2187,7 @@ This replaces ALL current data with that snapshot.`)) {
       const day = parseInt(appState._root.getElementById("checkpoint-day").value);
       const amount = parseFloat(appState._root.getElementById("checkpoint-amount").value);
       if (!day || day < 1 || day > 31) throw new Error("Please select a valid day (1-31).");
-      if (!Number.isFinite(amount) || amount < 0) throw new Error("Please enter a valid amount.");
+      if (!Number.isFinite(amount)) throw new Error("Please enter a valid amount.");
       const existingSameDay = appState.checkpoints.find((cp) => cp.day === day && cp.id !== id);
       if (existingSameDay) throw new Error(`A checkpoint for day ${day} already exists.`);
       if (id) {
@@ -2624,7 +2673,9 @@ This replaces ALL current data with that snapshot.`)) {
   function renderIncomeList() {
     appState.incomeListContainer.innerHTML = "";
     const summaryEl = appState._root.getElementById("income-summary");
-    if (appState.incomeEntries.length === 0) {
+    const wmHtml = keyToHtmlMonth(appState.workingMonthKey || currentMonthKey());
+    const monthIncome = appState.incomeEntries.filter((e) => (e.date || "").slice(0, 7) === wmHtml);
+    if (monthIncome.length === 0) {
       appState.incomeListContainer.innerHTML = `
             <div class="empty-state">
                 No income entries yet.<br>Add your paychecks and other income for this month.
@@ -2637,7 +2688,7 @@ This replaces ALL current data with that snapshot.`)) {
       return;
     }
     appState.incomeListContainer.style.display = "grid";
-    const sorted = [...appState.incomeEntries.sort((a, b) => a.date.localeCompare(b.date))];
+    const sorted = [...monthIncome].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     sorted.forEach((entry, idx) => {
       const dateStr = (/* @__PURE__ */ new Date(entry.date + "T00:00:00")).toLocaleDateString(void 0, { month: "short", day: "numeric" });
       const el = document.createElement("div");
@@ -2659,14 +2710,14 @@ This replaces ALL current data with that snapshot.`)) {
     });
     appState.incomeListContainer.querySelectorAll(".btn-edit-income").forEach((b) => b.addEventListener("click", (e) => openIncomeModal(e.target.dataset.id)));
     appState.incomeListContainer.querySelectorAll(".btn-delete-income").forEach((b) => b.addEventListener("click", (e) => deleteIncome(e.target.dataset.id)));
-    const total = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const total = monthIncome.reduce((s, e) => s + e.amount, 0);
     summaryEl.style.display = "block";
     summaryEl.innerHTML = `<span class="income-summary-label">Total Monthly Income:</span><span class="income-summary-value">${formatMoney(total)}</span>`;
   }
   function renderRecurringCostsList() {
     appState.costsListContainer.innerHTML = "";
     const recurringSummaryEl = appState._root.getElementById("recurring-summary");
-    const visibleRecurring = appState.recurringCosts.filter((c) => isCostDueThisMonth(c));
+    const visibleRecurring = appState.recurringCosts.filter((c) => isCostDueThisMonth(c, appState.workingMonthKey || currentMonthKey()));
     const totalRecurring = visibleRecurring.reduce((sum, c) => sum + c.amount, 0);
     const directRecurring = visibleRecurring.filter((c) => c.paymentMethod === "direct").reduce((sum, c) => sum + c.amount, 0);
     const cardRecurring = visibleRecurring.filter((c) => c.paymentMethod === "card").reduce((sum, c) => sum + c.amount, 0);
@@ -2748,7 +2799,7 @@ This replaces ALL current data with that snapshot.`)) {
   function renderCostCard(cost, grid, isOneTime, currentDay) {
     const isPastDue = (cost.dueDay || 1) <= currentDay;
     const isCard = cost.paymentMethod === "card";
-    const isDue = isOneTime || isCostDueThisMonth(cost);
+    const isDue = isOneTime || isCostDueThisMonth(cost, appState.workingMonthKey || currentMonthKey());
     const intN = cost.intervalMonths || 1;
     const paidState = appState.paidStatus[cost.id];
     const paymentMethodBadge = isCard ? '<span class="debt-type-badge card-badge">\u{1F4B3} Card</span>' : '<span class="debt-type-badge direct-badge">\u{1F3E6} Direct</span>';
@@ -3092,108 +3143,13 @@ This replaces ALL current data with that snapshot.`)) {
   });
 
   // src/app/render-payment.js
-  function runSimulation2(strat) {
-    const totalIncome = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
-    const activeCosts = appState.recurringCosts.filter((c) => isCostDueThisMonth(c));
-    const totalRecurringDirect = activeCosts.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
-    const totalRecurringCard = activeCosts.filter((c) => c.paymentMethod === "card").reduce((s, c) => s + c.amount, 0);
-    const totalRecurring = activeCosts.reduce((s, c) => s + c.amount, 0);
-    const effectiveBudget = totalIncome - totalRecurringDirect;
-    if (appState.debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
-      return { valid: false, totalIncome, totalRecurring, effectiveBudget };
-    }
-    const totalMinPayments = appState.debts.reduce((s, d) => s + d.minPayment, 0);
-    if (effectiveBudget < totalMinPayments) {
-      return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
-    }
-    const incomeDays = [...appState.incomeEntries.map((e) => ({ day: parseInt(e.date.split("-")[2]), amount: e.amount })).sort((a, b) => a.day - b.day)];
-    let simDebts = appState.debts.map((d) => ({ ...d, interestPaid: 0 }));
-    const MAX_MONTHS = 1200;
-    let monthsElapsed = 0;
-    let totalInterestPaid = 0;
-    let payoffLog = [];
-    const perDebtMonthly = {};
-    simDebts.forEach((d) => {
-      perDebtMonthly[d.id] = [d.balance];
-    });
-    const day1Checkpoint = appState.checkpoints.find((cp) => cp.day === 1);
-    const day1Balance = day1Checkpoint ? day1Checkpoint.amount : 0;
-    while (simDebts.some((d) => d.balance > 0) && monthsElapsed < MAX_MONTHS) {
-      monthsElapsed++;
-      let availableCash = effectiveBudget + (monthsElapsed === 1 ? day1Balance : 0);
-      simDebts.forEach((d) => {
-        if (d.balance <= 0) return;
-        let effectiveRate = d.rate;
-        if (d.promoZeroInterest && d.promoExpiryDate) {
-          const today = /* @__PURE__ */ new Date();
-          const simDate = new Date(today.getFullYear(), today.getMonth() + monthsElapsed, 1);
-          if (simDate <= /* @__PURE__ */ new Date(d.promoExpiryDate + "T00:00:00")) effectiveRate = 0;
-          else effectiveRate = d.originalRate || d.rate;
-        }
-        const interest = d.balance * (effectiveRate / 100 / 12);
-        d.balance += interest;
-        totalInterestPaid += interest;
-        d.interestPaid += interest;
-      });
-      const alive = simDebts.filter((d) => d.balance > 0);
-      const ordered = getStrategyOrder(alive, strat);
-      const targetId = ordered[0]?.id;
-      const aliveMinSum = alive.reduce((s, d) => s + d.minPayment, 0);
-      const extraAvail = Math.max(0, effectiveBudget - aliveMinSum);
-      const paymentQueue = alive.map((d) => ({
-        id: d.id,
-        dueDay: d.dueDay || 1,
-        needed: Math.min(
-          d.balance,
-          d.minPayment + (d.id === targetId ? Math.min(extraAvail, Math.max(0, d.balance - d.minPayment)) : 0)
-        )
-      })).sort((a, b) => a.dueDay - b.dueDay);
-      let cashPool = 0;
-      let incomeIdx = 0;
-      for (const payment of paymentQueue) {
-        while (incomeIdx < incomeDays.length && incomeDays[incomeIdx].day <= payment.dueDay) {
-          cashPool += incomeDays[incomeIdx++].amount;
-        }
-        while (cashPool < payment.needed && incomeIdx < incomeDays.length) {
-          cashPool += incomeDays[incomeIdx++].amount;
-        }
-        const debt = simDebts.find((d) => d.id === payment.id);
-        if (!debt || debt.balance <= 0) continue;
-        const actual = Math.min(payment.needed, cashPool, debt.balance);
-        cashPool -= actual;
-        debt.balance = Math.max(0, debt.balance - actual);
-        if (debt.balance <= 0.01) {
-          debt.balance = 0;
-          if (!payoffLog.find((l) => l.id === debt.id)) {
-            payoffLog.push({ ...debt, payoffMonth: monthsElapsed });
-          }
-        }
-      }
-      simDebts.forEach((d) => {
-        perDebtMonthly[d.id].push(Math.max(0, d.balance));
-      });
-    }
-    const debtPayoffMonths = {};
-    payoffLog.forEach((l) => {
-      debtPayoffMonths[l.id] = l.payoffMonth;
-    });
-    const maxLen = Math.max(...Object.values(perDebtMonthly).map((a) => a.length));
-    const monthlyTotals = Array.from(
-      { length: maxLen },
-      (_, i) => Object.values(perDebtMonthly).reduce((sum, arr) => sum + (arr[i] ?? 0), 0)
-    );
-    return {
-      valid: true,
-      monthsElapsed,
-      totalInterestPaid,
-      payoffLog,
-      monthlyTotals,
-      perDebtMonthly,
-      debtPayoffMonths,
-      totalIncome,
-      totalRecurring,
-      effectiveBudget
-    };
+  function runSimulation3(strat) {
+    return simulatePayoff({
+      debts: appState.debts,
+      incomeEntries: appState.incomeEntries,
+      recurringCosts: appState.recurringCosts,
+      monthKey: appState.workingMonthKey || currentMonthKey()
+    }, strat);
   }
   function renderVisualization(simResults) {
     const statTotalDebt = appState._root.getElementById("stat-total-debt");
@@ -3232,7 +3188,7 @@ This replaces ALL current data with that snapshot.`)) {
                     <strong>Costs:</strong> ${formatMoney(archiveDataForDebt.totalCosts || 0)}
                 </div>
                 <div class="timeline-error-actions">
-                    <button class="btn btn-primary" onclick="document.getElementById('plan-next-month-btn').click()">\u{1F4C5} Return to Current Month</button>
+                    <button class="btn btn-primary" data-click-target="plan-next-month-btn">\u{1F4C5} Return to Current Month</button>
                 </div>
             </div>`;
       renderPaydownChart([], {});
@@ -3251,7 +3207,7 @@ This replaces ALL current data with that snapshot.`)) {
                 <div class="timeline-error-title">No Debts Added</div>
                 <div class="timeline-error-message">Add your credit cards, loans, and other debts to see your personalized payoff timeline and calculate your debt-free date.</div>
                 <div class="timeline-error-actions">
-                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab="debts"]').click()">\u{1F4B3} Add Your First Debt</button>
+                    <button class="btn btn-primary" data-goto-tab="debts">\u{1F4B3} Add Your First Debt</button>
                 </div>
             </div>`;
       renderPaydownChart([], {});
@@ -3276,22 +3232,22 @@ This replaces ALL current data with that snapshot.`)) {
         icon = "\u{1F4B0}";
         title = "No Income Added";
         message = "You need to add income entries before we can calculate your payoff timeline. Tell us about your paychecks, deposits, or any other monthly income.";
-        primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab="income"]').click(); setTimeout(() => document.getElementById('add-income-btn').click(), 100)">\u2795 Add Income</button>`;
+        primaryAction = `<button class="btn btn-success" data-goto-tab="income" data-then-click="add-income-btn">\u2795 Add Income</button>`;
       } else if ((effectiveBudget || 0) <= 0) {
-        const _active = appState.recurringCosts.filter((c) => isCostDueThisMonth(c));
+        const _active = appState.recurringCosts.filter((c) => isCostDueThisMonth(c, appState.workingMonthKey || currentMonthKey()));
         const totalRecurringDirect = _active.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
         const totalRecurringCard = _active.filter((c) => c.paymentMethod === "card").reduce((s, c) => s + c.amount, 0);
         icon = "\u{1F4C9}";
         title = "Budget Over-Committed";
         message = `Your income of ${formatMoney(totalIncome)} is entirely consumed by direct recurring costs of ${formatMoney(totalRecurringDirect)}.${totalRecurringCard > 0 ? ` (Card-charged costs of ${formatMoney(totalRecurringCard)} are already factored into card payments.)` : ""} You need to either increase income or reduce costs to free up money for debt payoff.`;
-        primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab="income"]').click()">\u{1F4B0} Add Income</button>`;
-        secondaryAction = `<button class="btn btn-warning" onclick="document.querySelector('[data-tab="income"]').click()">\u{1F4DD} Review Costs</button>`;
+        primaryAction = `<button class="btn btn-success" data-goto-tab="income">\u{1F4B0} Add Income</button>`;
+        secondaryAction = `<button class="btn btn-warning" data-goto-tab="income">\u{1F4DD} Review Costs</button>`;
       } else {
         icon = "\u{1F4B3}";
         title = "Can't Cover Minimum Payments";
         message = `Your effective budget of ${formatMoney(effectiveBudget)} is less than your total minimum payments of ${formatMoney(totalMinPayments)}. You need more available cash to make progress on your debts.`;
-        primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab="income"]').click()">\u{1F4B0} Increase Income</button>`;
-        secondaryAction = `<button class="btn btn-secondary" onclick="document.querySelector('[data-tab="debts"]').click()">\u{1F4C9} Review Debts</button>`;
+        primaryAction = `<button class="btn btn-success" data-goto-tab="income">\u{1F4B0} Increase Income</button>`;
+        secondaryAction = `<button class="btn btn-secondary" data-goto-tab="debts">\u{1F4C9} Review Debts</button>`;
       }
       timelineChart.innerHTML = `
             <div class="timeline-error-card">
@@ -3320,8 +3276,8 @@ This replaces ALL current data with that snapshot.`)) {
                 <div class="timeline-error-title">Payoff Exceeds 100 Years</div>
                 <div class="timeline-error-message">With your current budget, these debts would take over 100 years to pay off. This usually means either the balances are very high compared to your available payoff budget, or interest rates are preventing progress.</div>
                 <div class="timeline-error-actions">
-                    <button class="btn btn-success" onclick="document.querySelector('[data-tab="income"]').click()">\u{1F4B0} Increase Budget</button>
-                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab="debts"]').click()">\u{1F4C9} Review Debts</button>
+                    <button class="btn btn-success" data-goto-tab="income">\u{1F4B0} Increase Budget</button>
+                    <button class="btn btn-primary" data-goto-tab="debts">\u{1F4C9} Review Debts</button>
                 </div>
             </div>`;
       return;
@@ -3337,7 +3293,7 @@ This replaces ALL current data with that snapshot.`)) {
     startCountdown(payoffDate);
     const otherStrat = appState.strategy === "snowball" ? "avalanche" : "snowball";
     const otherLabel = otherStrat.charAt(0).toUpperCase() + otherStrat.slice(1);
-    const otherResult = runSimulation2(otherStrat);
+    const otherResult = runSimulation3(otherStrat);
     if (otherResult.valid) {
       const interestDiff = otherResult.totalInterestPaid - simResults.totalInterestPaid;
       statSavingsBox.style.display = "block";
@@ -3363,14 +3319,15 @@ This replaces ALL current data with that snapshot.`)) {
     const list = appState._root.getElementById("payment-plan-list");
     const isArchiveView = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
     const archiveData = isArchiveView ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
-    const _income = archiveData ? archiveData.incomeEntries || [] : appState.incomeEntries;
+    const _monthKey = archiveData ? archiveData.month : appState.workingMonthKey || currentMonthKey();
+    const _incomeHtml = keyToHtmlMonth(_monthKey);
+    const _income = (archiveData ? archiveData.incomeEntries || [] : appState.incomeEntries).filter((e) => (e.date || "").slice(0, 7) === _incomeHtml);
     const _costs = archiveData ? archiveData.recurringCosts || [] : appState.recurringCosts;
     const _oneTimeCosts = archiveData ? archiveData.oneTimeCosts || [] : appState.oneTimeCosts;
     const _checkpoints = archiveData ? archiveData.checkpoints || [] : appState.checkpoints;
     const _debts = archiveData ? archiveData.debts || appState.debts : appState.debts;
     const _startBal = archiveData ? archiveData.startingBalance || 0 : appState.startingBalance;
     const _paidStatus = archiveData ? archiveData.paidStatus || {} : appState.paidStatus;
-    const _monthKey = archiveData ? archiveData.month : appState.workingMonthKey || currentMonthKey();
     const monthTitleEl = appState._root.getElementById("global-month-title");
     const prevBtn = appState._root.getElementById("plan-prev-month-btn");
     const nextBtn = appState._root.getElementById("plan-next-month-btn");
@@ -3393,9 +3350,10 @@ This replaces ALL current data with that snapshot.`)) {
     }
     const events = [];
     const today = /* @__PURE__ */ new Date();
-    const currentDay = today.getDate();
+    const isLiveMonth = !isArchiveView && _monthKey === currentMonthKey();
+    const currentDay = isLiveMonth ? today.getDate() : 0;
     _income.forEach((entry) => {
-      const day = parseInt(entry.date.split("-")[2]);
+      const day = parseInt(entry.date.split("-")[2]) || 1;
       events.push({ type: "income", id: entry.id, name: entry.label, day, date: /* @__PURE__ */ new Date(entry.date + "T00:00:00"), amount: entry.amount, sortKey: day * 1e3 });
     });
     _checkpoints.forEach((cp) => {
@@ -3633,7 +3591,7 @@ This replaces ALL current data with that snapshot.`)) {
       ovBudgetsContainer.style.display = "none";
     }
     section.style.display = "block";
-    let todayMarkerInserted = isArchiveView;
+    let todayMarkerInserted = !isLiveMonth;
     schedule.forEach((item, index) => {
       if (!todayMarkerInserted && (item.day || 1) >= currentDay) {
         todayMarkerInserted = true;
@@ -4431,9 +4389,11 @@ This replaces ALL current data with that snapshot.`)) {
     const aliveDebts = appState.debts.filter((d) => d.balance > 0);
     const sortedDebts = getStrategyOrder(aliveDebts, appState.strategy);
     const targetId = sortedDebts[0]?.id;
-    const totalIncome = appState.incomeEntries.reduce((s, e) => s + e.amount, 0);
+    const _wmKey = appState.workingMonthKey || currentMonthKey();
+    const _wmHtml = keyToHtmlMonth(_wmKey);
+    const totalIncome = appState.incomeEntries.filter((e) => (e.date || "").slice(0, 7) === _wmHtml).reduce((s, e) => s + e.amount, 0);
     const totalRecurring = [
-      ...appState.recurringCosts.filter((c) => isCostDueThisMonth(c) && c.paymentMethod !== "card"),
+      ...appState.recurringCosts.filter((c) => isCostDueThisMonth(c, _wmKey) && c.paymentMethod !== "card"),
       ...appState.oneTimeCosts.filter((c) => c.paymentMethod !== "card")
     ].reduce((s, c) => s + c.amount, 0);
     const totalMinPay = sortedDebts.reduce((s, d) => s + (appState.minPayOverrides[d.id] ?? d.minPayment), 0);
@@ -4735,7 +4695,9 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       checkpoints: appState.checkpoints,
       startingBalance: appState.startingBalance,
       paidStatus: appState.paidStatus,
-      spendingBudgets: appState.spendingBudgets
+      spendingBudgets: appState.spendingBudgets,
+      minPayOverrides: appState.minPayOverrides,
+      strategy: appState.strategy
     }, currentKey, nextKey);
     const nextFields = {
       incomeEntries: result.nextState.incomeEntries,
@@ -4745,6 +4707,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       paidStatus: result.nextState.paidStatus,
       minPayOverrides: result.nextState.minPayOverrides,
       spendingBudgets: result.nextState.spendingBudgets,
+      startingBalance: result.nextState.startingBalance,
       monthlyArchives: [result.archive, ...appState.monthlyArchives].slice(0, 24)
     };
     try {
@@ -4794,6 +4757,17 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       btn.appendChild(ripple);
       ripple.addEventListener("animationend", () => ripple.remove());
     }, true);
+    appState._root.addEventListener("click", (e) => {
+      const nav = e.target.closest("[data-goto-tab]");
+      if (nav) {
+        appState._root.querySelector(`[data-tab="${nav.dataset.gotoTab}"]`)?.click();
+        const then = nav.dataset.thenClick;
+        if (then) setTimeout(() => appState._root.getElementById(then)?.click(), 100);
+        return;
+      }
+      const clicker = e.target.closest("[data-click-target]");
+      if (clicker) appState._root.getElementById(clicker.dataset.clickTarget)?.click();
+    });
     appState.addDebtBtn.addEventListener("click", () => openDebtModal());
     appState.addCostBtn.addEventListener("click", () => openCostModal());
     appState.addIncomeBtn.addEventListener("click", () => openIncomeModal());
@@ -5108,10 +5082,11 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       const amountInput = appState._root.getElementById("new-checkpoint-amount");
       const day = parseInt(dayInput.value);
       const amount = parseFloat(amountInput.value);
-      if (!day || !Number.isFinite(amount) || amount < 0) {
+      if (!day || !Number.isFinite(amount)) {
         showErrorToast("Please enter a valid day and amount");
         return;
       }
+      if (appState.viewingArchiveIndex !== null) return;
       if (appState.checkpoints.some((cp) => cp.day === day)) {
         showErrorToast(`A checkpoint for day ${day} already exists`);
         return;
@@ -5132,7 +5107,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     });
     appState._root.getElementById("checkpoints-list").addEventListener("click", (e) => {
       const deleteBtn = e.target.closest(".delete-checkpoint-btn");
-      if (deleteBtn) {
+      if (deleteBtn && appState.viewingArchiveIndex === null) {
         const id = deleteBtn.dataset.id;
         appState.checkpoints = appState.checkpoints.filter((c) => c.id !== id);
         saveData().then(() => {
@@ -9337,6 +9312,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
             <button id="plan-prev-month-btn" class="btn btn-secondary btn-sm" style="visibility:hidden;">\u2190 Previous</button>
             <div class="month-title" id="global-month-title"></div>
             <button id="plan-next-month-btn" class="btn btn-primary btn-sm" style="visibility:hidden;">Current Month \u2192</button>
+            <button id="advance-month-btn" class="btn btn-secondary btn-sm" title="Archive this month and start fresh for next month early">\u23ED Skip to Next</button>
         </div>
 
         <nav class="tab-nav">
@@ -9361,13 +9337,13 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                     <div id="checkpoints-list" style="margin-bottom: 1rem;"></div>
 
                     <!-- Add New Checkpoint -->
-                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <div id="add-checkpoint-row" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                         <span style="font-size: 0.875rem; color: var(--text-secondary);">Add checkpoint on day</span>
                         <select id="new-checkpoint-day" style="width: 65px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
                             ${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("")}
                         </select>
                         <span style="font-size: 0.875rem; color: var(--text-secondary);">for</span>
-                        <input type="number" id="new-checkpoint-amount" min="0" step="0.01" placeholder="Amount"
+                        <input type="number" id="new-checkpoint-amount" step="0.01" placeholder="Amount"
                             style="width: 100px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
                         <button id="add-checkpoint-btn" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.8rem; white-space: nowrap;">+ Add</button>
                     </div>
@@ -9471,10 +9447,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                             <h2>Income</h2>
                             <p class="subtitle" style="margin-bottom:0;">Add each paycheck, deposit, or other income for this month with its expected date.</p>
                         </div>
-                        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-                            <button id="advance-month-btn" class="btn btn-secondary" title="Archive this month and start fresh for next month early">\u23ED Next Month</button>
-                            <button id="add-income-btn" class="btn btn-success">+ Add Income</button>
-                        </div>
+                        <button id="add-income-btn" class="btn btn-success">+ Add Income</button>
                     </div>
                     <div id="income-list" class="debts-list">
                         </div>
@@ -9917,7 +9890,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                 </div>
                 <div class="input-group">
                     <label for="checkpoint-amount">Balance Amount ($)</label>
-                    <input type="number" id="checkpoint-amount" min="0" step="0.01" required placeholder="e.g. 1200">
+                    <input type="number" id="checkpoint-amount" step="0.01" required placeholder="e.g. 1200">
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-checkpoint-modal">Cancel</button>

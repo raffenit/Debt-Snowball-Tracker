@@ -4015,6 +4015,7 @@ const PANEL_HTML = `<div class="app-container">
             <button id="plan-prev-month-btn" class="btn btn-secondary btn-sm" style="visibility:hidden;">← Previous</button>
             <div class="month-title" id="global-month-title"></div>
             <button id="plan-next-month-btn" class="btn btn-primary btn-sm" style="visibility:hidden;">Current Month →</button>
+            <button id="advance-month-btn" class="btn btn-secondary btn-sm" title="Archive this month and start fresh for next month early">⏭ Skip to Next</button>
         </div>
 
         <nav class="tab-nav">
@@ -4039,13 +4040,13 @@ const PANEL_HTML = `<div class="app-container">
                     <div id="checkpoints-list" style="margin-bottom: 1rem;"></div>
 
                     <!-- Add New Checkpoint -->
-                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <div id="add-checkpoint-row" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                         <span style="font-size: 0.875rem; color: var(--text-secondary);">Add checkpoint on day</span>
                         <select id="new-checkpoint-day" style="width: 65px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
                             ${Array.from({length: 31}, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}
                         </select>
                         <span style="font-size: 0.875rem; color: var(--text-secondary);">for</span>
-                        <input type="number" id="new-checkpoint-amount" min="0" step="0.01" placeholder="Amount"
+                        <input type="number" id="new-checkpoint-amount" step="0.01" placeholder="Amount"
                             style="width: 100px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
                         <button id="add-checkpoint-btn" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.8rem; white-space: nowrap;">+ Add</button>
                     </div>
@@ -4149,10 +4150,7 @@ const PANEL_HTML = `<div class="app-container">
                             <h2>Income</h2>
                             <p class="subtitle" style="margin-bottom:0;">Add each paycheck, deposit, or other income for this month with its expected date.</p>
                         </div>
-                        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-                            <button id="advance-month-btn" class="btn btn-secondary" title="Archive this month and start fresh for next month early">⏭ Next Month</button>
-                            <button id="add-income-btn" class="btn btn-success">+ Add Income</button>
-                        </div>
+                        <button id="add-income-btn" class="btn btn-success">+ Add Income</button>
                     </div>
                     <div id="income-list" class="debts-list">
                         </div>
@@ -4595,7 +4593,7 @@ const PANEL_HTML = `<div class="app-container">
                 </div>
                 <div class="input-group">
                     <label for="checkpoint-amount">Balance Amount ($)</label>
-                    <input type="number" id="checkpoint-amount" min="0" step="0.01" required placeholder="e.g. 1200">
+                    <input type="number" id="checkpoint-amount" step="0.01" required placeholder="e.g. 1200">
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-checkpoint-modal">Cancel</button>

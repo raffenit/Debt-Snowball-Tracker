@@ -11,6 +11,7 @@ import {
     addMonthsToKey,
 } from './date-utils.js';
 import { cashExpensesForMonth, syncCardExpenses } from './card-expenses.js';
+import { getStrategyOrder } from './simulation.js';
 
 /**
  * Calculate the state transition when closing one month and opening the next.
@@ -24,6 +25,8 @@ import { cashExpensesForMonth, syncCardExpenses } from './card-expenses.js';
  * @param {number} state.startingBalance
  * @param {Object} state.paidStatus
  * @param {Array} state.spendingBudgets
+ * @param {Object} [state.minPayOverrides]
+ * @param {string} [state.strategy]
  * @param {string} closingMonthKey - Month being closed (e.g. "2026-3")
  * @param {string} nextMonthKey - Month being opened (e.g. "2026-4")
  * @returns {{archive: Object, nextState: Object}} Archive snapshot and next-month state
@@ -38,6 +41,8 @@ export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
         startingBalance = 0,
         paidStatus = {},
         spendingBudgets = [],
+        minPayOverrides = {},
+        strategy = 'snowball',
     } = state;
 
     // Card-paid bills never touch bank cash (autopaid by card), and manual
@@ -70,18 +75,52 @@ export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
         totalCosts,
     };
 
-    // ── 2. Final balance = day-1 cash + income − all cash out ──────────────
-    const day1Cp = checkpoints.find(cp => cp.day === 1);
-    let cashPool = day1Cp ? day1Cp.amount : 0;
+    // ── 2. Final balance, mirroring the cash-flow schedule ─────────────────
+    // A checkpoint is a ground-truth bank sync that hard-resets the pool, so
+    // the LAST one is the real balance — only income after its day still adds,
+    // and only outflows on/after its day still subtract. With no checkpoints
+    // the pool starts at 0. Debt payments are real cash outflows and must be
+    // counted (minimums/overrides + snowball extra on the target, capped at
+    // balance — same math the schedule uses).
     const totalIncome = incomeEntries.reduce((s, e) => s + e.amount, 0);
-    const finalBalance = cashPool + totalIncome - totalCosts;
+    const orderedDebts = getStrategyOrder(debts.filter(d => d.balance > 0), strategy);
+    const totalMinPay = orderedDebts.reduce((s, d) => s + (minPayOverrides[d.id] ?? d.minPayment ?? 0), 0);
+    const extra = Math.max(0, totalIncome - totalCosts - totalMinPay);
+    const targetId = orderedDebts[0]?.id;
+
+    const syncDay = checkpoints.length
+        ? Math.max(...checkpoints.map(cp => cp.day))
+        : 0;
+    const poolAtSync = checkpoints.length
+        ? checkpoints.find(cp => cp.day === syncDay).amount
+        : 0;
+
+    const dayOf = (e) => parseInt((e.date || '').split('-')[2]) || 1;
+    const incomeAfter = incomeEntries
+        .filter(e => dayOf(e) > syncDay)
+        .reduce((s, e) => s + e.amount, 0);
+    const outflowsAfter = [
+        ...cashCosts.map(c => ({ day: c.dueDay || 1, amount: c.amount })),
+        ...cashExpensesForMonth(spendingBudgets || [], closingMonthKey)
+            .map(e => ({ day: e.date ? dayOf(e) : 1, amount: e.amount })),
+        ...orderedDebts.map(d => ({
+            day: d.dueDay || 1,
+            amount: Math.min(d.balance,
+                (minPayOverrides[d.id] ?? d.minPayment ?? 0) + (d.id === targetId ? extra : 0)),
+        })),
+    ].filter(x => x.day >= syncDay)
+     .reduce((s, x) => s + x.amount, 0);
+
+    const finalBalance = poolAtSync + incomeAfter - outflowsAfter;
     archive.finalBalance = finalBalance;
 
     // ── 3. Next-month state ─────────────────────────────────────────────────
     const nextIncome = generateRecurringIncomeForMonth(incomeEntries, nextMonthKey);
-    const nextCheckpoints = finalBalance > 0
-        ? [{ id: 'cp_' + Date.now(), day: 1, amount: finalBalance }]
-        : [];
+    // Always seed day 1 with the closing month's final balance — including
+    // zero and negative (overdraft) values. The next month's cash position
+    // should never silently reset to "no checkpoint" just because the
+    // month ended in the red.
+    const nextCheckpoints = [{ id: 'cp_' + Date.now(), day: 1, amount: finalBalance, autoRollover: true }];
     // Defensive: strip any one-time costs that may still be in recurringCosts (backward compat)
     const cleanRecurring = recurringCosts.filter(c => (c.category || 'other') !== 'one-time');
     const nextCosts = cleanRecurring.map(c => {
@@ -108,6 +147,7 @@ export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
             paidStatus: {},
             minPayOverrides: {},
             spendingBudgets: nextBudgets,
+            startingBalance: finalBalance,
         },
     };
 }

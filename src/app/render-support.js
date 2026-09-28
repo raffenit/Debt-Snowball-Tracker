@@ -1,7 +1,7 @@
 import { appState } from './state.js';
 import { currentMonthKey } from '../core/date-utils.js';
 import { calcAutoMin, escHtml, formatMoney } from '../core/pure-utils.js';
-import { getStrategyOrder, runSimulation } from '../core/simulation.js';
+import { getStrategyOrder, simulatePayoff } from '../core/simulation.js';
 import { showNotificationToast } from './render-export.js';
 
 // ─── Countdown Timer ─────────────────────────────────────────────────────────
@@ -81,6 +81,17 @@ function openWindfallModal() {
 function closeWindfallModal() {
     appState.windfallModal.classList.remove('active');
     setTimeout(() => { appState.windfallModal.style.display = 'none'; }, 300);
+}
+
+// The payoff sim lives in core/simulation.js and takes an explicit state
+// snapshot — feed it live appState scoped to the working month.
+function runSimulation(strat) {
+    return simulatePayoff({
+        debts:          appState.debts,
+        incomeEntries:  appState.incomeEntries,
+        recurringCosts: appState.recurringCosts,
+        monthKey:       appState.workingMonthKey || currentMonthKey(),
+    }, strat);
 }
 
 function calcWindfall() {

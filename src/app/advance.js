@@ -31,6 +31,8 @@ async function advanceToNextMonth() {
         startingBalance: appState.startingBalance,
         paidStatus:     appState.paidStatus,
         spendingBudgets: appState.spendingBudgets,
+        minPayOverrides: appState.minPayOverrides,
+        strategy:       appState.strategy,
     }, currentKey, nextKey);
 
     // Compute the full next-month payload FIRST, persist it, and only then
@@ -44,6 +46,7 @@ async function advanceToNextMonth() {
         paidStatus:      result.nextState.paidStatus,
         minPayOverrides: result.nextState.minPayOverrides,
         spendingBudgets: result.nextState.spendingBudgets,
+        startingBalance: result.nextState.startingBalance,
         monthlyArchives: [result.archive, ...appState.monthlyArchives].slice(0, 24),
     };
 

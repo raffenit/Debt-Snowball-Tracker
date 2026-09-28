@@ -31,6 +31,7 @@ export {
     getStrategyOrder,
     runSimulation,
     runSimulationWithWindfall,
+    simulatePayoff,
     setDebts,
     setRecurringCosts,
     setOneTimeCosts,

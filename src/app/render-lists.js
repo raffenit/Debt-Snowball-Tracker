@@ -1,5 +1,5 @@
 import { appState } from './state.js';
-import { currentMonthKey, formatMonthLabel, intervalLabel, isCostDueThisMonth } from '../core/date-utils.js';
+import { currentMonthKey, formatMonthLabel, intervalLabel, isCostDueThisMonth, keyToHtmlMonth } from '../core/date-utils.js';
 import { cardChargesByDebt } from '../core/card-expenses.js';
 import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
 import { getStrategyOrder } from '../core/simulation.js';
@@ -10,7 +10,12 @@ function renderIncomeList() {
     appState.incomeListContainer.innerHTML = '';
     const summaryEl = appState._root.getElementById('income-summary');
 
-    if (appState.incomeEntries.length === 0) {
+    // Show the working month's income — recurring rows are materialized to it,
+    // so this filter only drops stray rows dated in other months.
+    const wmHtml = keyToHtmlMonth(appState.workingMonthKey || currentMonthKey());
+    const monthIncome = appState.incomeEntries.filter(e => (e.date || '').slice(0, 7) === wmHtml);
+
+    if (monthIncome.length === 0) {
         appState.incomeListContainer.innerHTML = `
             <div class="empty-state">
                 No income entries yet.<br>Add your paychecks and other income for this month.
@@ -24,7 +29,7 @@ function renderIncomeList() {
     }
 
     appState.incomeListContainer.style.display = 'grid';
-    const sorted = [...appState.incomeEntries.sort((a,b) => a.date.localeCompare(b.date))];
+    const sorted = [...monthIncome].sort((a,b) => (a.date || '').localeCompare(b.date || ''));
 
     sorted.forEach((entry, idx) => {
         const dateStr = new Date(entry.date+'T00:00:00').toLocaleDateString(undefined, { month:'short', day:'numeric' });
@@ -49,7 +54,7 @@ function renderIncomeList() {
     appState.incomeListContainer.querySelectorAll('.btn-edit-income').forEach(b   => b.addEventListener('click', e => openIncomeModal(e.target.dataset.id)));
     appState.incomeListContainer.querySelectorAll('.btn-delete-income').forEach(b => b.addEventListener('click', e => deleteIncome(e.target.dataset.id)));
 
-    const total = appState.incomeEntries.reduce((s,e) => s + e.amount, 0);
+    const total = monthIncome.reduce((s,e) => s + e.amount, 0);
     summaryEl.style.display = 'block';
     summaryEl.innerHTML = `<span class="income-summary-label">Total Monthly Income:</span><span class="income-summary-value">${formatMoney(total)}</span>`;
 }
@@ -60,7 +65,7 @@ function renderRecurringCostsList() {
     const recurringSummaryEl = appState._root.getElementById('recurring-summary');
 
     // Recurring costs only (one-time costs are rendered separately)
-    const visibleRecurring = appState.recurringCosts.filter(c => isCostDueThisMonth(c));
+    const visibleRecurring = appState.recurringCosts.filter(c => isCostDueThisMonth(c, appState.workingMonthKey || currentMonthKey()));
     const totalRecurring   = visibleRecurring.reduce((sum, c) => sum + c.amount, 0);
     const directRecurring  = visibleRecurring.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
     const cardRecurring    = visibleRecurring.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
@@ -161,7 +166,7 @@ function renderRecurringCostsList() {
 function renderCostCard(cost, grid, isOneTime, currentDay) {
     const isPastDue = (cost.dueDay || 1) <= currentDay;
     const isCard    = cost.paymentMethod === 'card';
-    const isDue     = isOneTime || isCostDueThisMonth(cost);
+    const isDue     = isOneTime || isCostDueThisMonth(cost, appState.workingMonthKey || currentMonthKey());
     const intN      = cost.intervalMonths || 1;
     const paidState = appState.paidStatus[cost.id];
 

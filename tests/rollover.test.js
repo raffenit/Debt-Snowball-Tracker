@@ -47,8 +47,9 @@ describe('calculateMonthRollover', () => {
         assert.equal(archive.paidStatus.c1, true);
         assert.equal(archive.totalIncome, 3000);
         assert.equal(archive.totalCosts, 1000);
-        // finalBalance = 500 + 3000 - 1000 = 2500
-        assert.equal(archive.finalBalance, 2500);
+        // Debt payments are cash outflows too: snowball target pays
+        // min(5000, 150 + extra 1850) = 2000 → 500 + 3000 − 1000 − 2000 = 500
+        assert.equal(archive.finalBalance, 500);
     });
 
     test('final balance includes one-time costs', () => {
@@ -141,12 +142,13 @@ describe('calculateMonthRollover', () => {
         const { nextState } = calculateMonthRollover(state, closingMonth, nextMonth);
         assert.equal(nextState.checkpoints.length, 1);
         assert.equal(nextState.checkpoints[0].day, 1);
-        // finalBalance = 500 + 3000 - 0 = 3500
-        assert.equal(nextState.checkpoints[0].amount, 3500);
+        // The day-15 sync (2000) is ground truth — income on/before it is
+        // already inside that number, so it carries over unchanged.
+        assert.equal(nextState.checkpoints[0].amount, 2000);
         assert.ok(nextState.checkpoints[0].id.startsWith('cp_'));
     });
 
-    test('zero or negative final balance produces no checkpoint', () => {
+    test('negative final balance still seeds a day-1 checkpoint (deficit carries)', () => {
         const state = baseState({
             incomeEntries: [{ id: 'i1', label: 'Salary', amount: 1000, date: '2026-04-15', scheduleType: 'monthly', scheduleDay: 15 }],
             recurringCosts: [{ id: 'c1', name: 'Rent', amount: 2000, category: 'utility', intervalMonths: 1 }],
@@ -154,7 +156,10 @@ describe('calculateMonthRollover', () => {
         });
 
         const { nextState } = calculateMonthRollover(state, closingMonth, nextMonth);
-        assert.equal(nextState.checkpoints.length, 0);
+        // 500 + 1000 − 2000 = −500 — the overdraft is the next month's truth
+        assert.equal(nextState.checkpoints.length, 1);
+        assert.equal(nextState.checkpoints[0].day, 1);
+        assert.equal(nextState.checkpoints[0].amount, -500);
     });
 
     test('paidStatus and minPayOverrides are reset', () => {
@@ -191,10 +196,12 @@ describe('calculateMonthRollover', () => {
         assert.deepEqual(nextState.spendingBudgets[1].exception, { month: '2026-2', amount: 300 });
     });
 
-    test('no checkpoint when no day-1 checkpoint and no income', () => {
+    test('empty state still seeds a $0 day-1 checkpoint', () => {
         const state = baseState();
         const { nextState } = calculateMonthRollover(state, closingMonth, nextMonth);
-        assert.equal(nextState.checkpoints.length, 0);
+        // "Always carry the final balance" — $0 is a valid balance.
+        assert.equal(nextState.checkpoints.length, 1);
+        assert.equal(nextState.checkpoints[0].amount, 0);
     });
 
     test('tolerates missing state fields (defensive defaults)', () => {
@@ -265,6 +272,49 @@ describe('calculateMonthRollover', () => {
         const { archive } = calculateMonthRollover(state, closingMonth, nextMonth);
         // Only e3 counts: 500 + 3000 − 30 = 3470
         assert.equal(archive.finalBalance, 3470);
+    });
+
+    test('debt payments reduce the carried-over balance', () => {
+        const state = baseState({
+            incomeEntries: [{ id: 'i1', amount: 3000, date: '2026-04-15', scheduleType: 'monthly', scheduleDay: 15 }],
+            checkpoints: [{ id: 'cp1', day: 1, amount: 500 }],
+            debts: [
+                { id: 'd1', name: 'Card', balance: 5000, minPayment: 150, dueDay: 20 },
+                { id: 'd2', name: 'Loan', balance: 9000, minPayment: 200, dueDay: 25 },
+            ],
+            strategy: 'snowball',
+        });
+        const { archive } = calculateMonthRollover(state, closingMonth, nextMonth);
+        // Snowball order: d1 then d2. extra = 3000 − 350 = 2650 → d1 pays
+        // min(5000, 2800) = 2800, d2 pays 200. 500 + 3000 − 2800 − 200 = 500.
+        assert.equal(archive.finalBalance, 500);
+    });
+
+    test('a mid-month checkpoint supersedes earlier activity', () => {
+        const state = baseState({
+            incomeEntries: [
+                { id: 'i1', amount: 2000, date: '2026-04-05' },
+                { id: 'i2', amount: 2000, date: '2026-04-20' },
+            ],
+            recurringCosts: [{ id: 'c1', name: 'Rent', amount: 1000, dueDay: 1 }],
+            checkpoints: [{ id: 'cp1', day: 1, amount: 999 }, { id: 'cp2', day: 15, amount: 800 }],
+        });
+        const { archive } = calculateMonthRollover(state, closingMonth, nextMonth);
+        // Last sync (day 15, $800) is ground truth — earlier income and rent
+        // are already inside it. Only income after the 15th applies: 800+2000.
+        assert.equal(archive.finalBalance, 2800);
+    });
+
+    test('minPayOverrides are honored in the carried-over balance', () => {
+        const state = baseState({
+            incomeEntries: [{ id: 'i1', amount: 3000, date: '2026-04-15' }],
+            checkpoints: [{ id: 'cp1', day: 1, amount: 500 }],
+            debts: [{ id: 'd1', name: 'Card', balance: 5000, minPayment: 150, dueDay: 20 }],
+            minPayOverrides: { d1: 400 },
+        });
+        const { archive } = calculateMonthRollover(state, closingMonth, nextMonth);
+        // Override 400 + extra (3000 − 400 = 2600) → min(5000, 3000) = 3000.
+        assert.equal(archive.finalBalance, 500);
     });
 
     test('archive captures spendingBudgets with expenses — deep copied', () => {

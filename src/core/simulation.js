@@ -2,7 +2,7 @@
 // Used by both the main panel app and test suite
 
 import { MAX_SIMULATION_MONTHS } from './constants.js';
-import { currentMonthKey, isCostDueThisMonth } from './date-utils.js';
+import { currentMonthKey, isCostDueThisMonth, keyToHtmlMonth } from './date-utils.js';
 
 // ── State setters (mirrors app.js globals) ───────────────────────────────────
 let debts = [];
@@ -41,10 +41,28 @@ export function getStrategyOrder(debtList, strat) {
 // Card-charged recurring costs do NOT reduce the immediate cash available
 // for debt payoff — they are assumed to be folded into card minimum payments.
 // One-time costs are excluded because timeline projects multi-month future.
-export function runSimulation(strat) {
-    const totalIncome          = incomeEntries.reduce((s,e) => s + e.amount, 0);
+/**
+ * Pure payoff simulation over an explicit state snapshot.
+ * `state.monthKey` (optional): when set, income is scoped to that month and
+ * cost due-checks evaluate against it — pass the working month so an
+ * early-advanced month sims on its own data, not the real calendar's.
+ */
+export function simulatePayoff(state, strat) {
+    const simDebtsInput = state.debts || [];
+    const incomes       = state.incomeEntries || [];
+    const costs         = state.recurringCosts || [];
+    const monthKey      = state.monthKey || undefined;
+
+    // Scope income to the target month when one is given — recurring rows are
+    // materialized to the working month, so a stray one-time/stale row from
+    // another month must not inflate (or corrupt) the projection.
+    const scopedIncome = monthKey
+        ? incomes.filter(e => (e.date || '').slice(0, 7) === keyToHtmlMonth(monthKey))
+        : incomes;
+
+    const totalIncome          = scopedIncome.reduce((s,e) => s + e.amount, 0);
     // Timeline projection uses recurring costs due this month only; one-time costs are separate.
-    const activeCosts          = recurringCosts.filter(c => isCostDueThisMonth(c));
+    const activeCosts          = costs.filter(c => isCostDueThisMonth(c, monthKey));
     const totalRecurringDirect = activeCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
     const totalRecurringCard   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
     const totalRecurring       = activeCosts.reduce((s,c) => s + c.amount, 0);
@@ -52,20 +70,21 @@ export function runSimulation(strat) {
     // card-charged costs are already folded into the card's minimum payment.
     const effectiveBudget      = totalIncome - totalRecurringDirect;
 
-    if (debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
+    if (simDebtsInput.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
         return { valid: false, totalIncome, totalRecurring, effectiveBudget };
     }
 
-    const totalMinPayments = debts.reduce((s,d) => s + d.minPayment, 0);
+    // Paid-off debts don't owe a minimum — don't let them block the sim.
+    const totalMinPayments = simDebtsInput.filter(d => d.balance > 0).reduce((s,d) => s + d.minPayment, 0);
     if (effectiveBudget < totalMinPayments) {
         return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
     }
 
-    const incomeDays = [...incomeEntries]
-        .map(e => ({ day: parseInt(e.date.split('-')[2]), amount: e.amount }))
+    const incomeDays = scopedIncome
+        .map(e => ({ day: parseInt((e.date || '').split('-')[2]) || 1, amount: e.amount }))
         .sort((a,b) => a.day - b.day);
 
-    let simDebts = debts.map(d => ({ ...d, interestPaid: 0 }));
+    let simDebts = simDebtsInput.map(d => ({ ...d, interestPaid: 0 }));
     let monthsElapsed = 0, totalInterestPaid = 0, payoffLog = [];
     const perDebtMonthly = {};
     simDebts.forEach(d => { perDebtMonthly[d.id] = [d.balance]; });
@@ -136,6 +155,11 @@ export function runSimulation(strat) {
     return { valid: true, monthsElapsed, totalInterestPaid, payoffLog,
              monthlyTotals, perDebtMonthly, debtPayoffMonths,
              totalIncome, totalRecurring, effectiveBudget };
+}
+
+// Module-state wrapper kept for tests/legacy callers.
+export function runSimulation(strat) {
+    return simulatePayoff({ debts, incomeEntries, recurringCosts, startingBalance }, strat);
 }
 
 export function runSimulationWithWindfall(windfall, strat) {

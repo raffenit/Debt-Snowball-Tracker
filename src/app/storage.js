@@ -211,6 +211,8 @@ async function loadBackendData() {
                     startingBalance: appState.startingBalance,
                     paidStatus:     appState.paidStatus,
                     spendingBudgets: appState.spendingBudgets,
+                    minPayOverrides: appState.minPayOverrides,
+                    strategy:       appState.strategy,
                 }, prevMonth, thisMonth);
 
                 appState.monthlyArchives.unshift(rollover.archive);
@@ -223,6 +225,7 @@ async function loadBackendData() {
                 appState.paidStatus      = rollover.nextState.paidStatus;
                 appState.minPayOverrides = rollover.nextState.minPayOverrides;
                 appState.spendingBudgets = rollover.nextState.spendingBudgets;
+                appState.startingBalance = rollover.nextState.startingBalance;
 
                 saveData().catch(err => reportError('Month rollover save failed', err));
             } else if (data.paidStatus) {
@@ -246,7 +249,12 @@ async function loadBackendData() {
                 if (htmlMk && stale.length) {
                     appState.incomeEntries = [
                         ...generateRecurringIncomeForMonth(appState.incomeEntries, wm),
-                        ...appState.incomeEntries.filter(isOneTimeInc),
+                        // One-time income is month-scoped — only rows dated in
+                        // the working month survive; stale ones from other
+                        // months must not re-enter (they'd render on wrong days
+                        // and inflate income totals forever).
+                        ...appState.incomeEntries.filter(e =>
+                            isOneTimeInc(e) && (e.date || '').slice(0, 7) === htmlMk),
                     ];
                     needsCleanupSave = true;
                     console.info(`[DebtSnowball] Regenerated ${stale.length} income entr(ies) with stale dates for the working month.`);

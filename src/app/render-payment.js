@@ -1,146 +1,23 @@
 import { appState } from './state.js';
-import { addMonthsToKey, currentMonthKey, formatMonthLabel, generateRecurringIncomeForMonth, isCostDueInMonth, isCostDueThisMonth } from '../core/date-utils.js';
+import { addMonthsToKey, currentMonthKey, formatMonthLabel, generateRecurringIncomeForMonth, isCostDueInMonth, isCostDueThisMonth, keyToHtmlMonth } from '../core/date-utils.js';
 import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
-import { getStrategyOrder } from '../core/simulation.js';
+import { getStrategyOrder, simulatePayoff } from '../core/simulation.js';
 import { cashExpensesForMonth } from '../core/card-expenses.js';
 import { getBudgetAmount } from './render-budgets.js';
 import { renderPaydownChart, renderTimelineChart } from './render-charts.js';
 import { startCountdown, stopCountdown } from './render-support.js';
 
 // ─── Core Simulation ─────────────────────────────────────────────────────────
-// Date-aware: income arrives on its specific day-of-month, payments are only
-// made after sufficient cash has arrived. Returns a rich result object used
-// for both the chart and the debt cards.
+// Thin wrapper over core/simulation.js — feeds live app state and scopes the
+// sim to the WORKING month (which may be ahead of the real calendar after an
+// early advance). Income is filtered to that month inside simulatePayoff.
 function runSimulation(strat) {
-    const totalIncome         = appState.incomeEntries.reduce((s,e) => s + e.amount, 0);
-    const activeCosts          = appState.recurringCosts.filter(c => isCostDueThisMonth(c));
-    // Timeline projection uses recurring costs only; one-time costs are separate.
-    const totalRecurringDirect = activeCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurringCard   = activeCosts.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
-    const totalRecurring       = activeCosts.reduce((s,c) => s + c.amount, 0);
-    // Only direct-payment costs reduce the immediate cash available for debt payoff;
-    // card-charged costs are already folded into the card's minimum payment.
-    const effectiveBudget = totalIncome - totalRecurringDirect;
-
-    if (appState.debts.length === 0 || totalIncome <= 0 || effectiveBudget <= 0) {
-        return { valid: false, totalIncome, totalRecurring, effectiveBudget };
-    }
-
-    const totalMinPayments = appState.debts.reduce((s,d) => s + d.minPayment, 0);
-    if (effectiveBudget < totalMinPayments) {
-        return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
-    }
-
-    // Build income day schedule (sorted)
-    const incomeDays = [...appState.incomeEntries
-        .map(e => ({ day: parseInt(e.date.split('-')[2]), amount: e.amount }))
-        .sort((a,b) => a.day - b.day)];
-
-    let simDebts = appState.debts.map(d => ({ ...d, interestPaid: 0 }));
-    const MAX_MONTHS = 1200;
-    let monthsElapsed     = 0;
-    let totalInterestPaid = 0;
-    let payoffLog         = [];
-
-    // Per-debt monthly balance snapshots
-    const perDebtMonthly = {};
-    simDebts.forEach(d => { perDebtMonthly[d.id] = [d.balance]; });
-
-    // Get day 1 checkpoint amount for initial cash
-    const day1Checkpoint = appState.checkpoints.find(cp => cp.day === 1);
-    const day1Balance = day1Checkpoint ? day1Checkpoint.amount : 0;
-
-    while (simDebts.some(d => d.balance > 0) && monthsElapsed < MAX_MONTHS) {
-        monthsElapsed++;
-        // Add starting cash in first month to the monthly available amount
-        let availableCash = effectiveBudget + (monthsElapsed === 1 ? day1Balance : 0); // eslint-disable-line no-unused-vars
-
-        // 1. Accrue interest
-        simDebts.forEach(d => {
-            if (d.balance <= 0) return;
-            let effectiveRate = d.rate;
-            if (d.promoZeroInterest && d.promoExpiryDate) {
-                const today   = new Date();
-                const simDate = new Date(today.getFullYear(), today.getMonth() + monthsElapsed, 1);
-                if (simDate <= new Date(d.promoExpiryDate+'T00:00:00')) effectiveRate = 0;
-                else effectiveRate = d.originalRate || d.rate;
-            }
-            const interest     = d.balance * (effectiveRate / 100 / 12);
-            d.balance         += interest;
-            totalInterestPaid += interest;
-            d.interestPaid    += interest;
-        });
-
-        // 2. Date-aware payment scheduling
-        const alive    = simDebts.filter(d => d.balance > 0);
-        const ordered  = getStrategyOrder(alive, strat);
-        const targetId = ordered[0]?.id;
-        const aliveMinSum   = alive.reduce((s,d) => s + d.minPayment, 0);
-        const extraAvail    = Math.max(0, effectiveBudget - aliveMinSum);
-
-        // Build payment queue sorted by due day
-        const paymentQueue = alive.map(d => ({
-            id:     d.id,
-            dueDay: d.dueDay || 1,
-            needed: Math.min(
-                d.balance,
-                d.minPayment + (d.id === targetId ? Math.min(extraAvail, Math.max(0, d.balance - d.minPayment)) : 0)
-            )
-        })).sort((a,b) => a.dueDay - b.dueDay);
-
-        let cashPool   = 0;
-        let incomeIdx  = 0;
-
-        for (const payment of paymentQueue) {
-            // Advance income whose day <= payment due day
-            while (incomeIdx < incomeDays.length && incomeDays[incomeIdx].day <= payment.dueDay) {
-                cashPool += incomeDays[incomeIdx++].amount;
-            }
-            // If still short, pull remaining income (payment deferred until next check)
-            while (cashPool < payment.needed && incomeIdx < incomeDays.length) {
-                cashPool += incomeDays[incomeIdx++].amount;
-            }
-
-            const debt   = simDebts.find(d => d.id === payment.id);
-            if (!debt || debt.balance <= 0) continue;
-            const actual = Math.min(payment.needed, cashPool, debt.balance);
-            cashPool    -= actual;
-            debt.balance = Math.max(0, debt.balance - actual);
-
-            if (debt.balance <= 0.01) {
-                debt.balance = 0;
-                if (!payoffLog.find(l => l.id === debt.id)) {
-                    payoffLog.push({ ...debt, payoffMonth: monthsElapsed });
-                }
-            }
-        }
-
-        // Snapshot balances this month
-        simDebts.forEach(d => {
-            perDebtMonthly[d.id].push(Math.max(0, d.balance));
-        });
-    }
-
-    const debtPayoffMonths = {};
-    payoffLog.forEach(l => { debtPayoffMonths[l.id] = l.payoffMonth; });
-
-    const maxLen = Math.max(...Object.values(perDebtMonthly).map(a => a.length));
-    const monthlyTotals = Array.from({ length: maxLen }, (_,i) =>
-        Object.values(perDebtMonthly).reduce((sum, arr) => sum + (arr[i] ?? 0), 0)
-    );
-
-    return {
-        valid: true,
-        monthsElapsed,
-        totalInterestPaid,
-        payoffLog,
-        monthlyTotals,
-        perDebtMonthly,
-        debtPayoffMonths,
-        totalIncome,
-        totalRecurring,
-        effectiveBudget
-    };
+    return simulatePayoff({
+        debts:          appState.debts,
+        incomeEntries:  appState.incomeEntries,
+        recurringCosts: appState.recurringCosts,
+        monthKey:       appState.workingMonthKey || currentMonthKey(),
+    }, strat);
 }
 
 // ─── Visualization ───────────────────────────────────────────────────────────
@@ -191,7 +68,7 @@ function renderVisualization(simResults) {
                     <strong>Costs:</strong> ${formatMoney(archiveDataForDebt.totalCosts || 0)}
                 </div>
                 <div class="timeline-error-actions">
-                    <button class="btn btn-primary" onclick="document.getElementById('plan-next-month-btn').click()">📅 Return to Current Month</button>
+                    <button class="btn btn-primary" data-click-target="plan-next-month-btn">📅 Return to Current Month</button>
                 </div>
             </div>`;
         renderPaydownChart([], {});
@@ -211,7 +88,7 @@ function renderVisualization(simResults) {
                 <div class="timeline-error-title">No Debts Added</div>
                 <div class="timeline-error-message">Add your credit cards, loans, and other debts to see your personalized payoff timeline and calculate your debt-free date.</div>
                 <div class="timeline-error-actions">
-                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab=\"debts\"]').click()">💳 Add Your First Debt</button>
+                    <button class="btn btn-primary" data-goto-tab="debts">💳 Add Your First Debt</button>
                 </div>
             </div>`;
         renderPaydownChart([], {});
@@ -239,22 +116,22 @@ function renderVisualization(simResults) {
             icon = '💰';
             title = 'No Income Added';
             message = 'You need to add income entries before we can calculate your payoff timeline. Tell us about your paychecks, deposits, or any other monthly income.';
-            primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click(); setTimeout(() => document.getElementById('add-income-btn').click(), 100)">➕ Add Income</button>`;
+            primaryAction = `<button class="btn btn-success" data-goto-tab="income" data-then-click="add-income-btn">➕ Add Income</button>`;
         } else if ((effectiveBudget || 0) <= 0) {
-            const _active              = appState.recurringCosts.filter(c => isCostDueThisMonth(c));
+            const _active              = appState.recurringCosts.filter(c => isCostDueThisMonth(c, appState.workingMonthKey || currentMonthKey()));
             const totalRecurringDirect = _active.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
             const totalRecurringCard   = _active.filter(c => c.paymentMethod === 'card').reduce((s,c) => s + c.amount, 0);
             icon = '📉';
             title = 'Budget Over-Committed';
             message = `Your income of ${formatMoney(totalIncome)} is entirely consumed by direct recurring costs of ${formatMoney(totalRecurringDirect)}.${totalRecurringCard > 0 ? ` (Card-charged costs of ${formatMoney(totalRecurringCard)} are already factored into card payments.)` : ''} You need to either increase income or reduce costs to free up money for debt payoff.`;
-            primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click()">💰 Add Income</button>`;
-            secondaryAction = `<button class="btn btn-warning" onclick="document.querySelector('[data-tab=\"income\"]').click()">📝 Review Costs</button>`;
+            primaryAction = `<button class="btn btn-success" data-goto-tab="income">💰 Add Income</button>`;
+            secondaryAction = `<button class="btn btn-warning" data-goto-tab="income">📝 Review Costs</button>`;
         } else {
             icon = '💳';
             title = 'Can\'t Cover Minimum Payments';
             message = `Your effective budget of ${formatMoney(effectiveBudget)} is less than your total minimum payments of ${formatMoney(totalMinPayments)}. You need more available cash to make progress on your debts.`;
-            primaryAction = `<button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click()">💰 Increase Income</button>`;
-            secondaryAction = `<button class="btn btn-secondary" onclick="document.querySelector('[data-tab=\"debts\"]').click()">📉 Review Debts</button>`;
+            primaryAction = `<button class="btn btn-success" data-goto-tab="income">💰 Increase Income</button>`;
+            secondaryAction = `<button class="btn btn-secondary" data-goto-tab="debts">📉 Review Debts</button>`;
         }
         
         timelineChart.innerHTML = `
@@ -285,8 +162,8 @@ function renderVisualization(simResults) {
                 <div class="timeline-error-title">Payoff Exceeds 100 Years</div>
                 <div class="timeline-error-message">With your current budget, these debts would take over 100 years to pay off. This usually means either the balances are very high compared to your available payoff budget, or interest rates are preventing progress.</div>
                 <div class="timeline-error-actions">
-                    <button class="btn btn-success" onclick="document.querySelector('[data-tab=\"income\"]').click()">💰 Increase Budget</button>
-                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab=\"debts\"]').click()">📉 Review Debts</button>
+                    <button class="btn btn-success" data-goto-tab="income">💰 Increase Budget</button>
+                    <button class="btn btn-primary" data-goto-tab="debts">📉 Review Debts</button>
                 </div>
             </div>`;
         return;
@@ -338,14 +215,19 @@ function renderPaymentPlan() {
     // ── Archive-view wiring ────────────────────────────────────────────────────
     const isArchiveView = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
     const archiveData   = isArchiveView ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
-    const _income       = archiveData ? (archiveData.incomeEntries  || []) : appState.incomeEntries;
+    const _monthKey     = archiveData ? archiveData.month : (appState.workingMonthKey || currentMonthKey());
+    const _incomeHtml   = keyToHtmlMonth(_monthKey);
+    // Income rows are materialized for their month — a stray row dated in a
+    // different month (stale one-time income, missed heal) must not render or
+    // count here.
+    const _income       = (archiveData ? (archiveData.incomeEntries  || []) : appState.incomeEntries)
+        .filter(e => (e.date || '').slice(0, 7) === _incomeHtml);
     const _costs        = archiveData ? (archiveData.recurringCosts || []) : appState.recurringCosts;
     const _oneTimeCosts = archiveData ? (archiveData.oneTimeCosts   || []) : appState.oneTimeCosts;
     const _checkpoints  = archiveData ? (archiveData.checkpoints    || []) : appState.checkpoints;
     const _debts        = archiveData ? (archiveData.debts           || appState.debts) : appState.debts;
     const _startBal     = archiveData ? (archiveData.startingBalance || 0)  : appState.startingBalance;
     const _paidStatus   = archiveData ? (archiveData.paidStatus      || {}) : appState.paidStatus;
-    const _monthKey     = archiveData ? archiveData.month : (appState.workingMonthKey || currentMonthKey());
 
     // ── Month title & navigation ───────────────────────────────────────────────
     const monthTitleEl = appState._root.getElementById('global-month-title');
@@ -372,10 +254,14 @@ function renderPaymentPlan() {
 
     const events = [];
     const today = new Date();
-    const currentDay = today.getDate();
+    // "Today" only means something when the viewed month IS the real current
+    // month — an early-advanced future month (or an archive) has no today in
+    // it. currentDay = 0 means nothing is past-due and nothing is skipped.
+    const isLiveMonth = !isArchiveView && _monthKey === currentMonthKey();
+    const currentDay  = isLiveMonth ? today.getDate() : 0;
 
     _income.forEach(entry => {
-        const day = parseInt(entry.date.split('-')[2]);
+        const day = parseInt(entry.date.split('-')[2]) || 1;
         events.push({ type:'income', id: entry.id, name: entry.label, day, date: new Date(entry.date+'T00:00:00'), amount: entry.amount, sortKey: day * 1000 });
     });
 
@@ -698,7 +584,7 @@ function renderPaymentPlan() {
     section.style.display = 'block';
 
     // --- UI CREATION: Build the visual rows ---
-    let todayMarkerInserted = isArchiveView; // skip in archive view
+    let todayMarkerInserted = !isLiveMonth; // only the real current month has a "today"
     schedule.forEach((item, index) => {
         // Insert "Today" marker before the first item on or after today
         if (!todayMarkerInserted && (item.day || 1) >= currentDay) {

@@ -440,3 +440,37 @@ describe('getStrategyOrder — ties and large lists', () => {
         }
     });
 });
+
+// ─── simulatePayoff (explicit-state variant) ──────────────────────────────────
+import { simulatePayoff } from './helpers.js';
+
+describe('simulatePayoff — state snapshot + month scoping', () => {
+    const debts = [
+        { id: 'd1', name: 'Card', balance: 5000, rate: 20, minPayment: 150, dueDay: 15 },
+        { id: 'd2', name: 'Paid-off', balance: 0, rate: 20, minPayment: 900, dueDay: 15 },
+    ];
+    const income = [
+        { id: 'i1', amount: 3000, date: '2026-10-10' },
+        { id: 'i2', amount: 500, date: '2026-08-03' }, // stale one-time row from another month
+    ];
+
+    test('zero-balance debts do not inflate totalMinPayments', () => {
+        // Without the balance>0 filter, minPayments = 1050 > budget → invalid.
+        const r = simulatePayoff({ debts, incomeEntries: income, recurringCosts: [], monthKey: '2026-9' }, 'snowball');
+        assert.equal(r.valid, true);
+    });
+
+    test('income is scoped to monthKey — other-month rows are ignored', () => {
+        const r = simulatePayoff({ debts, incomeEntries: income, recurringCosts: [], monthKey: '2026-9' }, 'snowball');
+        assert.equal(r.totalIncome, 3000); // the Aug row does not leak in
+    });
+
+    test('missing income date does not crash the sim', () => {
+        const r = simulatePayoff({
+            debts: [{ id: 'd1', balance: 100, rate: 0, minPayment: 50 }],
+            incomeEntries: [{ id: 'i1', amount: 1000 }], // no date, no monthKey
+            recurringCosts: [],
+        }, 'snowball');
+        assert.equal(r.valid, true);
+    });
+});
