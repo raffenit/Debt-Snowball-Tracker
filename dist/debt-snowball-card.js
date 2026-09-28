@@ -3599,7 +3599,7 @@ This replaces ALL current data with that snapshot.`)) {
       ovBudgetsContainer.style.display = "block";
       const budgetSummaries = ovBudgets.map((budget) => {
         const budgeted = getBudgetAmount(budget);
-        const spent = (budget.expenses || []).reduce((s, e) => s + e.amount, 0);
+        const spent = (budget.expenses || []).filter((e) => !e.autoDirect).reduce((s, e) => s + e.amount, 0);
         const remaining = budgeted - spent;
         const percentUsed = budgeted > 0 ? spent / budgeted * 100 : 0;
         return { name: budget.name, budgeted, spent, remaining, percentUsed };

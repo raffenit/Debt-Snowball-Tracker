@@ -540,10 +540,14 @@ function renderPaymentPlan() {
     if (ovBudgetsContainer && ovBudgetsGrid && ovBudgets.length > 0) {
         ovBudgetsContainer.style.display = 'block';
 
-        // Calculate budget status for each
+        // Calculate budget status for each. Exclude autoDirect expenses to avoid
+        // double-counting with direct costs (they're already counted in the direct
+        // costs line of the Month Overview).
         const budgetSummaries = ovBudgets.map(budget => {
             const budgeted = getBudgetAmount(budget);
-            const spent = (budget.expenses || []).reduce((s, e) => s + e.amount, 0);
+            const spent = (budget.expenses || [])
+                .filter(e => !e.autoDirect)
+                .reduce((s, e) => s + e.amount, 0);
             const remaining = budgeted - spent;
             const percentUsed = budgeted > 0 ? (spent / budgeted) * 100 : 0;
             return { name: budget.name, budgeted, spent, remaining, percentUsed };
