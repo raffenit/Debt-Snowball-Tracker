@@ -103,7 +103,8 @@ function renderVisualization(simResults) {
         appState._root.getElementById('stat-payoff-date-alt').textContent = 'Budget Too Low!';
         statTotalInterest.textContent = 'N/A';
         statSavingsBox.style.display  = 'none';
-        windfallBar.style.display     = 'none';
+        // Keep windfall bar visible when there are debts — it can help explore "what if I add a lump sum?"
+        if (appState.debts.length > 0) windfallBar.style.display = 'flex';
         stopCountdown();
         
         let icon = '⚠️';

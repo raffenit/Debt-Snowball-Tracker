@@ -3259,7 +3259,7 @@ This replaces ALL current data with that snapshot.`)) {
       appState._root.getElementById("stat-payoff-date-alt").textContent = "Budget Too Low!";
       statTotalInterest.textContent = "N/A";
       statSavingsBox.style.display = "none";
-      windfallBar.style.display = "none";
+      if (appState.debts.length > 0) windfallBar.style.display = "flex";
       stopCountdown();
       let icon = "\u26A0\uFE0F";
       let title = "";
