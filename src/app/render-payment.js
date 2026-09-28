@@ -1,9 +1,9 @@
 import { appState } from './state.js';
 import { addMonthsToKey, currentMonthKey, formatMonthLabel, isCostDueInMonth, isCostDueThisMonth, keyToHtmlMonth } from '../core/date-utils.js';
 import { escHtml, formatMoney, formatOrdinal } from '../core/pure-utils.js';
-import { getStrategyOrder, simulatePayoff } from '../core/simulation.js';
+import { getStrategyOrder, runSimulation as simulateFromState } from '../core/simulation.js';
 import { cashExpensesForMonth } from '../core/card-expenses.js';
-import { summarizeCashFlowEvents } from '../core/cash-flow.js';
+import { lowestCashFlowBalance, summarizeCashFlowEvents } from '../core/cash-flow.js';
 import { getBudgetAmount } from './render-budgets.js';
 import { renderPaydownChart, renderTimelineChart } from './render-charts.js';
 import { startCountdown, stopCountdown } from './render-support.js';
@@ -13,12 +13,7 @@ import { startCountdown, stopCountdown } from './render-support.js';
 // sim to the WORKING month (which may be ahead of the real calendar after an
 // early advance). Income is filtered to that month inside simulatePayoff.
 function runSimulation(strat) {
-    return simulatePayoff({
-        debts:          appState.debts,
-        incomeEntries:  appState.incomeEntries,
-        recurringCosts: appState.recurringCosts,
-        monthKey:       appState.workingMonthKey || currentMonthKey(),
-    }, strat);
+    return simulateFromState(strat, appState);
 }
 
 // ─── Visualization ───────────────────────────────────────────────────────────
@@ -517,29 +512,13 @@ function renderPaymentPlan() {
     if (schedule.length === 0) { section.style.display = 'none'; return; }
 
     // --- MATH ONLY: Cash runway estimate (current month only) ---
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const sortedFutureIncomes = _income
         .map(e => ({ date: new Date(e.date+'T00:00:00'), amount: e.amount, label: e.label }))
-        .filter(e => e.date >= today)
+        .filter(e => e.date >= todayStart)
         .sort((a,b) => a.date - b.date);
     const nextIncome = sortedFutureIncomes[0] || null;
-    const targetDay  = nextIncome ? nextIncome.date.getDate() : 31;
-
-    let testBalance  = _startBal;
-    let minProjected = testBalance;
-
-    schedule.forEach(item => {
-        const itemDay = item.day || 1;
-        if (itemDay < currentDay) return;
-        if (nextIncome && itemDay >= targetDay && item.type !== 'income') return;
-
-        if (item.type === 'checkpoint')                       testBalance = item.amount;
-        else if (item.type === 'income')                      testBalance += item.amount;
-        else if (item.type !== 'starting-balance')            testBalance -= item.amount;
-
-        if (testBalance < minProjected) {
-            minProjected = testBalance;
-        }
-    });
+    const minProjected = lowestCashFlowBalance(schedule, _startBal);
 
     // Update the visual dashboard boxes
     const summaryNext   = appState._root.getElementById('runway-next-paycheck');

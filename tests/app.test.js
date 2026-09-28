@@ -246,6 +246,40 @@ describe('runSimulation — invalid / edge cases', () => {
     });
 });
 
+describe('runSimulation — explicit live-state snapshot', () => {
+    beforeEach(() => {
+        // Module globals stay empty on purpose: the app never calls setIncomeEntries.
+        setDebts([]);
+        setRecurringCosts([]);
+        setIncomeEntries([]);
+    });
+
+    test('uses the passed snapshot instead of empty module globals', () => {
+        const r = runSimulation('snowball', {
+            debts: [makeDebt({ id: 'd1', balance: 1000, rate: 0, minPayment: 100, dueDay: 15 })],
+            incomeEntries: onePaycheck(500),
+            recurringCosts: [],
+        });
+        assert.equal(r.valid, true);
+        assert.equal(r.totalIncome, 500);
+        assert.equal(r.monthsElapsed, 2);
+    });
+
+    test('maps workingMonthKey to month-scoped income like the live card does', () => {
+        const r = runSimulation('snowball', {
+            debts: [makeDebt({ id: 'd1', balance: 1000, rate: 0, minPayment: 100 })],
+            incomeEntries: [
+                { id: 'i1', amount: 800, date: '2026-10-05' },
+                { id: 'i2', amount: 50, date: '2026-08-03' },
+            ],
+            recurringCosts: [],
+            workingMonthKey: '2026-9',
+        });
+        assert.equal(r.totalIncome, 800);
+        assert.equal(r.valid, true);
+    });
+});
+
 describe('runSimulation — single debt, no interest', () => {
     beforeEach(() => {
         setRecurringCosts([]);

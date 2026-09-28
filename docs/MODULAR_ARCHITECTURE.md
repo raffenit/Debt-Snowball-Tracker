@@ -26,7 +26,7 @@ src/app/                →   esbuild (bundle: true)   →   dist/debt-snowball-
 ## Module Reference
 
 ### `src/core/cash-flow.js` — Cash-Flow Summary Aggregation
-- **Purpose**: Totals income and expenditures from the complete planned cash-flow event stream used by Month Overview.
+- **Purpose**: Totals income/expenditures and the lowest running balance from the complete planned cash-flow event stream used by Month Overview and runway status.
 - **Dependencies**: None; pure and directly unit tested.
 - **Why extract**: Keeps fixed bills, one-time costs, manual cash expenses, debt overrides, and pay-in-full events in one summary source instead of rebuilding totals from the Budgets tab.
 
@@ -76,9 +76,9 @@ src/app/                →   esbuild (bundle: true)   →   dist/debt-snowball-
 - **Why extract**: These three functions collectively render ~400 lines of HTML list generation. Isolating them makes list-specific styling and logic easier to maintain.
 
 ### `render-payment.js` — Payment Plan, Visualization, Simulation
-- **Purpose**: `runSimulation()`, `renderPaymentPlan()`, `renderVisualization()`, `renderTimelineChart()`, `renderPerDebtChart()`.
-- **Dependencies**: Global state, `_root`, DOM refs, `getStrategyOrder()` (from `pure-shim.js`).
-- **Why extract**: The core simulation engine and its visual outputs. **Note**: `runSimulation()` also exists in `src/core/simulation.js` (ES module for Node.js tests). The browser bundle uses this inline copy because the dist file is self-contained. Any bug fixes must be synced to both copies.
+- **Purpose**: `runSimulation()` wrapper, `renderPaymentPlan()`, `renderVisualization()`. Charts live in `render-charts.js`.
+- **Dependencies**: Global state, `_root`, DOM refs, `src/core/simulation.js`, `src/core/cash-flow.js`.
+- **Why extract**: Visual outputs for the payoff timeline and monthly cash-flow plan. The payoff engine itself lives in `src/core/simulation.js`; `renderUI` must call `runSimulation(strategy, appState)` so the chart uses live income/debts instead of empty test globals.
 
 ### `card.js` — Custom Element Definition
 - **Purpose**: Defines the `DebtSnowballCard` class extending `HTMLElement`, including `connectedCallback`, `disconnectedCallback`, `_initApp`, `_loadChartJs`, and Lovelace Card API methods (`setConfig`, `getCardSize`, etc.). Registers the element via `customElements.define()`.
@@ -171,7 +171,6 @@ User Action → events.js → mutates state (state-shim.js)
 
 ## Future Work
 
-- **Sync `runSimulation` implementations**: The simulation engine exists in both `src/core/simulation.js` (ES module for Node tests) and `render-payment.js` (browser bundle). A future build step could transpile `src/core/simulation.js` into the bundle instead of maintaining two copies.
 - **Further subdivide `render-modals.js`**: At ~1030 lines, this module still contains modals, CRUD, and `renderUI`. Could be split into `80-render-ui.js` and `85-modals-crud.js` if it grows further.
 - **Add a standalone HTML test page**: For browser-level testing without HA, create `test.html` that loads `dist/debt-snowball-card.js` in a mock environment.
 - **Avoid duplicate imports**: esbuild fails with "The symbol 'X' has already been declared" if the same symbol is imported from the same module twice. When adding imports, always check existing imports first to avoid this build error.

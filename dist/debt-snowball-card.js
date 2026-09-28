@@ -651,8 +651,18 @@ var DebtSnowballApp = (() => {
       effectiveBudget
     };
   }
-  function runSimulation(strat) {
-    return simulatePayoff({ debts, incomeEntries, recurringCosts, startingBalance }, strat);
+  function simulationStateFrom(state) {
+    return {
+      debts: state.debts || [],
+      incomeEntries: state.incomeEntries || [],
+      recurringCosts: state.recurringCosts || [],
+      monthKey: state.monthKey || state.workingMonthKey,
+      startingBalance: state.startingBalance || 0
+    };
+  }
+  function runSimulation(strat, state) {
+    const snapshot = state ? simulationStateFrom(state) : { debts, incomeEntries, recurringCosts, startingBalance };
+    return simulatePayoff(snapshot, strat);
   }
   var debts, recurringCosts, incomeEntries, startingBalance;
   var init_simulation = __esm({
@@ -3148,6 +3158,15 @@ This replaces ALL current data with that snapshot.`)) {
   });
 
   // src/core/cash-flow.js
+  function lowestCashFlowBalance(schedule = [], fallback = 0) {
+    let lowest = null;
+    for (const item of schedule) {
+      const balance = Number(item.balance);
+      if (!Number.isFinite(balance)) continue;
+      lowest = lowest === null ? balance : Math.min(lowest, balance);
+    }
+    return lowest === null ? fallback : lowest;
+  }
   function summarizeCashFlowEvents(events = []) {
     return events.reduce((totals, event) => {
       const amount = Number(event.amount);
@@ -3287,12 +3306,7 @@ This replaces ALL current data with that snapshot.`)) {
 
   // src/app/render-payment.js
   function runSimulation3(strat) {
-    return simulatePayoff({
-      debts: appState.debts,
-      incomeEntries: appState.incomeEntries,
-      recurringCosts: appState.recurringCosts,
-      monthKey: appState.workingMonthKey || currentMonthKey()
-    }, strat);
+    return runSimulation(strat, appState);
   }
   function renderVisualization(simResults) {
     const statTotalDebt = appState._root.getElementById("stat-total-debt");
@@ -3719,22 +3733,10 @@ This replaces ALL current data with that snapshot.`)) {
       section.style.display = "none";
       return;
     }
-    const sortedFutureIncomes = _income.map((e) => ({ date: /* @__PURE__ */ new Date(e.date + "T00:00:00"), amount: e.amount, label: e.label })).filter((e) => e.date >= today).sort((a, b) => a.date - b.date);
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const sortedFutureIncomes = _income.map((e) => ({ date: /* @__PURE__ */ new Date(e.date + "T00:00:00"), amount: e.amount, label: e.label })).filter((e) => e.date >= todayStart).sort((a, b) => a.date - b.date);
     const nextIncome = sortedFutureIncomes[0] || null;
-    const targetDay = nextIncome ? nextIncome.date.getDate() : 31;
-    let testBalance = _startBal;
-    let minProjected = testBalance;
-    schedule.forEach((item) => {
-      const itemDay = item.day || 1;
-      if (itemDay < currentDay) return;
-      if (nextIncome && itemDay >= targetDay && item.type !== "income") return;
-      if (item.type === "checkpoint") testBalance = item.amount;
-      else if (item.type === "income") testBalance += item.amount;
-      else if (item.type !== "starting-balance") testBalance -= item.amount;
-      if (testBalance < minProjected) {
-        minProjected = testBalance;
-      }
-    });
+    const minProjected = lowestCashFlowBalance(schedule, _startBal);
     const summaryNext = appState._root.getElementById("runway-next-paycheck");
     const summaryMin = appState._root.getElementById("runway-min-project");
     const summaryStatus = appState._root.getElementById("runway-status");
@@ -4884,7 +4886,7 @@ This replaces ALL current data with that snapshot.`)) {
     renderIncomeList();
     renderRecurringCostsList();
     renderSpendingBudgets();
-    const simResults = runSimulation(appState.strategy);
+    const simResults = runSimulation(appState.strategy, appState);
     renderDebtsList(simResults);
     renderVisualization(simResults);
     const schedule = renderPaymentPlan();

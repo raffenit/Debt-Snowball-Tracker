@@ -1,6 +1,16 @@
-// Pure cash-flow aggregation shared by the Month Overview and tests.
+// Pure cash-flow helpers shared by Month Overview, runway status, and tests.
 // Event construction remains responsible for deciding which transactions
-// affect cash; this module totals the complete resulting stream.
+// affect cash; this module reads the resulting stream.
+
+export function lowestCashFlowBalance(schedule = [], fallback = 0) {
+    let lowest = null;
+    for (const item of schedule) {
+        const balance = Number(item.balance);
+        if (!Number.isFinite(balance)) continue;
+        lowest = lowest === null ? balance : Math.min(lowest, balance);
+    }
+    return lowest === null ? fallback : lowest;
+}
 
 export function summarizeCashFlowEvents(events = []) {
     return events.reduce((totals, event) => {

@@ -157,9 +157,27 @@ export function simulatePayoff(state, strat) {
              totalIncome, totalRecurring, effectiveBudget };
 }
 
-// Module-state wrapper kept for tests/legacy callers.
-export function runSimulation(strat) {
-    return simulatePayoff({ debts, incomeEntries, recurringCosts, startingBalance }, strat);
+/**
+ * Build a simulatePayoff snapshot from live app state.
+ * The card stores the working month as `workingMonthKey`; the engine reads `monthKey`.
+ */
+export function simulationStateFrom(state) {
+    return {
+        debts:           state.debts || [],
+        incomeEntries:   state.incomeEntries || [],
+        recurringCosts:  state.recurringCosts || [],
+        monthKey:        state.monthKey || state.workingMonthKey,
+        startingBalance: state.startingBalance || 0,
+    };
+}
+
+// Optional second argument is the live card state. Omitting it keeps the
+// setter-based module globals used by the unit tests.
+export function runSimulation(strat, state) {
+    const snapshot = state
+        ? simulationStateFrom(state)
+        : { debts, incomeEntries, recurringCosts, startingBalance };
+    return simulatePayoff(snapshot, strat);
 }
 
 export function runSimulationWithWindfall(windfall, strat) {

@@ -781,7 +781,9 @@ function renderUI() {
     renderRecurringCostsList();
     renderSpendingBudgets();
 
-    const simResults = runSimulation(appState.strategy);
+    // Pass live appState. The no-arg form uses empty test-only module globals
+    // and reports "No Income Added" even when the Income tab is populated.
+    const simResults = runSimulation(appState.strategy, appState);
     renderDebtsList(simResults);
     renderVisualization(simResults);
     
