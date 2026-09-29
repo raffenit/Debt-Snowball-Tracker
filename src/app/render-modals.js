@@ -753,7 +753,7 @@ function showSanityWarningsModal() {
     showDataHealthModal(appState.sanityWarnings, {
         context: 'load',
         title:   'Unusual data detected',
-        body:    'These patterns look suspicious — often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. Fix only appears when the alert is a leftover pointer to something already deleted.',
+        body:    'These patterns look suspicious — often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. On a month-to-month alert, Show puts both months side by side. Fix only appears when the alert is a leftover pointer to something already deleted.',
         onFix:   applyAlertFix,
     });
 }

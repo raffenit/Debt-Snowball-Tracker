@@ -206,6 +206,32 @@ describe('checkDataSanity — month-over-month', () => {
         assert.ok(ids(ws).includes('income-jump'));
     });
 
+    test('income jump carries both months for a side-by-side review', () => {
+        const ws = checkDataSanity(base({
+            monthlyArchives: [{
+                month: '2026-7', label: 'August 2026', totalIncome: 4000, totalCosts: 2000,
+                incomeEntries: [
+                    { id: 'a', label: 'Paycheck', amount: 4000, date: '2026-08-01', scheduleType: 'monthly' },
+                ],
+            }],
+            incomeEntries: [
+                { id: 'b', label: 'Paycheck', amount: 4000, date: '2026-09-01', scheduleType: 'monthly' },
+                { id: 'c', label: 'Paycheck', amount: 4000, date: '2026-09-01', scheduleType: 'monthly' },
+                { id: 'd', label: 'Bonus', amount: 6000, date: '2026-09-15', scheduleType: 'one-time' },
+            ],
+        }));
+        const jump = ws.find(x => x.id === 'income-jump');
+        assert.equal(jump.compare.leftTitle, 'August 2026');
+        assert.equal(jump.compare.rightTitle, 'This month');
+        assert.equal(jump.compare.leftTotal, 4000);
+        assert.equal(jump.compare.rightTotal, 14000);
+        assert.equal(jump.compare.left.length, 1);
+        assert.equal(jump.compare.right.length, 3);
+        assert.equal(jump.compare.right[1].name, 'Paycheck');
+        assert.equal(jump.compare.right[2].note, 'one-time');
+        assert.equal(jump.compare.matchDates, false);
+    });
+
     test('income total <40% of archive gives a notice', () => {
         const ws = checkDataSanity(base({
             monthlyArchives: [archive],

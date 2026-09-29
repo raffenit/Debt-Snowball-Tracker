@@ -270,23 +270,28 @@ async function _renderServerBackups(body) {
 //                       repair list. Resolves 'confirm' | 'export' | 'cancel'.
 function showDataHealthModal(issues, { context = 'load', title, body, confirmLabel = 'Fix & Continue', hasData = false, onFix = null } = {}) {
     const tags = { repaired: 'Repaired', warning: 'Warning', notice: 'Notice', info: 'Notice', fatal: 'Blocked' };
-    const rows = issues.map(i => {
+    const rows = issues.map((i, idx) => {
         const kind = tags[i.severity] ? (i.severity === 'info' ? 'notice' : i.severity) : 'notice';
-        const show = i.focus
-            ? `<button type="button" class="health-issue-link" data-health-focus="${escHtml(JSON.stringify(i.focus))}">Show</button>`
-            : '';
+        const show = i.compare
+            ? `<button type="button" class="health-issue-link" data-health-compare="${idx}">Show</button>`
+            : i.focus
+                ? `<button type="button" class="health-issue-link" data-health-focus="${escHtml(JSON.stringify(i.focus))}">Show</button>`
+                : '';
         const fix = i.fix
             ? `<button type="button" class="health-issue-link" data-health-fix="${escHtml(JSON.stringify(i.fix))}">Fix</button>`
             : '';
         return `
-        <div class="health-issue">
-            <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || 'Notice')}</span>
-            <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
-            <span class="health-issue-actions">
-                <button type="button" class="health-issue-copy">Copy</button>
-                ${show}
-                ${fix}
-            </span>
+        <div class="health-issue-block">
+            <div class="health-issue">
+                <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || 'Notice')}</span>
+                <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
+                <span class="health-issue-actions">
+                    <button type="button" class="health-issue-copy">Copy</button>
+                    ${show}
+                    ${fix}
+                </span>
+            </div>
+            ${i.compare ? '<div class="health-compare" hidden></div>' : ''}
         </div>`;
     }).join('');
 
@@ -334,7 +339,26 @@ function showDataHealthModal(issues, { context = 'load', title, body, confirmLab
                 }
             });
         });
-        overlay.querySelectorAll('.health-issue-link').forEach(btn => {
+        overlay.querySelectorAll('[data-health-compare]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const block = btn.closest('.health-issue-block');
+                const panel = block?.querySelector('.health-compare');
+                if (!panel) return;
+                const willOpen = panel.hidden;
+                overlay.querySelectorAll('.health-compare').forEach(p => { p.hidden = true; });
+                overlay.querySelectorAll('[data-health-compare]').forEach(b => { b.textContent = 'Show'; });
+                if (!willOpen) return;
+                if (!panel.dataset.filled) {
+                    const issue = issues[Number(btn.dataset.healthCompare)];
+                    panel.innerHTML = renderHealthCompare(issue?.compare);
+                    panel.dataset.filled = '1';
+                }
+                panel.hidden = false;
+                btn.textContent = 'Hide';
+                panel.scrollIntoView({ block: 'nearest' });
+            });
+        });
+        overlay.querySelectorAll('[data-health-focus]').forEach(btn => {
             btn.addEventListener('click', () => {
                 let focus = null;
                 try { focus = JSON.parse(btn.dataset.healthFocus); } catch { /* ignore */ }
@@ -357,6 +381,57 @@ function showDataHealthModal(issues, { context = 'load', title, body, confirmLab
         overlay.querySelector('#health-cancel-btn')?.addEventListener('click',  () => done('cancel'));
         overlay.addEventListener('click', e => { if (e.target === overlay) done(context === 'confirm' ? 'cancel' : 'ok'); });
     });
+}
+
+// Two columns of the months a drift alert compared. Rows that don't appear
+// on the other side, or that appear more times, are marked so a duplicated
+// paycheck or a one-time deposit stands out from the rest.
+function renderHealthCompare(compare) {
+    if (!compare) return '';
+    const keyOf = row => compare.matchDates === false
+        ? `${row.name}|${row.amount}|${row.note}`
+        : `${row.name}|${row.amount}|${row.when}|${row.note}`;
+    const counts = rows => {
+        const m = new Map();
+        for (const row of rows || []) m.set(keyOf(row), (m.get(keyOf(row)) || 0) + 1);
+        return m;
+    };
+    const mark = (rows, other) => {
+        const seen = new Map();
+        return (rows || []).map(row => {
+            const key = keyOf(row);
+            const n = (seen.get(key) || 0) + 1;
+            seen.set(key, n);
+            const elsewhere = other.get(key) || 0;
+            const flag = !elsewhere ? 'Only here' : n > elsewhere ? 'Extra' : '';
+            return { ...row, flag };
+        });
+    };
+    const column = (title, total, rows, otherRows) => {
+        const marked = mark(rows, counts(otherRows));
+        const listed = (rows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        const stored = Number(total) || 0;
+        const items = marked.length
+            ? marked.map(r => {
+                const meta = [r.when, r.note, r.flag].filter(Boolean).map(escHtml).join(' · ');
+                return `<li class="health-compare-row${r.flag ? ' health-compare-flagged' : ''}">
+                    <span class="health-compare-name">${escHtml(r.name)}</span>
+                    <span class="health-compare-amt">${formatMoney(r.amount)}</span>
+                    ${meta ? `<span class="health-compare-meta">${meta}</span>` : ''}
+                </li>`;
+            }).join('')
+            : '<li class="health-compare-empty">No individual rows saved for this month.</li>';
+        const gap = marked.length && Math.abs(listed - stored) > 0.5
+            ? `<p class="health-compare-gap">Listed rows add up to ${formatMoney(listed)}. The stored month total is ${formatMoney(stored)}.</p>`
+            : '';
+        return `<div class="health-compare-col">
+            <div class="health-compare-head"><span>${escHtml(title)}</span><strong>${formatMoney(stored)}</strong></div>
+            <ul class="health-compare-list">${items}</ul>
+            ${gap}
+        </div>`;
+    };
+    return column(compare.leftTitle, compare.leftTotal, compare.left, compare.right)
+        + column(compare.rightTitle, compare.rightTotal, compare.right, compare.left);
 }
 
 // ─── Categorize prompt ───────────────────────────────────────────────────────

@@ -73,6 +73,51 @@ debt-snowball-card {
         radial-gradient(ellipse 40% 30% at 80% 80%, rgba(30, 40, 110, 0.06) 0%, transparent 60%);
 }
 
+/* Native scrollbars follow the midnight background and stay narrow.
+   scrollbar-color / scrollbar-width inherit; the webkit rules do not. */
+html,
+body,
+debt-snowball-card,
+debt-snowball-card * {
+    color-scheme: dark;
+    scrollbar-width: thin;
+    scrollbar-color: #2a2748 var(--bg-color);
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+debt-snowball-card::-webkit-scrollbar,
+debt-snowball-card *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track,
+debt-snowball-card::-webkit-scrollbar-track,
+debt-snowball-card *::-webkit-scrollbar-track,
+html::-webkit-scrollbar-corner,
+body::-webkit-scrollbar-corner,
+debt-snowball-card::-webkit-scrollbar-corner,
+debt-snowball-card *::-webkit-scrollbar-corner {
+    background: var(--bg-color);
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb,
+debt-snowball-card::-webkit-scrollbar-thumb,
+debt-snowball-card *::-webkit-scrollbar-thumb {
+    background: #2a2748;
+    border-radius: 6px;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover,
+debt-snowball-card::-webkit-scrollbar-thumb:hover,
+debt-snowball-card *::-webkit-scrollbar-thumb:hover {
+    background: #3a365c;
+}
+
 .app-container {
     --page-pad: 1rem;
     width: 100% !important;
@@ -597,16 +642,102 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     flex-direction: column;
     align-items: stretch;
     gap: 0.55rem;
-    max-height: 40vh;
+    max-height: 62vh;
     overflow-y: auto;
     margin: 0 0 1rem;
     text-align: left;
+}
+
+.health-issue-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
 }
 
 .health-issue {
     display: flex;
     align-items: flex-start;
     gap: 0.55rem;
+}
+
+.health-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+}
+
+.health-compare-col {
+    min-width: 0;
+    padding: 0.45rem 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.18);
+}
+
+.health-compare-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.35rem;
+    align-items: baseline;
+    margin-bottom: 0.3rem;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.health-compare-head strong {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.health-compare-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 220px;
+    overflow: auto;
+}
+
+.health-compare-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.05rem 0.35rem;
+    padding: 0.28rem 0.2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.75rem;
+}
+
+.health-compare-name {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.health-compare-amt {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.health-compare-meta,
+.health-compare-empty,
+.health-compare-gap {
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    line-height: 1.35;
+}
+
+.health-compare-meta {
+    grid-column: 1 / -1;
+}
+
+.health-compare-flagged {
+    background: rgba(255, 191, 31, 0.14);
+    border-radius: 4px;
+}
+
+.health-compare-gap,
+.health-compare-empty {
+    margin: 0.35rem 0 0;
 }
 
 .health-issue-tag {

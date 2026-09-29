@@ -16,11 +16,37 @@
 
 import { keyToHtmlMonth } from './date-utils.js';
 
-const w = (id, field, severity, detail, focus, fix) => ({
+const w = (id, field, severity, detail, focus, fix, compare) => ({
     id, field, severity, detail,
     ...(focus ? { focus } : {}),
     ...(fix ? { fix } : {}),
+    ...(compare ? { compare } : {}),
 });
+
+// Compact rows for a month-versus-month Show panel. Totals are the figures
+// the alert itself used, which can differ from the listed rows on an older
+// archive that only stored a sum.
+function incomeRows(entries) {
+    return (entries || []).map(e => ({
+        name: e.label || 'Income',
+        amount: Number(e.amount) || 0,
+        when: e.date || '',
+        note: e.scheduleType || e.schedule || '',
+    }));
+}
+
+function billRows(entries) {
+    return (entries || []).map(c => ({
+        name: c.name || 'Bill',
+        amount: Number(c.amount) || 0,
+        when: c.dueDay ? `Day ${c.dueDay}` : '',
+        note: (c.intervalMonths || 1) > 1 ? `Every ${c.intervalMonths} months` : '',
+    }));
+}
+
+function monthCompare(leftTitle, rightTitle, left, right, leftTotal, rightTotal, matchDates = true) {
+    return { leftTitle, rightTitle, left, right, leftTotal, rightTotal, matchDates };
+}
 
 // Where a warning can be opened. ids are live records; an empty list still
 // switches to the right tab. Leftovers that no longer have a record (a paid
@@ -202,32 +228,41 @@ export function checkDataSanity(s) {
     // comparing against them produces false "10× jump" warnings.
     const prev = archives.find(a => !a.retro) || null;
     if (prev) {
-        const countJump = (curr, old, field, noun) => {
+        const prevTitle = prev.label || 'Last month';
+        const countJump = (curr, old, field, noun, left, right, matchDates = true) => {
             if (old > 0 && curr > Math.max(3, old * 2)) {
+                const sum = rows => (rows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
                 out.push(w(`count-${field}`, field, 'warning',
                     `${noun} count jumped from ${old} last month to ${curr} — possible duplication bug.`,
-                    focusFor(field)));
+                    null, null,
+                    monthCompare(`${prevTitle} · ${old}`, `This month · ${curr}`, left, right, sum(left), sum(right), matchDates)));
             }
         };
-        countJump(incomeEntries.length,  (prev.incomeEntries  || []).length, 'incomeEntries',  'Income entries');
-        countJump(recurringCosts.length, (prev.recurringCosts || []).length, 'recurringCosts', 'Bill');
+        countJump(incomeEntries.length,  (prev.incomeEntries  || []).length, 'incomeEntries',  'Income entries',
+            incomeRows(prev.incomeEntries), incomeRows(incomeEntries), false);
+        countJump(recurringCosts.length, (prev.recurringCosts || []).length, 'recurringCosts', 'Bill',
+            billRows(prev.recurringCosts), billRows(recurringCosts));
 
         const incomeTotal = incomeEntries.reduce((x, e) => x + (e.amount || 0), 0);
+        const incomeCompare = monthCompare(prevTitle, 'This month',
+            incomeRows(prev.incomeEntries), incomeRows(incomeEntries), prev.totalIncome, incomeTotal, false);
         if (prev.totalIncome > 0 && incomeTotal > prev.totalIncome * 2.5) {
             out.push(w('income-jump', 'incomeEntries', 'warning',
                 `This month's income ($${Math.round(incomeTotal)}) is ${(incomeTotal / prev.totalIncome).toFixed(1)}× last month's — possible duplication.`,
-                focusFor('incomeEntries')));
+                null, null, incomeCompare));
         }
         if (prev.totalIncome > 0 && incomeTotal > 0 && incomeTotal < prev.totalIncome * 0.4) {
             out.push(w('income-drop', 'incomeEntries', 'notice',
                 `This month's income ($${Math.round(incomeTotal)}) is less than half of last month's — worth verifying.`,
-                focusFor('incomeEntries')));
+                null, null, incomeCompare));
         }
         const costTotal = recurringCosts.reduce((x, c) => x + (c.amount || 0), 0);
         if (prev.totalCosts > 0 && costTotal > prev.totalCosts * 2.5) {
             out.push(w('cost-jump', 'recurringCosts', 'warning',
                 `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}× last month's — possible duplication.`,
-                focusFor('recurringCosts')));
+                null, null,
+                monthCompare(prevTitle, 'This month',
+                    billRows(prev.recurringCosts), billRows(recurringCosts), prev.totalCosts, costTotal)));
         }
 
         // A manual expense repeated from last month's archive is probably a

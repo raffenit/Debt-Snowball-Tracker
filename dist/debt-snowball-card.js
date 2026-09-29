@@ -2140,19 +2140,22 @@ This replaces ALL current data with that snapshot.`)) {
   }
   function showDataHealthModal(issues, { context = "load", title, body, confirmLabel = "Fix & Continue", hasData = false, onFix = null } = {}) {
     const tags = { repaired: "Repaired", warning: "Warning", notice: "Notice", info: "Notice", fatal: "Blocked" };
-    const rows = issues.map((i) => {
+    const rows = issues.map((i, idx) => {
       const kind = tags[i.severity] ? i.severity === "info" ? "notice" : i.severity : "notice";
-      const show = i.focus ? `<button type="button" class="health-issue-link" data-health-focus="${escHtml(JSON.stringify(i.focus))}">Show</button>` : "";
+      const show = i.compare ? `<button type="button" class="health-issue-link" data-health-compare="${idx}">Show</button>` : i.focus ? `<button type="button" class="health-issue-link" data-health-focus="${escHtml(JSON.stringify(i.focus))}">Show</button>` : "";
       const fix = i.fix ? `<button type="button" class="health-issue-link" data-health-fix="${escHtml(JSON.stringify(i.fix))}">Fix</button>` : "";
       return `
-        <div class="health-issue">
-            <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || "Notice")}</span>
-            <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
-            <span class="health-issue-actions">
-                <button type="button" class="health-issue-copy">Copy</button>
-                ${show}
-                ${fix}
-            </span>
+        <div class="health-issue-block">
+            <div class="health-issue">
+                <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || "Notice")}</span>
+                <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
+                <span class="health-issue-actions">
+                    <button type="button" class="health-issue-copy">Copy</button>
+                    ${show}
+                    ${fix}
+                </span>
+            </div>
+            ${i.compare ? '<div class="health-compare" hidden></div>' : ""}
         </div>`;
     }).join("");
     const defaultTitle = context === "confirm" ? "Data needs repair" : "Data repairs applied";
@@ -2198,7 +2201,30 @@ This replaces ALL current data with that snapshot.`)) {
           }
         });
       });
-      overlay.querySelectorAll(".health-issue-link").forEach((btn) => {
+      overlay.querySelectorAll("[data-health-compare]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const block = btn.closest(".health-issue-block");
+          const panel = block?.querySelector(".health-compare");
+          if (!panel) return;
+          const willOpen = panel.hidden;
+          overlay.querySelectorAll(".health-compare").forEach((p) => {
+            p.hidden = true;
+          });
+          overlay.querySelectorAll("[data-health-compare]").forEach((b) => {
+            b.textContent = "Show";
+          });
+          if (!willOpen) return;
+          if (!panel.dataset.filled) {
+            const issue = issues[Number(btn.dataset.healthCompare)];
+            panel.innerHTML = renderHealthCompare(issue?.compare);
+            panel.dataset.filled = "1";
+          }
+          panel.hidden = false;
+          btn.textContent = "Hide";
+          panel.scrollIntoView({ block: "nearest" });
+        });
+      });
+      overlay.querySelectorAll("[data-health-focus]").forEach((btn) => {
         btn.addEventListener("click", () => {
           let focus = null;
           try {
@@ -2229,6 +2255,46 @@ This replaces ALL current data with that snapshot.`)) {
         if (e.target === overlay) done(context === "confirm" ? "cancel" : "ok");
       });
     });
+  }
+  function renderHealthCompare(compare) {
+    if (!compare) return "";
+    const keyOf = (row) => compare.matchDates === false ? `${row.name}|${row.amount}|${row.note}` : `${row.name}|${row.amount}|${row.when}|${row.note}`;
+    const counts = (rows) => {
+      const m = /* @__PURE__ */ new Map();
+      for (const row of rows || []) m.set(keyOf(row), (m.get(keyOf(row)) || 0) + 1);
+      return m;
+    };
+    const mark = (rows, other) => {
+      const seen = /* @__PURE__ */ new Map();
+      return (rows || []).map((row) => {
+        const key = keyOf(row);
+        const n = (seen.get(key) || 0) + 1;
+        seen.set(key, n);
+        const elsewhere = other.get(key) || 0;
+        const flag = !elsewhere ? "Only here" : n > elsewhere ? "Extra" : "";
+        return { ...row, flag };
+      });
+    };
+    const column = (title, total, rows, otherRows) => {
+      const marked = mark(rows, counts(otherRows));
+      const listed = (rows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+      const stored = Number(total) || 0;
+      const items = marked.length ? marked.map((r) => {
+        const meta = [r.when, r.note, r.flag].filter(Boolean).map(escHtml).join(" \xB7 ");
+        return `<li class="health-compare-row${r.flag ? " health-compare-flagged" : ""}">
+                    <span class="health-compare-name">${escHtml(r.name)}</span>
+                    <span class="health-compare-amt">${formatMoney(r.amount)}</span>
+                    ${meta ? `<span class="health-compare-meta">${meta}</span>` : ""}
+                </li>`;
+      }).join("") : '<li class="health-compare-empty">No individual rows saved for this month.</li>';
+      const gap = marked.length && Math.abs(listed - stored) > 0.5 ? `<p class="health-compare-gap">Listed rows add up to ${formatMoney(listed)}. The stored month total is ${formatMoney(stored)}.</p>` : "";
+      return `<div class="health-compare-col">
+            <div class="health-compare-head"><span>${escHtml(title)}</span><strong>${formatMoney(stored)}</strong></div>
+            <ul class="health-compare-list">${items}</ul>
+            ${gap}
+        </div>`;
+    };
+    return column(compare.leftTitle, compare.leftTotal, compare.left, compare.right) + column(compare.rightTitle, compare.rightTotal, compare.right, compare.left);
   }
   function showCategorizeModal(cost, userBudgets) {
     return new Promise((resolve) => {
@@ -4056,6 +4122,25 @@ This replaces ALL current data with that snapshot.`)) {
   });
 
   // src/core/sanity.js
+  function incomeRows(entries) {
+    return (entries || []).map((e) => ({
+      name: e.label || "Income",
+      amount: Number(e.amount) || 0,
+      when: e.date || "",
+      note: e.scheduleType || e.schedule || ""
+    }));
+  }
+  function billRows(entries) {
+    return (entries || []).map((c) => ({
+      name: c.name || "Bill",
+      amount: Number(c.amount) || 0,
+      when: c.dueDay ? `Day ${c.dueDay}` : "",
+      note: (c.intervalMonths || 1) > 1 ? `Every ${c.intervalMonths} months` : ""
+    }));
+  }
+  function monthCompare(leftTitle, rightTitle, left, right, leftTotal, rightTotal, matchDates = true) {
+    return { leftTitle, rightTitle, left, right, leftTotal, rightTotal, matchDates };
+  }
   function focusFor(field, ids = []) {
     const map = {
       incomeEntries: ["income", "income"],
@@ -4260,27 +4345,57 @@ This replaces ALL current data with that snapshot.`)) {
     }
     const prev = archives.find((a) => !a.retro) || null;
     if (prev) {
-      const countJump = (curr, old, field, noun) => {
+      const prevTitle = prev.label || "Last month";
+      const countJump = (curr, old, field, noun, left, right, matchDates = true) => {
         if (old > 0 && curr > Math.max(3, old * 2)) {
+          const sum = (rows) => (rows || []).reduce((s2, r) => s2 + (Number(r.amount) || 0), 0);
           out.push(w(
             `count-${field}`,
             field,
             "warning",
             `${noun} count jumped from ${old} last month to ${curr} \u2014 possible duplication bug.`,
-            focusFor(field)
+            null,
+            null,
+            monthCompare(`${prevTitle} \xB7 ${old}`, `This month \xB7 ${curr}`, left, right, sum(left), sum(right), matchDates)
           ));
         }
       };
-      countJump(incomeEntries2.length, (prev.incomeEntries || []).length, "incomeEntries", "Income entries");
-      countJump(recurringCosts2.length, (prev.recurringCosts || []).length, "recurringCosts", "Bill");
+      countJump(
+        incomeEntries2.length,
+        (prev.incomeEntries || []).length,
+        "incomeEntries",
+        "Income entries",
+        incomeRows(prev.incomeEntries),
+        incomeRows(incomeEntries2),
+        false
+      );
+      countJump(
+        recurringCosts2.length,
+        (prev.recurringCosts || []).length,
+        "recurringCosts",
+        "Bill",
+        billRows(prev.recurringCosts),
+        billRows(recurringCosts2)
+      );
       const incomeTotal = incomeEntries2.reduce((x, e) => x + (e.amount || 0), 0);
+      const incomeCompare = monthCompare(
+        prevTitle,
+        "This month",
+        incomeRows(prev.incomeEntries),
+        incomeRows(incomeEntries2),
+        prev.totalIncome,
+        incomeTotal,
+        false
+      );
       if (prev.totalIncome > 0 && incomeTotal > prev.totalIncome * 2.5) {
         out.push(w(
           "income-jump",
           "incomeEntries",
           "warning",
           `This month's income ($${Math.round(incomeTotal)}) is ${(incomeTotal / prev.totalIncome).toFixed(1)}\xD7 last month's \u2014 possible duplication.`,
-          focusFor("incomeEntries")
+          null,
+          null,
+          incomeCompare
         ));
       }
       if (prev.totalIncome > 0 && incomeTotal > 0 && incomeTotal < prev.totalIncome * 0.4) {
@@ -4289,7 +4404,9 @@ This replaces ALL current data with that snapshot.`)) {
           "incomeEntries",
           "notice",
           `This month's income ($${Math.round(incomeTotal)}) is less than half of last month's \u2014 worth verifying.`,
-          focusFor("incomeEntries")
+          null,
+          null,
+          incomeCompare
         ));
       }
       const costTotal = recurringCosts2.reduce((x, c) => x + (c.amount || 0), 0);
@@ -4299,7 +4416,16 @@ This replaces ALL current data with that snapshot.`)) {
           "recurringCosts",
           "warning",
           `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}\xD7 last month's \u2014 possible duplication.`,
-          focusFor("recurringCosts")
+          null,
+          null,
+          monthCompare(
+            prevTitle,
+            "This month",
+            billRows(prev.recurringCosts),
+            billRows(recurringCosts2),
+            prev.totalCosts,
+            costTotal
+          )
         ));
       }
       const prevExpKeys = new Set((prev.spendingBudgets || []).flatMap((b) => (b.expenses || []).filter((e) => !e.autoCard).map((e) => `${(e.description || "").toLowerCase().trim()}|${e.amount}`)));
@@ -4330,13 +4456,14 @@ This replaces ALL current data with that snapshot.`)) {
   var init_sanity = __esm({
     "src/core/sanity.js"() {
       init_date_utils();
-      w = (id, field, severity, detail, focus, fix) => ({
+      w = (id, field, severity, detail, focus, fix, compare) => ({
         id,
         field,
         severity,
         detail,
         ...focus ? { focus } : {},
-        ...fix ? { fix } : {}
+        ...fix ? { fix } : {},
+        ...compare ? { compare } : {}
       });
     }
   });
@@ -5004,7 +5131,7 @@ This replaces ALL current data with that snapshot.`)) {
     showDataHealthModal(appState.sanityWarnings, {
       context: "load",
       title: "Unusual data detected",
-      body: "These patterns look suspicious \u2014 often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. Fix only appears when the alert is a leftover pointer to something already deleted.",
+      body: "These patterns look suspicious \u2014 often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. On a month-to-month alert, Show puts both months side by side. Fix only appears when the alert is a leftover pointer to something already deleted.",
       onFix: applyAlertFix
     });
   }
@@ -5821,6 +5948,51 @@ debt-snowball-card {
         radial-gradient(ellipse 40% 30% at 80% 80%, rgba(30, 40, 110, 0.06) 0%, transparent 60%);
 }
 
+/* Native scrollbars follow the midnight background and stay narrow.
+   scrollbar-color / scrollbar-width inherit; the webkit rules do not. */
+html,
+body,
+debt-snowball-card,
+debt-snowball-card * {
+    color-scheme: dark;
+    scrollbar-width: thin;
+    scrollbar-color: #2a2748 var(--bg-color);
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+debt-snowball-card::-webkit-scrollbar,
+debt-snowball-card *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track,
+debt-snowball-card::-webkit-scrollbar-track,
+debt-snowball-card *::-webkit-scrollbar-track,
+html::-webkit-scrollbar-corner,
+body::-webkit-scrollbar-corner,
+debt-snowball-card::-webkit-scrollbar-corner,
+debt-snowball-card *::-webkit-scrollbar-corner {
+    background: var(--bg-color);
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb,
+debt-snowball-card::-webkit-scrollbar-thumb,
+debt-snowball-card *::-webkit-scrollbar-thumb {
+    background: #2a2748;
+    border-radius: 6px;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover,
+debt-snowball-card::-webkit-scrollbar-thumb:hover,
+debt-snowball-card *::-webkit-scrollbar-thumb:hover {
+    background: #3a365c;
+}
+
 .app-container {
     --page-pad: 1rem;
     width: 100% !important;
@@ -6345,16 +6517,102 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     flex-direction: column;
     align-items: stretch;
     gap: 0.55rem;
-    max-height: 40vh;
+    max-height: 62vh;
     overflow-y: auto;
     margin: 0 0 1rem;
     text-align: left;
+}
+
+.health-issue-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
 }
 
 .health-issue {
     display: flex;
     align-items: flex-start;
     gap: 0.55rem;
+}
+
+.health-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+}
+
+.health-compare-col {
+    min-width: 0;
+    padding: 0.45rem 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.18);
+}
+
+.health-compare-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.35rem;
+    align-items: baseline;
+    margin-bottom: 0.3rem;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.health-compare-head strong {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.health-compare-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 220px;
+    overflow: auto;
+}
+
+.health-compare-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.05rem 0.35rem;
+    padding: 0.28rem 0.2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.75rem;
+}
+
+.health-compare-name {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.health-compare-amt {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.health-compare-meta,
+.health-compare-empty,
+.health-compare-gap {
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    line-height: 1.35;
+}
+
+.health-compare-meta {
+    grid-column: 1 / -1;
+}
+
+.health-compare-flagged {
+    background: rgba(255, 191, 31, 0.14);
+    border-radius: 4px;
+}
+
+.health-compare-gap,
+.health-compare-empty {
+    margin: 0.35rem 0 0;
 }
 
 .health-issue-tag {
