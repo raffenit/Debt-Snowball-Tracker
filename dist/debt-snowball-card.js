@@ -1087,8 +1087,8 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.8.12";
-      PANEL_BUILD_DATE = "2026-09-28";
+      PANEL_VERSION = "2.8.13";
+      PANEL_BUILD_DATE = "2026-09-29";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
       installType = scriptSrc.includes("hacsfiles") ? "HACS" : scriptSrc.includes("local") ? "Manual (/local/)" : scriptSrc.includes("community") ? "HACS (community)" : "Unknown";
