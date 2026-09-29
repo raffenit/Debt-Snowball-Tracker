@@ -35,7 +35,8 @@ export const appState = {
     errorLog: [],             // in-memory ring buffer of reported errors (see error-report.js)
     dataIssues: null,         // sanitizeData() issues found on load — consumed once by renderUI to show the health modal
     sanityWarnings: [],       // checkDataSanity() warnings on live data — shown via header badge + modal
-    _sanitySignature: null,   // dedupe: warning-id set already shown this session
+    acknowledgedAlerts: [],   // warning ids the user marked accurate — still listed, not active
+    _sanitySignature: null,   // dedupe: active warning-id set already shown this session
 
     // ─── Root Element (set during init) ───────────────────────────────────────
     _root: null,

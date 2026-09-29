@@ -256,13 +256,22 @@ export function checkDataSanity(s) {
                 `This month's income ($${Math.round(incomeTotal)}) is less than half of last month's — worth verifying.`,
                 null, null, incomeCompare));
         }
-        const costTotal = recurringCosts.reduce((x, c) => x + (c.amount || 0), 0);
-        if (prev.totalCosts > 0 && costTotal > prev.totalCosts * 2.5) {
+        // Compare the saved bill lists with each other. prev.totalCosts is
+        // cash that left the account (bills due that month, one-time costs,
+        // and spending), so pairing it with a full bill catalog flags two
+        // identical lists as a jump. Use that cash figure only when the
+        // archive has no bill amounts to add up.
+        const prevBills = billRows(prev.recurringCosts);
+        const currBills = billRows(recurringCosts);
+        const sumRows = rows => rows.reduce((x, r) => x + (Number(r.amount) || 0), 0);
+        const prevListed = sumRows(prevBills);
+        const costTotal = sumRows(currBills);
+        const prevBillTotal = prevListed > 0 ? prevListed : (prev.totalCosts || 0);
+        if (prevBillTotal > 0 && costTotal > prevBillTotal * 2.5) {
             out.push(w('cost-jump', 'recurringCosts', 'warning',
-                `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}× last month's — possible duplication.`,
+                `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prevBillTotal).toFixed(1)}× last month's — possible duplication.`,
                 null, null,
-                monthCompare(prevTitle, 'This month',
-                    billRows(prev.recurringCosts), billRows(recurringCosts), prev.totalCosts, costTotal)));
+                monthCompare(prevTitle, 'This month', prevBills, currBills, prevBillTotal, costTotal)));
         }
 
         // A manual expense repeated from last month's archive is probably a

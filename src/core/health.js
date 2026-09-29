@@ -25,6 +25,7 @@ export const FIELD_SPECS = [
     { name: 'monthlyArchives',  kind: 'records', default: () => [] },
     { name: 'spendingBudgets',  kind: 'records', default: () => [] },
     { name: 'cardExpenseSkips', kind: 'strings', default: () => [] },
+    { name: 'acknowledgedAlerts', kind: 'strings', default: () => [] },
     { name: 'paidStatus',       kind: 'object',  default: () => ({}) },
     { name: 'minPayOverrides',  kind: 'object',  default: () => ({}) },
     { name: 'expenseDefaults',  kind: 'object',  default: () => ({}) },

@@ -779,31 +779,75 @@ async function applyAlertFix(fix) {
     await saveData();
     appState.sanityWarnings = checkDataSanity(appState);
     _updateSanityBadge();
-    appState._sanitySignature = appState.sanityWarnings.length
-        ? appState.sanityWarnings.map(x => x.id).sort().join('|')
-        : null;
-    const left = appState.sanityWarnings.length;
+    appState._sanitySignature = _activeSanitySignature();
+    const left = _activeSanityWarnings().length;
     showSavedToast(left ? 'Removed that leftover. Other alerts are still open.' : 'Removed that leftover. The alert is gone.');
     if (left) showSanityWarningsModal();
+}
+
+function _activeSanityWarnings() {
+    const acked = new Set(appState.acknowledgedAlerts || []);
+    return (appState.sanityWarnings || []).filter(w => !acked.has(w.id));
+}
+
+function _resolvedSanityWarnings() {
+    const acked = new Set(appState.acknowledgedAlerts || []);
+    return (appState.sanityWarnings || []).filter(w => acked.has(w.id));
+}
+
+function _activeSanitySignature() {
+    return _activeSanityWarnings().map(w => w.id).sort().join('|');
 }
 
 function _updateSanityBadge() {
     const badge = appState._root.getElementById('sanity-badge');
     if (!badge) return;
-    const n = appState.sanityWarnings?.length || 0;
-    badge.style.display = n ? '' : 'none';
+    const active = _activeSanityWarnings().length;
+    const resolved = _resolvedSanityWarnings().length;
     const count = appState._root.getElementById('sanity-count');
-    if (count) count.textContent = n;
+    badge.classList.toggle('is-clear', active === 0 && resolved > 0);
+    if (active > 0) {
+        badge.style.display = '';
+        badge.title = 'Unusual data patterns detected — click to review';
+        if (count) count.textContent = active;
+    } else if (resolved > 0) {
+        badge.style.display = '';
+        badge.title = 'Alerts you marked accurate — click to review';
+        if (count) count.textContent = '✓';
+    } else {
+        badge.style.display = 'none';
+        if (count) count.textContent = '0';
+    }
+}
+
+async function setAlertAcknowledged(id, acknowledged) {
+    const ids = new Set(appState.acknowledgedAlerts || []);
+    if (acknowledged) ids.add(id);
+    else ids.delete(id);
+    appState.acknowledgedAlerts = [...ids];
+    await saveData();
+    _updateSanityBadge();
+    appState._sanitySignature = _activeSanitySignature();
+    showSavedToast(acknowledged
+        ? 'Marked accurate. It stays in the list as resolved and no longer counts.'
+        : 'Reopened. It counts as an active alert again.');
 }
 
 // Reopenable review of current sanity warnings (header badge / auto-open).
 function showSanityWarningsModal() {
-    if (!appState.sanityWarnings?.length) return;
-    showDataHealthModal(appState.sanityWarnings, {
+    const active = _activeSanityWarnings();
+    const resolved = _resolvedSanityWarnings().map(w => ({ ...w, resolved: true }));
+    if (!active.length && !resolved.length) return;
+    showDataHealthModal([...active, ...resolved], {
         context: 'load',
         title:   'Unusual data detected',
-        body:    'These patterns look suspicious — often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. On a month-to-month alert, Show puts both months side by side. Fix only appears when the alert is a leftover pointer to something already deleted.',
+        body:    'These patterns look suspicious — often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. On a month-to-month alert, Show puts both months side by side. It\'s accurate keeps the alert in this list as resolved and stops it counting. Fix only appears when the alert is a leftover pointer to something already deleted.',
         onFix:   applyAlertFix,
+        onAcknowledge: async (id, acknowledged) => {
+            await setAlertAcknowledged(id, acknowledged);
+        },
+    }).then(result => {
+        if (result === 'ack') showSanityWarningsModal();
     });
 }
 
@@ -843,12 +887,12 @@ function renderUI() {
     // stays visible via the badge without re-popping.
     appState.sanityWarnings = checkDataSanity(appState);
     _updateSanityBadge();
-    const sig = appState.sanityWarnings.map(x => x.id).sort().join('|');
-    if (appState.sanityWarnings.length && sig !== appState._sanitySignature) {
+    const sig = _activeSanitySignature();
+    if (_activeSanityWarnings().length && sig !== appState._sanitySignature) {
         appState._sanitySignature = sig;
         showSanityWarningsModal();
     }
-    if (!appState.sanityWarnings.length) appState._sanitySignature = null;
+    if (!_activeSanityWarnings().length) appState._sanitySignature = sig;
 
     // Render checkpoints list
     renderCheckpointsList();

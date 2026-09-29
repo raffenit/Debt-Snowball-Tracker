@@ -89,8 +89,10 @@ var DebtSnowballApp = (() => {
         // sanitizeData() issues found on load — consumed once by renderUI to show the health modal
         sanityWarnings: [],
         // checkDataSanity() warnings on live data — shown via header badge + modal
+        acknowledgedAlerts: [],
+        // warning ids the user marked accurate — still listed, not active
         _sanitySignature: null,
-        // dedupe: warning-id set already shown this session
+        // dedupe: active warning-id set already shown this session
         // ─── Root Element (set during init) ───────────────────────────────────────
         _root: null,
         // ─── DOM Elements (populated during init) ───────────────────────────────
@@ -1027,6 +1029,7 @@ var DebtSnowballApp = (() => {
         { name: "monthlyArchives", kind: "records", default: () => [] },
         { name: "spendingBudgets", kind: "records", default: () => [] },
         { name: "cardExpenseSkips", kind: "strings", default: () => [] },
+        { name: "acknowledgedAlerts", kind: "strings", default: () => [] },
         { name: "paidStatus", kind: "object", default: () => ({}) },
         { name: "minPayOverrides", kind: "object", default: () => ({}) },
         { name: "expenseDefaults", kind: "object", default: () => ({}) },
@@ -1060,6 +1063,7 @@ var DebtSnowballApp = (() => {
       checkpoints: data.checkpoints ?? [],
       strategy: ["snowball", "avalanche"].includes(data.strategy) ? data.strategy : "snowball",
       cardExpenseSkips: data.cardExpenseSkips ?? [],
+      acknowledgedAlerts: data.acknowledgedAlerts ?? [],
       monthlyArchives: data.monthlyArchives ?? [],
       paidStatus: backupIsCurrentMonth ? data.paidStatus ?? {} : {},
       minPayOverrides: backupIsCurrentMonth ? data.minPayOverrides ?? {} : {},
@@ -1278,6 +1282,7 @@ var DebtSnowballApp = (() => {
         "strategy",
         "spendingBudgets",
         "cardExpenseSkips",
+        "acknowledgedAlerts",
         "minPayOverrides",
         "monthlyArchives",
         "paidStatus",
@@ -1665,6 +1670,7 @@ var DebtSnowballApp = (() => {
         appState.monthlyArchives = data.monthlyArchives || [];
         appState.spendingBudgets = data.spendingBudgets || [];
         appState.cardExpenseSkips = data.cardExpenseSkips || [];
+        appState.acknowledgedAlerts = data.acknowledgedAlerts || [];
         let incomeMigrated = false;
         appState.incomeEntries = appState.incomeEntries.map((e) => {
           const sched = e.scheduleType || e.schedule;
@@ -1808,6 +1814,7 @@ var DebtSnowballApp = (() => {
       monthlyArchives: appState.monthlyArchives,
       spendingBudgets: appState.spendingBudgets,
       cardExpenseSkips: appState.cardExpenseSkips,
+      acknowledgedAlerts: appState.acknowledgedAlerts,
       minPayOverrides: appState.minPayOverrides,
       expenseDefaults: appState.expenseDefaults
     };
@@ -2140,21 +2147,30 @@ This replaces ALL current data with that snapshot.`)) {
       }
     }));
   }
-  function showDataHealthModal(issues, { context = "load", title, body, confirmLabel = "Fix & Continue", hasData = false, onFix = null } = {}) {
-    const tags = { repaired: "Repaired", warning: "Warning", notice: "Notice", info: "Notice", fatal: "Blocked" };
+  function showDataHealthModal(issues, { context = "load", title, body, confirmLabel = "Fix & Continue", hasData = false, onFix = null, onAcknowledge = null } = {}) {
+    const tags = { repaired: "Repaired", warning: "Warning", notice: "Notice", info: "Notice", fatal: "Blocked", resolved: "Resolved" };
+    let sawResolved = false;
     const rows = issues.map((i, idx) => {
-      const kind = tags[i.severity] ? i.severity === "info" ? "notice" : i.severity : "notice";
+      const resolved = !!i.resolved;
+      const kind = resolved ? "resolved" : tags[i.severity] ? i.severity === "info" ? "notice" : i.severity : "notice";
       const show = i.compare ? `<button type="button" class="health-issue-link" data-health-compare="${idx}">Show</button>` : i.focus ? `<button type="button" class="health-issue-link" data-health-focus="${escHtml(JSON.stringify(i.focus))}">Show</button>` : "";
-      const fix = i.fix ? `<button type="button" class="health-issue-link" data-health-fix="${escHtml(JSON.stringify(i.fix))}">Fix</button>` : "";
+      const fix = !resolved && i.fix ? `<button type="button" class="health-issue-link" data-health-fix="${escHtml(JSON.stringify(i.fix))}">Fix</button>` : "";
+      const ack = onAcknowledge && !resolved ? `<button type="button" class="health-issue-link" data-health-ack="${idx}">It's accurate</button>` : "";
+      const reopen = onAcknowledge && resolved ? `<button type="button" class="health-issue-link" data-health-reopen="${idx}">Reopen</button>` : "";
+      const heading = resolved && !sawResolved ? '<p class="health-resolved-label">Marked accurate</p>' : "";
+      if (resolved) sawResolved = true;
       return `
-        <div class="health-issue-block">
+        ${heading}
+        <div class="health-issue-block${resolved ? " is-resolved" : ""}">
             <div class="health-issue">
-                <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || "Notice")}</span>
+                <span class="health-issue-tag health-issue-${kind}">${escHtml(resolved ? "Resolved" : tags[i.severity] || "Notice")}</span>
                 <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
                 <span class="health-issue-actions">
                     <button type="button" class="health-issue-copy">Copy</button>
                     ${show}
                     ${fix}
+                    ${ack}
+                    ${reopen}
                 </span>
             </div>
             ${i.compare ? '<div class="health-compare" hidden></div>' : ""}
@@ -2237,6 +2253,18 @@ This replaces ALL current data with that snapshot.`)) {
           done("ok");
         });
       });
+      const acknowledge = async (btn, acknowledged) => {
+        btn.disabled = true;
+        const issue = issues[Number(btn.dataset.healthAck || btn.dataset.healthReopen)];
+        if (issue && onAcknowledge) await onAcknowledge(issue.id, acknowledged);
+        done("ack");
+      };
+      overlay.querySelectorAll("[data-health-ack]").forEach((btn) => {
+        btn.addEventListener("click", () => acknowledge(btn, true));
+      });
+      overlay.querySelectorAll("[data-health-reopen]").forEach((btn) => {
+        btn.addEventListener("click", () => acknowledge(btn, false));
+      });
       overlay.querySelectorAll("[data-health-fix]").forEach((btn) => {
         btn.addEventListener("click", async () => {
           btn.disabled = true;
@@ -2289,7 +2317,7 @@ This replaces ALL current data with that snapshot.`)) {
                     ${meta ? `<span class="health-compare-meta">${meta}</span>` : ""}
                 </li>`;
       }).join("") : '<li class="health-compare-empty">No individual rows saved for this month.</li>';
-      const gap = marked.length && Math.abs(listed - stored) > 0.5 ? `<p class="health-compare-gap">Listed rows add up to ${formatMoney(listed)}. The stored month total is ${formatMoney(stored)}.</p>` : "";
+      const gap = marked.length && Math.abs(listed - stored) > 0.5 ? `<p class="health-compare-gap">These rows add up to ${formatMoney(listed)}. The total above is ${formatMoney(stored)} \u2014 cash that left the account (bills due that month, plus spending), not the sum of every saved bill.</p>` : "";
       return `<div class="health-compare-col">
             <div class="health-compare-head"><span>${escHtml(title)}</span><strong>${formatMoney(stored)}</strong></div>
             <ul class="health-compare-list">${items}</ul>
@@ -4443,23 +4471,21 @@ This replaces ALL current data with that snapshot.`)) {
           incomeCompare
         ));
       }
-      const costTotal = recurringCosts2.reduce((x, c) => x + (c.amount || 0), 0);
-      if (prev.totalCosts > 0 && costTotal > prev.totalCosts * 2.5) {
+      const prevBills = billRows(prev.recurringCosts);
+      const currBills = billRows(recurringCosts2);
+      const sumRows = (rows) => rows.reduce((x, r) => x + (Number(r.amount) || 0), 0);
+      const prevListed = sumRows(prevBills);
+      const costTotal = sumRows(currBills);
+      const prevBillTotal = prevListed > 0 ? prevListed : prev.totalCosts || 0;
+      if (prevBillTotal > 0 && costTotal > prevBillTotal * 2.5) {
         out.push(w(
           "cost-jump",
           "recurringCosts",
           "warning",
-          `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}\xD7 last month's \u2014 possible duplication.`,
+          `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prevBillTotal).toFixed(1)}\xD7 last month's \u2014 possible duplication.`,
           null,
           null,
-          monthCompare(
-            prevTitle,
-            "This month",
-            billRows(prev.recurringCosts),
-            billRows(recurringCosts2),
-            prev.totalCosts,
-            costTotal
-          )
+          monthCompare(prevTitle, "This month", prevBills, currBills, prevBillTotal, costTotal)
         ));
       }
       const prevExpKeys = new Set((prev.spendingBudgets || []).flatMap((b) => (b.expenses || []).filter((e) => !e.autoCard).map((e) => `${(e.description || "").toLowerCase().trim()}|${e.amount}`)));
@@ -5181,26 +5207,66 @@ This replaces ALL current data with that snapshot.`)) {
     await saveData();
     appState.sanityWarnings = checkDataSanity(appState);
     _updateSanityBadge();
-    appState._sanitySignature = appState.sanityWarnings.length ? appState.sanityWarnings.map((x) => x.id).sort().join("|") : null;
-    const left = appState.sanityWarnings.length;
+    appState._sanitySignature = _activeSanitySignature();
+    const left = _activeSanityWarnings().length;
     showSavedToast(left ? "Removed that leftover. Other alerts are still open." : "Removed that leftover. The alert is gone.");
     if (left) showSanityWarningsModal();
+  }
+  function _activeSanityWarnings() {
+    const acked = new Set(appState.acknowledgedAlerts || []);
+    return (appState.sanityWarnings || []).filter((w2) => !acked.has(w2.id));
+  }
+  function _resolvedSanityWarnings() {
+    const acked = new Set(appState.acknowledgedAlerts || []);
+    return (appState.sanityWarnings || []).filter((w2) => acked.has(w2.id));
+  }
+  function _activeSanitySignature() {
+    return _activeSanityWarnings().map((w2) => w2.id).sort().join("|");
   }
   function _updateSanityBadge() {
     const badge = appState._root.getElementById("sanity-badge");
     if (!badge) return;
-    const n = appState.sanityWarnings?.length || 0;
-    badge.style.display = n ? "" : "none";
+    const active = _activeSanityWarnings().length;
+    const resolved = _resolvedSanityWarnings().length;
     const count = appState._root.getElementById("sanity-count");
-    if (count) count.textContent = n;
+    badge.classList.toggle("is-clear", active === 0 && resolved > 0);
+    if (active > 0) {
+      badge.style.display = "";
+      badge.title = "Unusual data patterns detected \u2014 click to review";
+      if (count) count.textContent = active;
+    } else if (resolved > 0) {
+      badge.style.display = "";
+      badge.title = "Alerts you marked accurate \u2014 click to review";
+      if (count) count.textContent = "\u2713";
+    } else {
+      badge.style.display = "none";
+      if (count) count.textContent = "0";
+    }
+  }
+  async function setAlertAcknowledged(id, acknowledged) {
+    const ids = new Set(appState.acknowledgedAlerts || []);
+    if (acknowledged) ids.add(id);
+    else ids.delete(id);
+    appState.acknowledgedAlerts = [...ids];
+    await saveData();
+    _updateSanityBadge();
+    appState._sanitySignature = _activeSanitySignature();
+    showSavedToast(acknowledged ? "Marked accurate. It stays in the list as resolved and no longer counts." : "Reopened. It counts as an active alert again.");
   }
   function showSanityWarningsModal() {
-    if (!appState.sanityWarnings?.length) return;
-    showDataHealthModal(appState.sanityWarnings, {
+    const active = _activeSanityWarnings();
+    const resolved = _resolvedSanityWarnings().map((w2) => ({ ...w2, resolved: true }));
+    if (!active.length && !resolved.length) return;
+    showDataHealthModal([...active, ...resolved], {
       context: "load",
       title: "Unusual data detected",
-      body: "These patterns look suspicious \u2014 often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. On a month-to-month alert, Show puts both months side by side. Fix only appears when the alert is a leftover pointer to something already deleted.",
-      onFix: applyAlertFix
+      body: "These patterns look suspicious \u2014 often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. On a month-to-month alert, Show puts both months side by side. It's accurate keeps the alert in this list as resolved and stops it counting. Fix only appears when the alert is a leftover pointer to something already deleted.",
+      onFix: applyAlertFix,
+      onAcknowledge: async (id, acknowledged) => {
+        await setAlertAcknowledged(id, acknowledged);
+      }
+    }).then((result) => {
+      if (result === "ack") showSanityWarningsModal();
     });
   }
   function renderUI() {
@@ -5224,12 +5290,12 @@ This replaces ALL current data with that snapshot.`)) {
     }
     appState.sanityWarnings = checkDataSanity(appState);
     _updateSanityBadge();
-    const sig = appState.sanityWarnings.map((x) => x.id).sort().join("|");
-    if (appState.sanityWarnings.length && sig !== appState._sanitySignature) {
+    const sig = _activeSanitySignature();
+    if (_activeSanityWarnings().length && sig !== appState._sanitySignature) {
       appState._sanitySignature = sig;
       showSanityWarningsModal();
     }
-    if (!appState.sanityWarnings.length) appState._sanitySignature = null;
+    if (!_activeSanityWarnings().length) appState._sanitySignature = sig;
     renderCheckpointsList();
     appState._root.querySelectorAll(".strategy-btn").forEach((b) => {
       b.classList.toggle("active", b.dataset.strategy === appState.strategy);
@@ -6768,6 +6834,31 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .health-issue-warning {
     background: rgba(245, 158, 11, 0.16);
     color: #fbbf24;
+}
+
+.health-issue-resolved {
+    background: rgba(52, 211, 153, 0.16);
+    color: #6ee7b7;
+}
+
+.health-resolved-label {
+    margin: 0.35rem 0 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.health-issue-block.is-resolved .health-issue-text {
+    opacity: 0.72;
+}
+
+#sanity-badge.header-action.is-clear {
+    background: transparent;
+    border: 1px solid rgba(27, 22, 48, 0.32);
+    color: var(--header-ink);
+    box-shadow: none;
 }
 
 .health-issue-notice {

@@ -766,6 +766,31 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     color: #fbbf24;
 }
 
+.health-issue-resolved {
+    background: rgba(52, 211, 153, 0.16);
+    color: #6ee7b7;
+}
+
+.health-resolved-label {
+    margin: 0.35rem 0 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.health-issue-block.is-resolved .health-issue-text {
+    opacity: 0.72;
+}
+
+#sanity-badge.header-action.is-clear {
+    background: transparent;
+    border: 1px solid rgba(27, 22, 48, 0.32);
+    color: var(--header-ink);
+    box-shadow: none;
+}
+
 .health-issue-notice {
     background: rgba(91, 127, 255, 0.14);
     color: #c5d0ff;

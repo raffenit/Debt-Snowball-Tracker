@@ -69,6 +69,7 @@ export function filterBackupFields(data, monthKey) {
         checkpoints:      data.checkpoints    ?? [],
         strategy:         ['snowball', 'avalanche'].includes(data.strategy) ? data.strategy : 'snowball',
         cardExpenseSkips: data.cardExpenseSkips ?? [],
+        acknowledgedAlerts: data.acknowledgedAlerts ?? [],
         monthlyArchives:  data.monthlyArchives  ?? [],
         paidStatus:       backupIsCurrentMonth ? (data.paidStatus     ?? {}) : {},
         minPayOverrides:  backupIsCurrentMonth ? (data.minPayOverrides ?? {}) : {},

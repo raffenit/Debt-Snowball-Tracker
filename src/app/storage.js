@@ -101,6 +101,7 @@ async function loadBackendData() {
             appState.monthlyArchives  = data.monthlyArchives  || [];
             appState.spendingBudgets  = data.spendingBudgets  || [];
             appState.cardExpenseSkips = data.cardExpenseSkips || [];
+            appState.acknowledgedAlerts = data.acknowledgedAlerts || [];
 
             // Older rows were saved with no schedule at all and were skipped on
             // rollover. Fill those in as monthly. An explicit one-time choice
@@ -309,6 +310,7 @@ function buildSavePayload() {
         monthlyArchives: appState.monthlyArchives,
         spendingBudgets: appState.spendingBudgets,
         cardExpenseSkips: appState.cardExpenseSkips,
+        acknowledgedAlerts: appState.acknowledgedAlerts,
         minPayOverrides: appState.minPayOverrides,
         expenseDefaults: appState.expenseDefaults,
     };

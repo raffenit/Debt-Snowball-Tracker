@@ -134,7 +134,7 @@ function showNotificationToast(message, type = 'info') {
 // roll in-memory state back instead of leaving phantom imported data on screen.
 const BACKUP_FIELDS = [
     'debts', 'recurringCosts', 'oneTimeCosts', 'incomeEntries', 'checkpoints',
-    'strategy', 'spendingBudgets', 'cardExpenseSkips', 'minPayOverrides',
+    'strategy', 'spendingBudgets', 'cardExpenseSkips', 'acknowledgedAlerts', 'minPayOverrides',
     'monthlyArchives', 'paidStatus', 'startingBalance', 'showMortgage',
     'expenseDefaults',
 ];

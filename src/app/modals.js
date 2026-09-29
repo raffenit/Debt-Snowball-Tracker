@@ -268,27 +268,42 @@ async function _renderServerBackups(body) {
 //   context 'load'    — review-only; repairs already applied in memory.
 //   context 'confirm' — gate a destructive action (import/restore) on the
 //                       repair list. Resolves 'confirm' | 'export' | 'cancel'.
-function showDataHealthModal(issues, { context = 'load', title, body, confirmLabel = 'Fix & Continue', hasData = false, onFix = null } = {}) {
-    const tags = { repaired: 'Repaired', warning: 'Warning', notice: 'Notice', info: 'Notice', fatal: 'Blocked' };
+function showDataHealthModal(issues, { context = 'load', title, body, confirmLabel = 'Fix & Continue', hasData = false, onFix = null, onAcknowledge = null } = {}) {
+    const tags = { repaired: 'Repaired', warning: 'Warning', notice: 'Notice', info: 'Notice', fatal: 'Blocked', resolved: 'Resolved' };
+    let sawResolved = false;
     const rows = issues.map((i, idx) => {
-        const kind = tags[i.severity] ? (i.severity === 'info' ? 'notice' : i.severity) : 'notice';
+        const resolved = !!i.resolved;
+        const kind = resolved ? 'resolved' : (tags[i.severity] ? (i.severity === 'info' ? 'notice' : i.severity) : 'notice');
         const show = i.compare
             ? `<button type="button" class="health-issue-link" data-health-compare="${idx}">Show</button>`
             : i.focus
                 ? `<button type="button" class="health-issue-link" data-health-focus="${escHtml(JSON.stringify(i.focus))}">Show</button>`
                 : '';
-        const fix = i.fix
+        const fix = !resolved && i.fix
             ? `<button type="button" class="health-issue-link" data-health-fix="${escHtml(JSON.stringify(i.fix))}">Fix</button>`
             : '';
+        const ack = onAcknowledge && !resolved
+            ? `<button type="button" class="health-issue-link" data-health-ack="${idx}">It's accurate</button>`
+            : '';
+        const reopen = onAcknowledge && resolved
+            ? `<button type="button" class="health-issue-link" data-health-reopen="${idx}">Reopen</button>`
+            : '';
+        const heading = resolved && !sawResolved
+            ? '<p class="health-resolved-label">Marked accurate</p>'
+            : '';
+        if (resolved) sawResolved = true;
         return `
-        <div class="health-issue-block">
+        ${heading}
+        <div class="health-issue-block${resolved ? ' is-resolved' : ''}">
             <div class="health-issue">
-                <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || 'Notice')}</span>
+                <span class="health-issue-tag health-issue-${kind}">${escHtml(resolved ? 'Resolved' : (tags[i.severity] || 'Notice'))}</span>
                 <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
                 <span class="health-issue-actions">
                     <button type="button" class="health-issue-copy">Copy</button>
                     ${show}
                     ${fix}
+                    ${ack}
+                    ${reopen}
                 </span>
             </div>
             ${i.compare ? '<div class="health-compare" hidden></div>' : ''}
@@ -366,6 +381,18 @@ function showDataHealthModal(issues, { context = 'load', title, body, confirmLab
                 done('ok');
             });
         });
+        const acknowledge = async (btn, acknowledged) => {
+            btn.disabled = true;
+            const issue = issues[Number(btn.dataset.healthAck || btn.dataset.healthReopen)];
+            if (issue && onAcknowledge) await onAcknowledge(issue.id, acknowledged);
+            done('ack');
+        };
+        overlay.querySelectorAll('[data-health-ack]').forEach(btn => {
+            btn.addEventListener('click', () => acknowledge(btn, true));
+        });
+        overlay.querySelectorAll('[data-health-reopen]').forEach(btn => {
+            btn.addEventListener('click', () => acknowledge(btn, false));
+        });
         overlay.querySelectorAll('[data-health-fix]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 btn.disabled = true;
@@ -422,7 +449,7 @@ function renderHealthCompare(compare) {
             }).join('')
             : '<li class="health-compare-empty">No individual rows saved for this month.</li>';
         const gap = marked.length && Math.abs(listed - stored) > 0.5
-            ? `<p class="health-compare-gap">Listed rows add up to ${formatMoney(listed)}. The stored month total is ${formatMoney(stored)}.</p>`
+            ? `<p class="health-compare-gap">These rows add up to ${formatMoney(listed)}. The total above is ${formatMoney(stored)} — cash that left the account (bills due that month, plus spending), not the sum of every saved bill.</p>`
             : '';
         return `<div class="health-compare-col">
             <div class="health-compare-head"><span>${escHtml(title)}</span><strong>${formatMoney(stored)}</strong></div>

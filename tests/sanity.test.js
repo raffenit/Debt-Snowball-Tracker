@@ -250,6 +250,41 @@ describe('checkDataSanity — month-over-month', () => {
         assert.ok(ids(ws).includes('cost-jump'));
     });
 
+    test('identical bill lists do not flag when the archive cash total is smaller', () => {
+        const bills = [
+            { id: 'c1', name: 'Rent', amount: 2000, dueDay: 1 },
+            { id: 'c2', name: 'Insurance', amount: 1429, dueDay: 14 },
+        ];
+        const ws = checkDataSanity(base({
+            monthlyArchives: [{
+                month: '2026-7', label: 'August 2026', totalIncome: 4000, totalCosts: 714,
+                incomeEntries: [{ id: 'i1', amount: 4000 }],
+                recurringCosts: bills,
+            }],
+            incomeEntries: [{ id: 'i1', amount: 4000 }],
+            recurringCosts: bills.map(b => ({ ...b })),
+        }));
+        assert.ok(!ids(ws).includes('cost-jump'));
+    });
+
+    test('cost jump compares the bill lists, not the archive cash total', () => {
+        const ws = checkDataSanity(base({
+            monthlyArchives: [{
+                month: '2026-7', label: 'August 2026', totalCosts: 99999,
+                recurringCosts: [{ id: 'c1', name: 'Rent', amount: 1000, dueDay: 1 }],
+            }],
+            recurringCosts: [
+                { id: 'c1', name: 'Rent', amount: 1000, dueDay: 1 },
+                { id: 'c2', name: 'Rent', amount: 1000, dueDay: 1 },
+                { id: 'c3', name: 'Electric', amount: 1000, dueDay: 5 },
+            ],
+        }));
+        const jump = ws.find(x => x.id === 'cost-jump');
+        assert.ok(jump);
+        assert.equal(jump.compare.leftTotal, 1000);
+        assert.equal(jump.compare.rightTotal, 3000);
+    });
+
     test('repeated manual expense across months → convert suggestion', () => {
         const ws = checkDataSanity(base({
             monthlyArchives: [{

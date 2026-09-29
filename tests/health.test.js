@@ -21,6 +21,7 @@ const VALID = {
     monthlyArchives: [{ month: '2026-7' }],
     spendingBudgets: [{ id: 'b1', expenses: [] }],
     cardExpenseSkips: ['2026-8:c1'],
+    acknowledgedAlerts: ['cost-jump'],
     paidStatus: { c1: true },
     minPayOverrides: { d1: 25 },
     expenseDefaults: { paymentMethod: 'card', cardDebtId: 'd1' },
