@@ -2261,6 +2261,18 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 /* ===== Drag & drop ===== */
+.cost-card[draggable="true"] {
+    cursor: grab;
+}
+.cost-card.dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+}
+.cost-subsection.cost-drop-target {
+    outline: 2px dashed var(--accent-color);
+    outline-offset: 3px;
+    border-radius: 8px;
+}
 .budget-expense-row[draggable="true"],
 .schedule-row[draggable="true"] {
     cursor: grab;

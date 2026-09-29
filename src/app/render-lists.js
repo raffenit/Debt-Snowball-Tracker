@@ -144,10 +144,10 @@ function renderRecurringCostsList() {
 
     categories.forEach(({ key, label, cls }) => {
         const group = recurringSorted.filter(c => categoryOf(c) === key);
-        if (group.length === 0) return;
 
         const section = document.createElement('div');
         section.className = `cost-subsection ${cls}`;
+        section.dataset.costCategory = key;
 
         const isCollapsible = key === 'utility' || key === 'subscription' || key === 'maintenance';
         const isExpanded    = appState.expandedCostSections.has(key);
@@ -162,7 +162,7 @@ function renderRecurringCostsList() {
         header.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">${toggleIcon}${label}</span><span class="cost-subsection-total">${formatMoney(groupTotal)}/mo</span>`;
         section.appendChild(header);
 
-        if (!isCollapsible || isExpanded) {
+        if (group.length && (!isCollapsible || isExpanded)) {
             const grid = document.createElement('div');
             grid.className = 'debts-list';
             grid.style.display = 'grid';
@@ -175,10 +175,11 @@ function renderRecurringCostsList() {
         appState.costsListContainer.appendChild(section);
     });
 
-    // ── One-time section ────────────────────────────────────────────────────
-    if (appState.oneTimeCosts.length > 0) {
+    // ── One-time section (always present so a bill can be dropped here) ──
+    {
         const otSection = document.createElement('div');
         otSection.className = 'cost-subsection cost-subsection-onetime';
+        otSection.dataset.costCategory = 'one-time';
         const otTotal = appState.oneTimeCosts.reduce((s, c) => s + c.amount, 0);
 
         const otHeader = document.createElement('div');
@@ -186,13 +187,15 @@ function renderRecurringCostsList() {
         otHeader.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">🔴 ONE-TIME BILLS (This Month Only)</span><span class="cost-subsection-total">${formatMoney(otTotal)}</span>`;
         otSection.appendChild(otHeader);
 
-        const otGrid = document.createElement('div');
-        otGrid.className = 'debts-list';
-        otGrid.style.display = 'grid';
-        otGrid.style.gridTemplateColumns = '1fr';
-        otGrid.style.gap = '0.65rem';
-        appState.oneTimeCosts.forEach(cost => renderCostCard(cost, otGrid, true, currentDay));
-        otSection.appendChild(otGrid);
+        if (appState.oneTimeCosts.length > 0) {
+            const otGrid = document.createElement('div');
+            otGrid.className = 'debts-list';
+            otGrid.style.display = 'grid';
+            otGrid.style.gridTemplateColumns = '1fr';
+            otGrid.style.gap = '0.65rem';
+            appState.oneTimeCosts.forEach(cost => renderCostCard(cost, otGrid, true, currentDay));
+            otSection.appendChild(otGrid);
+        }
         appState.costsListContainer.appendChild(otSection);
     }
 
@@ -243,6 +246,12 @@ function renderCostCard(cost, grid, isOneTime, currentDay) {
         (paidState ? ' card-paid' : '') +
         (isDue ? '' : ' not-due-month') +
         (isOneTime ? ' cost-card-onetime' : '');
+    el.draggable = true;
+    el.dataset.costId = cost.id;
+    el.dataset.costCategory = isOneTime
+        ? 'one-time'
+        : (['utility', 'subscription', 'maintenance', 'other'].includes(cost.category) ? cost.category : 'other');
+    el.title = 'Drag to another category';
     const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
     const metaParts  = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
     el.innerHTML = `

@@ -3027,9 +3027,9 @@ This replaces ALL current data with that snapshot.`)) {
     ];
     categories.forEach(({ key, label, cls }) => {
       const group = recurringSorted.filter((c) => categoryOf(c) === key);
-      if (group.length === 0) return;
       const section = document.createElement("div");
       section.className = `cost-subsection ${cls}`;
+      section.dataset.costCategory = key;
       const isCollapsible = key === "utility" || key === "subscription" || key === "maintenance";
       const isExpanded = appState.expandedCostSections.has(key);
       const groupTotal = group.reduce((s, c) => s + c.amount, 0);
@@ -3039,7 +3039,7 @@ This replaces ALL current data with that snapshot.`)) {
       const toggleIcon = isCollapsible ? `<span class="cost-section-toggle-icon${isExpanded ? "" : " collapsed"}">\u25BC</span>` : "";
       header.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">${toggleIcon}${label}</span><span class="cost-subsection-total">${formatMoney(groupTotal)}/mo</span>`;
       section.appendChild(header);
-      if (!isCollapsible || isExpanded) {
+      if (group.length && (!isCollapsible || isExpanded)) {
         const grid = document.createElement("div");
         grid.className = "debts-list";
         grid.style.display = "grid";
@@ -3050,21 +3050,24 @@ This replaces ALL current data with that snapshot.`)) {
       }
       appState.costsListContainer.appendChild(section);
     });
-    if (appState.oneTimeCosts.length > 0) {
+    {
       const otSection = document.createElement("div");
       otSection.className = "cost-subsection cost-subsection-onetime";
+      otSection.dataset.costCategory = "one-time";
       const otTotal = appState.oneTimeCosts.reduce((s, c) => s + c.amount, 0);
       const otHeader = document.createElement("div");
       otHeader.className = "cost-subsection-header";
       otHeader.innerHTML = `<span style="display:flex;align-items:center;gap:0.25rem;">\u{1F534} ONE-TIME BILLS (This Month Only)</span><span class="cost-subsection-total">${formatMoney(otTotal)}</span>`;
       otSection.appendChild(otHeader);
-      const otGrid = document.createElement("div");
-      otGrid.className = "debts-list";
-      otGrid.style.display = "grid";
-      otGrid.style.gridTemplateColumns = "1fr";
-      otGrid.style.gap = "0.65rem";
-      appState.oneTimeCosts.forEach((cost) => renderCostCard(cost, otGrid, true, currentDay));
-      otSection.appendChild(otGrid);
+      if (appState.oneTimeCosts.length > 0) {
+        const otGrid = document.createElement("div");
+        otGrid.className = "debts-list";
+        otGrid.style.display = "grid";
+        otGrid.style.gridTemplateColumns = "1fr";
+        otGrid.style.gap = "0.65rem";
+        appState.oneTimeCosts.forEach((cost) => renderCostCard(cost, otGrid, true, currentDay));
+        otSection.appendChild(otGrid);
+      }
       appState.costsListContainer.appendChild(otSection);
     }
     appState.costsListContainer.querySelectorAll(".btn-edit-cost").forEach((b) => b.addEventListener("click", (e) => openCostModal(e.target.dataset.id)));
@@ -3100,6 +3103,10 @@ This replaces ALL current data with that snapshot.`)) {
     }
     const el = document.createElement("div");
     el.className = "debt-card cost-card cost-card-compact" + (isCard ? " cost-card-credit" : " cost-card-direct") + (paidState ? " card-paid" : "") + (isDue ? "" : " not-due-month") + (isOneTime ? " cost-card-onetime" : "");
+    el.draggable = true;
+    el.dataset.costId = cost.id;
+    el.dataset.costCategory = isOneTime ? "one-time" : ["utility", "subscription", "maintenance", "other"].includes(cost.category) ? cost.category : "other";
+    el.title = "Drag to another category";
     const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join("");
     const metaParts = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
     el.innerHTML = `
@@ -4505,6 +4512,7 @@ This replaces ALL current data with that snapshot.`)) {
     deleteDebt: () => deleteDebt,
     deleteIncome: () => deleteIncome,
     dismissToast: () => dismissToast,
+    moveBillToCategory: () => moveBillToCategory,
     openCostModal: () => openCostModal,
     openDebtModal: () => openDebtModal,
     openIncomeModal: () => openIncomeModal,
@@ -4603,7 +4611,11 @@ This replaces ALL current data with that snapshot.`)) {
         appState._root.getElementById("cost-name").value = cost.name;
         appState._root.getElementById("cost-amount").value = cost.amount;
         appState._root.getElementById("cost-due-day").value = cost.dueDay || "";
-        appState._root.getElementById("cost-category").value = cost.category || "other";
+        const inOneTime = appState.oneTimeCosts.some((c) => c.id === cost.id);
+        const categorySelect = appState._root.getElementById("cost-category");
+        const categoryValue = inOneTime ? "one-time" : cost.category || "other";
+        categorySelect.value = categoryValue;
+        if (categorySelect.value !== categoryValue) categorySelect.value = "other";
         appState._root.getElementById("cost-payment-method").value = cost.paymentMethod || "direct";
         appState._root.getElementById("cost-amount-type").value = cost.amountType || "fixed";
         appState._root.getElementById("cost-budget").value = cost.budgetId || "";
@@ -4838,6 +4850,35 @@ This replaces ALL current data with that snapshot.`)) {
     } catch (err) {
       showErrorToast(err.message || "Failed to save bill.");
     }
+  }
+  function moveBillToCategory(costId, toCategory) {
+    if (!BILL_CATEGORY_LABELS[toCategory]) return;
+    const fromRecurring = appState.recurringCosts.find((c) => c.id === costId);
+    const fromOneTime = appState.oneTimeCosts.find((c) => c.id === costId);
+    const cost = fromRecurring || fromOneTime;
+    if (!cost) return;
+    const fromCategory = fromOneTime ? "one-time" : ["utility", "subscription", "maintenance", "other"].includes(cost.category) ? cost.category : "other";
+    if (fromCategory === toCategory) return;
+    if (toCategory === "one-time") {
+      appState.recurringCosts = appState.recurringCosts.filter((c) => c.id !== costId);
+      appState.oneTimeCosts = appState.oneTimeCosts.filter((c) => c.id !== costId);
+      appState.oneTimeCosts.push({
+        ...cost,
+        category: "one-time",
+        addedMonth: appState.workingMonthKey || currentMonthKey()
+      });
+    } else if (fromOneTime) {
+      appState.oneTimeCosts = appState.oneTimeCosts.filter((c) => c.id !== costId);
+      const moved = { ...cost, category: toCategory, intervalMonths: cost.intervalMonths > 1 ? cost.intervalMonths : 1 };
+      delete moved.addedMonth;
+      appState.recurringCosts.push(moved);
+    } else {
+      cost.category = toCategory;
+    }
+    if (toCategory === "utility" || toCategory === "subscription" || toCategory === "maintenance") {
+      appState.expandedCostSections.add(toCategory);
+    }
+    saveDataAndRender2().then(() => showSavedToast(`Moved to ${BILL_CATEGORY_LABELS[toCategory]} \u2713`)).catch((err) => reportError("Move failed \u2014 your change may not persist after reload", err));
   }
   function deleteCost(id) {
     showInlineConfirm(id, "cost", () => {
@@ -5202,7 +5243,7 @@ This replaces ALL current data with that snapshot.`)) {
     const schedule = renderPaymentPlan();
     if (schedule !== null) updateHASensors(simResults, schedule);
   }
-  var undoToastTimer;
+  var BILL_CATEGORY_LABELS, undoToastTimer;
   var init_render_modals = __esm({
     "src/app/render-modals.js"() {
       init_state();
@@ -5220,6 +5261,13 @@ This replaces ALL current data with that snapshot.`)) {
       init_error_report();
       init_sanity();
       init_render_support();
+      BILL_CATEGORY_LABELS = {
+        utility: "Utilities",
+        subscription: "Subscriptions",
+        maintenance: "Maintenance",
+        other: "Other",
+        "one-time": "One-time"
+      };
       undoToastTimer = null;
     }
   });
@@ -5345,6 +5393,52 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       if (appState.expandedCostSections.has(key)) appState.expandedCostSections.delete(key);
       else appState.expandedCostSections.add(key);
       renderRecurringCostsList();
+    });
+    appState.costsListContainer.addEventListener("dragstart", (e) => {
+      if (e.target.closest("button")) {
+        e.preventDefault();
+        return;
+      }
+      const card = e.target.closest('.cost-card[draggable="true"]');
+      if (!card) return;
+      e.dataTransfer.setData("text/plain", JSON.stringify({
+        costId: card.dataset.costId,
+        costCategory: card.dataset.costCategory
+      }));
+      e.dataTransfer.effectAllowed = "move";
+      card.classList.add("dragging");
+    });
+    appState.costsListContainer.addEventListener("dragend", (e) => {
+      e.target.closest(".cost-card")?.classList.remove("dragging");
+      appState.costsListContainer.querySelectorAll(".cost-drop-target").forEach((el) => el.classList.remove("cost-drop-target"));
+    });
+    appState.costsListContainer.addEventListener("dragover", (e) => {
+      const section = e.target.closest(".cost-subsection");
+      if (!section) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      appState.costsListContainer.querySelectorAll(".cost-drop-target").forEach((el) => {
+        if (el !== section) el.classList.remove("cost-drop-target");
+      });
+      section.classList.add("cost-drop-target");
+    });
+    appState.costsListContainer.addEventListener("dragleave", (e) => {
+      const section = e.target.closest(".cost-subsection");
+      if (section && !section.contains(e.relatedTarget)) section.classList.remove("cost-drop-target");
+    });
+    appState.costsListContainer.addEventListener("drop", (e) => {
+      const section = e.target.closest(".cost-subsection");
+      if (!section) return;
+      e.preventDefault();
+      section.classList.remove("cost-drop-target");
+      let payload;
+      try {
+        payload = JSON.parse(e.dataTransfer.getData("text/plain"));
+      } catch {
+        return;
+      }
+      if (!payload?.costId || !section.dataset.costCategory) return;
+      moveBillToCategory(payload.costId, section.dataset.costCategory);
     });
     appState._root.querySelectorAll(".close-budget-modal").forEach((b) => b.addEventListener("click", closeBudgetModal));
     appState._root.querySelectorAll(".close-expense-modal").forEach((b) => b.addEventListener("click", closeExpenseModal));
@@ -8171,6 +8265,18 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 /* ===== Drag & drop ===== */
+.cost-card[draggable="true"] {
+    cursor: grab;
+}
+.cost-card.dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+}
+.cost-subsection.cost-drop-target {
+    outline: 2px dashed var(--accent-color);
+    outline-offset: 3px;
+    border-radius: 8px;
+}
 .budget-expense-row[draggable="true"],
 .schedule-row[draggable="true"] {
     cursor: grab;

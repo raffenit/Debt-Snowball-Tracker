@@ -112,7 +112,11 @@ function openCostModal(costId = null, prefill = null) {
             appState._root.getElementById('cost-name').value            = cost.name;
             appState._root.getElementById('cost-amount').value          = cost.amount;
             appState._root.getElementById('cost-due-day').value         = cost.dueDay || '';
-            appState._root.getElementById('cost-category').value        = cost.category || 'other';
+            const inOneTime = appState.oneTimeCosts.some(c => c.id === cost.id);
+            const categorySelect = appState._root.getElementById('cost-category');
+            const categoryValue = inOneTime ? 'one-time' : (cost.category || 'other');
+            categorySelect.value = categoryValue;
+            if (categorySelect.value !== categoryValue) categorySelect.value = 'other';
             appState._root.getElementById('cost-payment-method').value  = cost.paymentMethod || 'direct';
             appState._root.getElementById('cost-amount-type').value     = cost.amountType || 'fixed';
             appState._root.getElementById('cost-budget').value          = cost.budgetId || '';
@@ -382,6 +386,51 @@ function saveCost() {
     } catch (err) {
         showErrorToast(err.message || 'Failed to save bill.');
     }
+}
+
+const BILL_CATEGORY_LABELS = {
+    utility: 'Utilities',
+    subscription: 'Subscriptions',
+    maintenance: 'Maintenance',
+    other: 'Other',
+    'one-time': 'One-time',
+};
+
+// Drag a bill onto another Fixed Bills section. Edit Bill uses the same
+// categories through its Bill Category dropdown.
+function moveBillToCategory(costId, toCategory) {
+    if (!BILL_CATEGORY_LABELS[toCategory]) return;
+    const fromRecurring = appState.recurringCosts.find(c => c.id === costId);
+    const fromOneTime = appState.oneTimeCosts.find(c => c.id === costId);
+    const cost = fromRecurring || fromOneTime;
+    if (!cost) return;
+    const fromCategory = fromOneTime
+        ? 'one-time'
+        : (['utility', 'subscription', 'maintenance', 'other'].includes(cost.category) ? cost.category : 'other');
+    if (fromCategory === toCategory) return;
+
+    if (toCategory === 'one-time') {
+        appState.recurringCosts = appState.recurringCosts.filter(c => c.id !== costId);
+        appState.oneTimeCosts = appState.oneTimeCosts.filter(c => c.id !== costId);
+        appState.oneTimeCosts.push({
+            ...cost,
+            category: 'one-time',
+            addedMonth: appState.workingMonthKey || currentMonthKey(),
+        });
+    } else if (fromOneTime) {
+        appState.oneTimeCosts = appState.oneTimeCosts.filter(c => c.id !== costId);
+        const moved = { ...cost, category: toCategory, intervalMonths: cost.intervalMonths > 1 ? cost.intervalMonths : 1 };
+        delete moved.addedMonth;
+        appState.recurringCosts.push(moved);
+    } else {
+        cost.category = toCategory;
+    }
+    if (toCategory === 'utility' || toCategory === 'subscription' || toCategory === 'maintenance') {
+        appState.expandedCostSections.add(toCategory);
+    }
+    saveDataAndRender()
+        .then(() => showSavedToast(`Moved to ${BILL_CATEGORY_LABELS[toCategory]} ✓`))
+        .catch(err => reportError('Move failed — your change may not persist after reload', err));
 }
 
 function deleteCost(id) {
@@ -823,4 +872,4 @@ function renderUI() {
     if (schedule !== null) updateHASensors(simResults, schedule);
 }
 
-export { closeCostModal, closeDebtModal, closeIncomeModal, deleteCost, deleteDebt, deleteIncome, dismissToast, openCostModal, openDebtModal, openIncomeModal, payoffDebt, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showInlineConfirm, showSanityWarningsModal, showSavedToast, showUndoToast, togglePaid, updateHASensors, updateIncomeScheduleHint };
+export { closeCostModal, closeDebtModal, closeIncomeModal, deleteCost, deleteDebt, deleteIncome, dismissToast, moveBillToCategory, openCostModal, openDebtModal, openIncomeModal, payoffDebt, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showInlineConfirm, showSanityWarningsModal, showSavedToast, showUndoToast, togglePaid, updateHASensors, updateIncomeScheduleHint };

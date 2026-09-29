@@ -3,7 +3,7 @@ import { currentMonthKey, isCostDueThisMonth } from '../core/date-utils.js';
 import { formatOrdinal } from '../core/pure-utils.js';
 import { advanceToNextMonth } from './advance.js';
 import { closeArchiveModal, openArchiveModal, updateCostModalIntervalVisibility } from './modals.js';
-import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, payoffDebt, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSanityWarningsModal, showSavedToast, togglePaid, updateIncomeScheduleHint } from './render-modals.js';
+import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, payoffDebt, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSanityWarningsModal, showSavedToast, togglePaid, updateIncomeScheduleHint, moveBillToCategory } from './render-modals.js';
 import { applyWindfall, autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, openWindfallModal, updateAutoMinHint } from './render-support.js';
 import { closeCheckpointModal, openCheckpointModal, renderCheckpointsList, saveCheckpoint } from './render-checkpoints.js';
 import { closeBudgetModal, closeExpenseModal, convertExpenseToBill, deleteBudget, deleteExpense, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
@@ -63,6 +63,50 @@ function setupEventListeners() {
         if (appState.expandedCostSections.has(key)) appState.expandedCostSections.delete(key);
         else appState.expandedCostSections.add(key);
         renderRecurringCostsList();
+    });
+
+    // Drag a bill onto another category section.
+    appState.costsListContainer.addEventListener('dragstart', e => {
+        if (e.target.closest('button')) {
+            e.preventDefault();
+            return;
+        }
+        const card = e.target.closest('.cost-card[draggable="true"]');
+        if (!card) return;
+        e.dataTransfer.setData('text/plain', JSON.stringify({
+            costId: card.dataset.costId,
+            costCategory: card.dataset.costCategory,
+        }));
+        e.dataTransfer.effectAllowed = 'move';
+        card.classList.add('dragging');
+    });
+    appState.costsListContainer.addEventListener('dragend', e => {
+        e.target.closest('.cost-card')?.classList.remove('dragging');
+        appState.costsListContainer.querySelectorAll('.cost-drop-target').forEach(el => el.classList.remove('cost-drop-target'));
+    });
+    appState.costsListContainer.addEventListener('dragover', e => {
+        const section = e.target.closest('.cost-subsection');
+        if (!section) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        appState.costsListContainer.querySelectorAll('.cost-drop-target').forEach(el => {
+            if (el !== section) el.classList.remove('cost-drop-target');
+        });
+        section.classList.add('cost-drop-target');
+    });
+    appState.costsListContainer.addEventListener('dragleave', e => {
+        const section = e.target.closest('.cost-subsection');
+        if (section && !section.contains(e.relatedTarget)) section.classList.remove('cost-drop-target');
+    });
+    appState.costsListContainer.addEventListener('drop', e => {
+        const section = e.target.closest('.cost-subsection');
+        if (!section) return;
+        e.preventDefault();
+        section.classList.remove('cost-drop-target');
+        let payload;
+        try { payload = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+        if (!payload?.costId || !section.dataset.costCategory) return;
+        moveBillToCategory(payload.costId, section.dataset.costCategory);
     });
 
     appState._root.querySelectorAll('.close-budget-modal').forEach(b  => b.addEventListener('click', closeBudgetModal));
