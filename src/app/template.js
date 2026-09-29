@@ -171,11 +171,18 @@ debt-snowball-card {
 
 #sanity-badge.header-action {
     width: auto;
+    min-width: 2.4rem;
     gap: 0.28rem;
     padding: 0 0.55rem;
-    background: rgba(168, 96, 16, 0.14);
-    border-color: rgba(140, 78, 8, 0.35);
-    color: #8a4b08;
+    background: #ffbf1f;
+    border: 2px solid #1b1630;
+    color: #1b1630;
+    box-shadow: 0 0 0 3px rgba(255, 191, 31, 0.55);
+}
+
+#sanity-badge.header-action:hover {
+    background: #ffd15a;
+    color: #1b1630;
 }
 
 .header-action-label {
@@ -631,15 +638,49 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .health-issue-text {
+    flex: 1;
+    min-width: 0;
     font-size: 0.85rem;
     line-height: 1.4;
     color: var(--text-secondary);
     text-align: left;
+    user-select: text;
+    cursor: text;
 }
 
 .health-issue-text strong {
     color: var(--text-primary);
     font-weight: 600;
+}
+
+.health-issue-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.health-issue-copy,
+.health-issue-link {
+    padding: 0.15rem 0.45rem;
+    border-radius: 6px;
+    border: 1px solid rgba(197, 208, 255, 0.35);
+    background: transparent;
+    color: #c5d0ff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+}
+
+.health-issue-copy:hover,
+.health-issue-link:hover {
+    background: rgba(91, 127, 255, 0.16);
+}
+
+.health-locate {
+    outline: 2px solid #ffbf1f;
+    outline-offset: 3px;
 }
 
 .health-actions {
@@ -4116,7 +4157,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border: 1px solid rgba(16,185,129,0.2);
     border-radius: 8px;
     padding: 0.75rem 1.25rem;
-    margin-bottom: 1.5rem;
+    margin: 0 0 1.5rem;
     gap: 1rem;
 }
 
@@ -5097,15 +5138,15 @@ const PANEL_HTML = `<div class="app-container">
                             <span id="stat-total-interest" class="stat-value">$0.00</span>
                         </div>
                     </div>
-                    <div id="windfall-bar" style="display:none;" class="windfall-bar">
-                        <span class="windfall-bar-label">&#128176; Got a windfall?</span>
-                        <button id="windfall-btn" class="btn btn-windfall">Run Lump Sum Planner</button>
-                    </div>
                     <div class="chart-wrapper">
                         <h3 id="paydown-chart-title" class="chart-title">Burndown</h3>
                         <div class="chart-canvas-frame">
                             <canvas id="paydown-chart" aria-label="Burndown chart" role="img"></canvas>
                         </div>
+                    </div>
+                    <div id="windfall-bar" style="display:none;" class="windfall-bar">
+                        <span class="windfall-bar-label">&#128176; Got a windfall?</span>
+                        <button id="windfall-btn" class="btn btn-windfall">Run Lump Sum Planner</button>
                     </div>
                     <div id="timeline-chart" class="timeline-container">
                         </div>

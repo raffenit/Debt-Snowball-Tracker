@@ -558,7 +558,11 @@ var DebtSnowballApp = (() => {
     const costs = state.recurringCosts || [];
     const monthKey = state.monthKey || void 0;
     const scopedIncome = monthKey ? incomes.filter((e) => (e.date || "").slice(0, 7) === keyToHtmlMonth(monthKey)) : incomes;
-    const totalIncome = scopedIncome.reduce((s, e) => s + e.amount, 0);
+    const isOneTimeIncome = (e) => (e.scheduleType || e.schedule) === "one-time";
+    const oneTimeIncome = scopedIncome.filter(isOneTimeIncome);
+    const repeatingIncomeRows = scopedIncome.filter((e) => !isOneTimeIncome(e));
+    const oneTimeTotal = oneTimeIncome.reduce((s, e) => s + e.amount, 0);
+    const totalIncome = repeatingIncomeRows.reduce((s, e) => s + e.amount, 0);
     const activeCosts = costs.filter((c) => isCostDueThisMonth(c, monthKey));
     const totalRecurringDirect = activeCosts.filter((c) => c.paymentMethod !== "card").reduce((s, c) => s + c.amount, 0);
     const totalRecurringCard = activeCosts.filter((c) => c.paymentMethod === "card").reduce((s, c) => s + c.amount, 0);
@@ -571,7 +575,9 @@ var DebtSnowballApp = (() => {
     if (effectiveBudget < totalMinPayments) {
       return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
     }
-    const incomeDays = scopedIncome.map((e) => ({ day: parseInt((e.date || "").split("-")[2]) || 1, amount: e.amount })).sort((a, b) => a.day - b.day);
+    const toIncomeDays = (rows) => rows.map((e) => ({ day: parseInt((e.date || "").split("-")[2]) || 1, amount: e.amount })).sort((a, b) => a.day - b.day);
+    const repeatingIncomeDays = toIncomeDays(repeatingIncomeRows);
+    const firstMonthIncomeDays = toIncomeDays(scopedIncome);
     let simDebts = simDebtsInput.map((d) => ({ ...d, interestPaid: 0 }));
     let monthsElapsed = 0, totalInterestPaid = 0, payoffLog = [];
     const perDebtMonthly = {};
@@ -599,7 +605,9 @@ var DebtSnowballApp = (() => {
       const ordered = getStrategyOrder(alive, strat);
       const targetId = ordered[0]?.id;
       const aliveMinSum = alive.reduce((s, d) => s + d.minPayment, 0);
-      const extraAvail = Math.max(0, effectiveBudget - aliveMinSum);
+      const monthBudget = monthsElapsed === 1 ? effectiveBudget + oneTimeTotal : effectiveBudget;
+      const incomeDays = monthsElapsed === 1 ? firstMonthIncomeDays : repeatingIncomeDays;
+      const extraAvail = Math.max(0, monthBudget - aliveMinSum);
       const paymentQueue = alive.map((d) => ({
         id: d.id,
         dueDay: d.dueDay || 1,
@@ -1633,7 +1641,10 @@ var DebtSnowballApp = (() => {
       });
       if (result) {
         const { data: clean, issues } = sanitizeData(result);
-        if (issues.some((i) => i.severity !== "info")) {
+        let repairsNeedSave = false;
+        const repairIssues = issues.filter((i) => i.severity !== "info");
+        if (repairIssues.length) {
+          repairsNeedSave = true;
           try {
             await preserveRawConfig(result, "pre-repair snapshot");
           } catch (err) {
@@ -1690,7 +1701,7 @@ var DebtSnowballApp = (() => {
         }
         const workingKey = data.paidMonth || currentMonthKey2();
         const workingIdx = monthKeyToIndex(workingKey);
-        let needsCleanupSave = incomeMigrated;
+        let needsCleanupSave = incomeMigrated || repairsNeedSave;
         const staleOneTime = appState.oneTimeCosts.filter((c) => {
           if (!c.addedMonth) return true;
           return monthKeyToIndex(c.addedMonth) < workingIdx;
@@ -2127,14 +2138,21 @@ This replaces ALL current data with that snapshot.`)) {
       }
     }));
   }
-  function showDataHealthModal(issues, { context = "load", title, body, confirmLabel = "Fix & Continue", hasData = false } = {}) {
+  function showDataHealthModal(issues, { context = "load", title, body, confirmLabel = "Fix & Continue", hasData = false, onFix = null } = {}) {
     const tags = { repaired: "Repaired", warning: "Warning", notice: "Notice", info: "Notice", fatal: "Blocked" };
     const rows = issues.map((i) => {
       const kind = tags[i.severity] ? i.severity === "info" ? "notice" : i.severity : "notice";
+      const show = i.focus ? `<button type="button" class="health-issue-link" data-health-focus="${escHtml(JSON.stringify(i.focus))}">Show</button>` : "";
+      const fix = i.fix ? `<button type="button" class="health-issue-link" data-health-fix="${escHtml(JSON.stringify(i.fix))}">Fix</button>` : "";
       return `
         <div class="health-issue">
             <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || "Notice")}</span>
             <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
+            <span class="health-issue-actions">
+                <button type="button" class="health-issue-copy">Copy</button>
+                ${show}
+                ${fix}
+            </span>
         </div>`;
     }).join("");
     const defaultTitle = context === "confirm" ? "Data needs repair" : "Data repairs applied";
@@ -2163,6 +2181,46 @@ This replaces ALL current data with that snapshot.`)) {
         overlay.remove();
         resolve(v);
       };
+      overlay.querySelectorAll(".health-issue-copy").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const text = btn.closest(".health-issue").querySelector(".health-issue-text").innerText;
+          try {
+            await navigator.clipboard.writeText(text);
+            btn.textContent = "Copied";
+          } catch {
+            const node = btn.closest(".health-issue").querySelector(".health-issue-text");
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            btn.textContent = "Selected";
+          }
+        });
+      });
+      overlay.querySelectorAll(".health-issue-link").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          let focus = null;
+          try {
+            focus = JSON.parse(btn.dataset.healthFocus);
+          } catch {
+          }
+          if (focus) overlay.dispatchEvent(new CustomEvent("health-goto", { bubbles: true, detail: focus }));
+          done("ok");
+        });
+      });
+      overlay.querySelectorAll("[data-health-fix]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          let fix = null;
+          try {
+            fix = JSON.parse(btn.dataset.healthFix);
+          } catch {
+          }
+          if (fix && onFix) await onFix(fix);
+          done("fix");
+        });
+      });
       overlay.querySelector("#health-ok-btn")?.addEventListener("click", () => done("ok"));
       overlay.querySelector("#health-confirm-btn")?.addEventListener("click", () => done("confirm"));
       overlay.querySelector("#health-export-btn")?.addEventListener("click", () => done("export"));
@@ -3998,6 +4056,19 @@ This replaces ALL current data with that snapshot.`)) {
   });
 
   // src/core/sanity.js
+  function focusFor(field, ids = []) {
+    const map = {
+      incomeEntries: ["income", "income"],
+      recurringCosts: ["income", "cost"],
+      oneTimeCosts: ["income", "cost"],
+      debts: ["debts", "debt"],
+      spendingBudgets: ["budgets", "budget"],
+      checkpoints: ["payment-plan", "checkpoint"]
+    };
+    const hit = map[field];
+    if (!hit) return void 0;
+    return { tab: hit[0], kind: hit[1], ids: ids.filter(Boolean) };
+  }
   function dupGroups(items, keyFn) {
     const m = /* @__PURE__ */ new Map();
     for (const item of items) {
@@ -4020,7 +4091,8 @@ This replaces ALL current data with that snapshot.`)) {
         `dup-ids-${listName}`,
         listName,
         "warning",
-        `${dups.size} duplicate id(s) in ${listName} \u2014 edits may hit the wrong entry.`
+        `${dups.size} duplicate id(s) in ${listName} \u2014 edits may hit the wrong entry.`,
+        focusFor(listName, [...dups])
       ));
     }
   }
@@ -4047,7 +4119,8 @@ This replaces ALL current data with that snapshot.`)) {
         `dup-income-${key}`,
         "incomeEntries",
         "warning",
-        `${rows.length} identical income entries "${label}" ($${rows[0].amount} on ${rows[0].date || "no date"}).`
+        `${rows.length} identical income entries "${label}" ($${rows[0].amount} on ${rows[0].date || "no date"}).`,
+        focusFor("incomeEntries", rows.map((r) => r.id))
       ));
     }
     for (const [key, rows] of dupGroups(
@@ -4058,7 +4131,8 @@ This replaces ALL current data with that snapshot.`)) {
         `dup-cost-${key}`,
         "recurringCosts",
         "warning",
-        `${rows.length} identical bills "${rows[0].name}" ($${rows[0].amount}, day ${rows[0].dueDay}).`
+        `${rows.length} identical bills "${rows[0].name}" ($${rows[0].amount}, day ${rows[0].dueDay}).`,
+        focusFor("recurringCosts", rows.map((r) => r.id))
       ));
     }
     for (const b of budgets) {
@@ -4070,7 +4144,8 @@ This replaces ALL current data with that snapshot.`)) {
           `dup-exp-${b.id}-${key}`,
           "spendingBudgets",
           "warning",
-          `${rows.length} identical expenses "${rows[0].description}" ($${rows[0].amount}) in budget "${b.name}".`
+          `${rows.length} identical expenses "${rows[0].description}" ($${rows[0].amount}) in budget "${b.name}".`,
+          { tab: "budgets", kind: "expense", ids: rows.map((r) => r.id) }
         ));
       }
     }
@@ -4080,14 +4155,16 @@ This replaces ALL current data with that snapshot.`)) {
         `neg-${field}`,
         field,
         "warning",
-        `${neg.length} ${noun} with negative amounts (e.g. "${neg[0].name || neg[0].label || neg[0].description}" $${neg[0].amount}).`
+        `${neg.length} ${noun} with negative amounts (e.g. "${neg[0].name || neg[0].label || neg[0].description}" $${neg[0].amount}).`,
+        focusFor(field, [neg[0].id])
       ));
       const huge = list.filter((x) => typeof x.amount === "number" && x.amount > 1e6);
       if (huge.length) out.push(w(
         `huge-${field}`,
         field,
         "notice",
-        `${huge.length} ${noun} over $1M \u2014 verify these aren't typos.`
+        `${huge.length} ${noun} over $1M \u2014 verify these aren't typos.`,
+        focusFor(field, [huge[0].id])
       ));
     };
     negCheck(recurringCosts2, "recurringCosts", "bill(s)");
@@ -4099,7 +4176,8 @@ This replaces ALL current data with that snapshot.`)) {
           `neg-debt-${d.id}`,
           "debts",
           "warning",
-          `Debt "${d.name}" has a negative balance ($${d.balance}).`
+          `Debt "${d.name}" has a negative balance ($${d.balance}).`,
+          focusFor("debts", [d.id])
         ));
       }
       if (typeof d.apr === "number" && (d.apr < 0 || d.apr > 60)) {
@@ -4107,7 +4185,8 @@ This replaces ALL current data with that snapshot.`)) {
           `apr-${d.id}`,
           "debts",
           "warning",
-          `Debt "${d.name}" has an unusual APR (${d.apr}%).`
+          `Debt "${d.name}" has an unusual APR (${d.apr}%).`,
+          focusFor("debts", [d.id])
         ));
       }
     }
@@ -4122,7 +4201,9 @@ This replaces ALL current data with that snapshot.`)) {
         "dangling-paid",
         "paidStatus",
         "notice",
-        `${danglingPaid.length} paid mark(s) reference bills/debts that no longer exist.`
+        `${danglingPaid.length} paid mark(s) reference bills/debts that no longer exist. Fix removes those marks.`,
+        null,
+        { type: "drop-paid", ids: danglingPaid }
       ));
     }
     const danglingSkips = (s.cardExpenseSkips || []).filter((k) => !knownIds.has(String(k).split(":")[1]));
@@ -4131,16 +4212,25 @@ This replaces ALL current data with that snapshot.`)) {
         "dangling-skips",
         "cardExpenseSkips",
         "notice",
-        `${danglingSkips.length} card-expense skip(s) reference deleted bills \u2014 they can never match.`
+        `${danglingSkips.length} card-expense skip(s) reference deleted bills \u2014 they can never match. Fix removes those skips.`,
+        null,
+        { type: "drop-skips", keys: danglingSkips }
       ));
     }
-    const danglingCard = budgets.reduce((n, b) => n + (b.expenses || []).filter((e) => e.cardDebtId && !knownIds.has(e.cardDebtId)).length, 0);
-    if (danglingCard) {
+    const danglingCardIds = [];
+    for (const b of budgets) {
+      for (const e of b.expenses || []) {
+        if (e.cardDebtId && !knownIds.has(e.cardDebtId) && e.id) danglingCardIds.push(e.id);
+      }
+    }
+    if (danglingCardIds.length) {
       out.push(w(
         "dangling-carddebt",
         "spendingBudgets",
         "notice",
-        `${danglingCard} expense(s) charged to a card that no longer exists \u2014 they won't count toward any card's total.`
+        `${danglingCardIds.length} expense(s) charged to a card that no longer exists. Fix clears that card link and keeps the expense.`,
+        null,
+        { type: "clear-card-link", ids: danglingCardIds }
       ));
     }
     const misrouted = [...recurringCosts2, ...oneTimeCosts].filter((c) => c.cardDebtId && c.paymentMethod !== "card");
@@ -4149,7 +4239,8 @@ This replaces ALL current data with that snapshot.`)) {
         "card-method-mismatch",
         "recurringCosts",
         "warning",
-        `${misrouted.length} bill(s) linked to a card but marked "direct" (e.g. "${misrouted[0].name}") \u2014 they're excluded from card totals and counted as cash. Edit the bill's Payment Method to Card.`
+        `${misrouted.length} bill(s) linked to a card but marked "direct" (e.g. "${misrouted[0].name}") \u2014 they're excluded from card totals and counted as cash. Edit the bill's Payment Method to Card.`,
+        focusFor("recurringCosts", misrouted.map((c) => c.id))
       ));
     }
     const htmlMk = s.workingMonthKey ? keyToHtmlMonth(s.workingMonthKey) : null;
@@ -4175,7 +4266,8 @@ This replaces ALL current data with that snapshot.`)) {
             `count-${field}`,
             field,
             "warning",
-            `${noun} count jumped from ${old} last month to ${curr} \u2014 possible duplication bug.`
+            `${noun} count jumped from ${old} last month to ${curr} \u2014 possible duplication bug.`,
+            focusFor(field)
           ));
         }
       };
@@ -4187,7 +4279,8 @@ This replaces ALL current data with that snapshot.`)) {
           "income-jump",
           "incomeEntries",
           "warning",
-          `This month's income ($${Math.round(incomeTotal)}) is ${(incomeTotal / prev.totalIncome).toFixed(1)}\xD7 last month's \u2014 possible duplication.`
+          `This month's income ($${Math.round(incomeTotal)}) is ${(incomeTotal / prev.totalIncome).toFixed(1)}\xD7 last month's \u2014 possible duplication.`,
+          focusFor("incomeEntries")
         ));
       }
       if (prev.totalIncome > 0 && incomeTotal > 0 && incomeTotal < prev.totalIncome * 0.4) {
@@ -4195,7 +4288,8 @@ This replaces ALL current data with that snapshot.`)) {
           "income-drop",
           "incomeEntries",
           "notice",
-          `This month's income ($${Math.round(incomeTotal)}) is less than half of last month's \u2014 worth verifying.`
+          `This month's income ($${Math.round(incomeTotal)}) is less than half of last month's \u2014 worth verifying.`,
+          focusFor("incomeEntries")
         ));
       }
       const costTotal = recurringCosts2.reduce((x, c) => x + (c.amount || 0), 0);
@@ -4204,7 +4298,8 @@ This replaces ALL current data with that snapshot.`)) {
           "cost-jump",
           "recurringCosts",
           "warning",
-          `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}\xD7 last month's \u2014 possible duplication.`
+          `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}\xD7 last month's \u2014 possible duplication.`,
+          focusFor("recurringCosts")
         ));
       }
       const prevExpKeys = new Set((prev.spendingBudgets || []).flatMap((b) => (b.expenses || []).filter((e) => !e.autoCard).map((e) => `${(e.description || "").toLowerCase().trim()}|${e.amount}`)));
@@ -4225,7 +4320,8 @@ This replaces ALL current data with that snapshot.`)) {
         "no-income",
         "incomeEntries",
         "notice",
-        "Bills/debts exist but no income is configured \u2014 the cash flow will only ever go down."
+        "Bills/debts exist but no income is configured \u2014 the cash flow will only ever go down.",
+        focusFor("incomeEntries")
       ));
     }
     return out;
@@ -4234,7 +4330,14 @@ This replaces ALL current data with that snapshot.`)) {
   var init_sanity = __esm({
     "src/core/sanity.js"() {
       init_date_utils();
-      w = (id, field, severity, detail) => ({ id, field, severity, detail });
+      w = (id, field, severity, detail, focus, fix) => ({
+        id,
+        field,
+        severity,
+        detail,
+        ...focus ? { focus } : {},
+        ...fix ? { fix } : {}
+      });
     }
   });
 
@@ -4865,6 +4968,29 @@ This replaces ALL current data with that snapshot.`)) {
       renderUI();
     }
   }
+  async function applyAlertFix(fix) {
+    if (!fix) return;
+    if (fix.type === "drop-paid") {
+      for (const id of fix.ids || []) delete appState.paidStatus[id];
+    } else if (fix.type === "drop-skips") {
+      const drop = new Set(fix.keys || []);
+      appState.cardExpenseSkips = (appState.cardExpenseSkips || []).filter((k) => !drop.has(k));
+    } else if (fix.type === "clear-card-link") {
+      const drop = new Set(fix.ids || []);
+      for (const budget of appState.spendingBudgets) {
+        for (const expense of budget.expenses || []) {
+          if (drop.has(expense.id)) delete expense.cardDebtId;
+        }
+      }
+    }
+    await saveData();
+    appState.sanityWarnings = checkDataSanity(appState);
+    _updateSanityBadge();
+    appState._sanitySignature = appState.sanityWarnings.length ? appState.sanityWarnings.map((x) => x.id).sort().join("|") : null;
+    const left = appState.sanityWarnings.length;
+    showSavedToast(left ? "Removed that leftover. Other alerts are still open." : "Removed that leftover. The alert is gone.");
+    if (left) showSanityWarningsModal();
+  }
   function _updateSanityBadge() {
     const badge = appState._root.getElementById("sanity-badge");
     if (!badge) return;
@@ -4878,7 +5004,8 @@ This replaces ALL current data with that snapshot.`)) {
     showDataHealthModal(appState.sanityWarnings, {
       context: "load",
       title: "Unusual data detected",
-      body: "These patterns look suspicious \u2014 often a sign of a bug (e.g. duplicated entries). Nothing was changed automatically; review and fix manually if needed."
+      body: "These patterns look suspicious \u2014 often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. Fix only appears when the alert is a leftover pointer to something already deleted.",
+      onFix: applyAlertFix
     });
   }
   function renderUI() {
@@ -5420,6 +5547,43 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     });
     appState._root.getElementById("income-schedule").addEventListener("change", updateIncomeScheduleHint);
     appState._root.getElementById("sanity-badge")?.addEventListener("click", showSanityWarningsModal);
+    appState._root.addEventListener("health-goto", (e) => {
+      const focus = e.detail;
+      if (!focus?.tab) return;
+      if (focus.kind === "cost") {
+        for (const id of focus.ids || []) {
+          const cost = [...appState.recurringCosts, ...appState.oneTimeCosts].find((c) => c.id === id);
+          const key = cost?.category || "other";
+          if (key === "utility" || key === "subscription" || key === "maintenance") appState.expandedCostSections.add(key);
+        }
+        renderRecurringCostsList();
+      }
+      if (focus.kind === "expense" || focus.kind === "budget") {
+        for (const budget of appState.spendingBudgets) {
+          const hit = (focus.ids || []).includes(budget.id) || (budget.expenses || []).some((exp) => (focus.ids || []).includes(exp.id));
+          if (hit) appState.expandedBudgets.add(budget.id);
+        }
+        renderSpendingBudgets();
+      }
+      appState._root.querySelector(`[data-tab="${focus.tab}"]`)?.click();
+      appState._root.querySelectorAll(".health-locate").forEach((el) => el.classList.remove("health-locate"));
+      const selectorFor = {
+        income: (id) => `.btn-edit-income[data-id="${CSS.escape(id)}"]`,
+        cost: (id) => `.btn-edit-cost[data-id="${CSS.escape(id)}"]`,
+        debt: (id) => `.btn-edit[data-id="${CSS.escape(id)}"]`,
+        budget: (id) => `.btn-edit-budget[data-budget-id="${CSS.escape(id)}"]`,
+        expense: (id) => `.budget-expense-row[data-expense-id="${CSS.escape(id)}"]`,
+        checkpoint: (id) => `.delete-checkpoint-btn[data-id="${CSS.escape(id)}"]`
+      }[focus.kind];
+      const nodes = [];
+      for (const id of focus.ids || []) {
+        const el = selectorFor && appState._root.querySelector(selectorFor(id));
+        const card = el?.closest(".income-card, .cost-card, .debt-card, .budget-card, .budget-expense-row, .checkpoint-chip") || el;
+        if (card) nodes.push(card);
+      }
+      nodes.forEach((node) => node.classList.add("health-locate"));
+      nodes[0]?.scrollIntoView({ block: "center" });
+    });
     appState._root.getElementById("history-btn").addEventListener("click", openArchiveModal);
     appState._root.getElementById("close-archive-modal").addEventListener("click", closeArchiveModal);
     appState._root.getElementById("archive-modal").addEventListener("click", (e) => {
@@ -5755,11 +5919,18 @@ debt-snowball-card {
 
 #sanity-badge.header-action {
     width: auto;
+    min-width: 2.4rem;
     gap: 0.28rem;
     padding: 0 0.55rem;
-    background: rgba(168, 96, 16, 0.14);
-    border-color: rgba(140, 78, 8, 0.35);
-    color: #8a4b08;
+    background: #ffbf1f;
+    border: 2px solid #1b1630;
+    color: #1b1630;
+    box-shadow: 0 0 0 3px rgba(255, 191, 31, 0.55);
+}
+
+#sanity-badge.header-action:hover {
+    background: #ffd15a;
+    color: #1b1630;
 }
 
 .header-action-label {
@@ -6215,15 +6386,49 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .health-issue-text {
+    flex: 1;
+    min-width: 0;
     font-size: 0.85rem;
     line-height: 1.4;
     color: var(--text-secondary);
     text-align: left;
+    user-select: text;
+    cursor: text;
 }
 
 .health-issue-text strong {
     color: var(--text-primary);
     font-weight: 600;
+}
+
+.health-issue-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.health-issue-copy,
+.health-issue-link {
+    padding: 0.15rem 0.45rem;
+    border-radius: 6px;
+    border: 1px solid rgba(197, 208, 255, 0.35);
+    background: transparent;
+    color: #c5d0ff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+}
+
+.health-issue-copy:hover,
+.health-issue-link:hover {
+    background: rgba(91, 127, 255, 0.16);
+}
+
+.health-locate {
+    outline: 2px solid #ffbf1f;
+    outline-offset: 3px;
 }
 
 .health-actions {
@@ -9700,7 +9905,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border: 1px solid rgba(16,185,129,0.2);
     border-radius: 8px;
     padding: 0.75rem 1.25rem;
-    margin-bottom: 1.5rem;
+    margin: 0 0 1.5rem;
     gap: 1rem;
 }
 
@@ -10680,15 +10885,15 @@ debt-snowball-card .checkpoint-chip .delete-checkpoint-btn {
                             <span id="stat-total-interest" class="stat-value">$0.00</span>
                         </div>
                     </div>
-                    <div id="windfall-bar" style="display:none;" class="windfall-bar">
-                        <span class="windfall-bar-label">&#128176; Got a windfall?</span>
-                        <button id="windfall-btn" class="btn btn-windfall">Run Lump Sum Planner</button>
-                    </div>
                     <div class="chart-wrapper">
                         <h3 id="paydown-chart-title" class="chart-title">Burndown</h3>
                         <div class="chart-canvas-frame">
                             <canvas id="paydown-chart" aria-label="Burndown chart" role="img"></canvas>
                         </div>
+                    </div>
+                    <div id="windfall-bar" style="display:none;" class="windfall-bar">
+                        <span class="windfall-bar-label">&#128176; Got a windfall?</span>
+                        <button id="windfall-btn" class="btn btn-windfall">Run Lump Sum Planner</button>
                     </div>
                     <div id="timeline-chart" class="timeline-container">
                         </div>

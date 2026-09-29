@@ -465,6 +465,32 @@ describe('simulatePayoff — state snapshot + month scoping', () => {
         assert.equal(r.totalIncome, 3000); // the Aug row does not leak in
     });
 
+    test('one-time income counts once, not as income every future month', () => {
+        const debt = { id: 'd1', name: 'Card', balance: 20000, rate: 0, minPayment: 100, dueDay: 28 };
+        const paycheck = { id: 'pay', label: 'Paycheck', amount: 200, date: '2026-10-01', scheduleType: 'monthly' };
+        const bonus = { id: 'bonus', label: 'Bonus', amount: 5000, date: '2026-10-15', scheduleType: 'one-time' };
+        const once = simulatePayoff({
+            debts: [debt],
+            incomeEntries: [paycheck, bonus],
+            recurringCosts: [],
+            monthKey: '2026-9',
+        }, 'snowball');
+        const repeating = simulatePayoff({
+            debts: [debt],
+            incomeEntries: [paycheck, { ...bonus, scheduleType: 'monthly' }],
+            recurringCosts: [],
+            monthKey: '2026-9',
+        }, 'snowball');
+
+        assert.equal(once.effectiveBudget, 200);
+        assert.equal(once.totalIncome, 200);
+        assert.equal(repeating.effectiveBudget, 5200);
+        assert.ok(once.monthsElapsed > repeating.monthsElapsed,
+            `one-time bonus must not shorten the plan like monthly income (${once.monthsElapsed} vs ${repeating.monthsElapsed})`);
+        assert.ok(once.monthsElapsed < 20000 / 200,
+            'the bonus still applies in the first month');
+    });
+
     test('missing income date does not crash the sim', () => {
         const r = simulatePayoff({
             debts: [{ id: 'd1', balance: 100, rate: 0, minPayment: 50 }],

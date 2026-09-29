@@ -136,6 +136,8 @@ describe('checkDataSanity — dangling references', () => {
         const w = ws.find(x => x.id === 'dangling-paid');
         assert.ok(w);
         assert.match(w.detail, /1 paid mark/);
+        assert.equal(w.fix.type, 'drop-paid');
+        assert.deepEqual(w.fix.ids, ['ghost']);
     });
 
     test('paid marks on debts count as valid references', () => {

@@ -709,6 +709,35 @@ async function _promptCategorizeQueue(costs) {
     }
 }
 
+// Remove one alert's leftover pointers — paid marks, card-expense skips, or
+// a card link on an expense whose card was deleted. The expense itself stays.
+// Live records (duplicates, odd APR, and so on) are not touched.
+async function applyAlertFix(fix) {
+    if (!fix) return;
+    if (fix.type === 'drop-paid') {
+        for (const id of fix.ids || []) delete appState.paidStatus[id];
+    } else if (fix.type === 'drop-skips') {
+        const drop = new Set(fix.keys || []);
+        appState.cardExpenseSkips = (appState.cardExpenseSkips || []).filter(k => !drop.has(k));
+    } else if (fix.type === 'clear-card-link') {
+        const drop = new Set(fix.ids || []);
+        for (const budget of appState.spendingBudgets) {
+            for (const expense of budget.expenses || []) {
+                if (drop.has(expense.id)) delete expense.cardDebtId;
+            }
+        }
+    }
+    await saveData();
+    appState.sanityWarnings = checkDataSanity(appState);
+    _updateSanityBadge();
+    appState._sanitySignature = appState.sanityWarnings.length
+        ? appState.sanityWarnings.map(x => x.id).sort().join('|')
+        : null;
+    const left = appState.sanityWarnings.length;
+    showSavedToast(left ? 'Removed that leftover. Other alerts are still open.' : 'Removed that leftover. The alert is gone.');
+    if (left) showSanityWarningsModal();
+}
+
 function _updateSanityBadge() {
     const badge = appState._root.getElementById('sanity-badge');
     if (!badge) return;
@@ -724,7 +753,8 @@ function showSanityWarningsModal() {
     showDataHealthModal(appState.sanityWarnings, {
         context: 'load',
         title:   'Unusual data detected',
-        body:    'These patterns look suspicious — often a sign of a bug (e.g. duplicated entries). Nothing was changed automatically; review and fix manually if needed.',
+        body:    'These patterns look suspicious — often a sign of a bug (e.g. duplicated entries). Show opens a record that is still there. Fix only appears when the alert is a leftover pointer to something already deleted.',
+        onFix:   applyAlertFix,
     });
 }
 

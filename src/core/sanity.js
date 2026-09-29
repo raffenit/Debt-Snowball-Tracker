@@ -16,7 +16,28 @@
 
 import { keyToHtmlMonth } from './date-utils.js';
 
-const w = (id, field, severity, detail) => ({ id, field, severity, detail });
+const w = (id, field, severity, detail, focus, fix) => ({
+    id, field, severity, detail,
+    ...(focus ? { focus } : {}),
+    ...(fix ? { fix } : {}),
+});
+
+// Where a warning can be opened. ids are live records; an empty list still
+// switches to the right tab. Leftovers that no longer have a record (a paid
+// mark for a deleted bill) get no focus — Sync is what clears those.
+function focusFor(field, ids = []) {
+    const map = {
+        incomeEntries:   ['income', 'income'],
+        recurringCosts:  ['income', 'cost'],
+        oneTimeCosts:    ['income', 'cost'],
+        debts:           ['debts', 'debt'],
+        spendingBudgets: ['budgets', 'budget'],
+        checkpoints:     ['payment-plan', 'checkpoint'],
+    };
+    const hit = map[field];
+    if (!hit) return undefined;
+    return { tab: hit[0], kind: hit[1], ids: ids.filter(Boolean) };
+}
 
 // Group items by a key fn; return [key, items] pairs having duplicates.
 function dupGroups(items, keyFn) {
@@ -39,7 +60,8 @@ function dupIds(listName, items, out) {
     }
     if (dups.size) {
         out.push(w(`dup-ids-${listName}`, listName, 'warning',
-            `${dups.size} duplicate id(s) in ${listName} — edits may hit the wrong entry.`));
+            `${dups.size} duplicate id(s) in ${listName} — edits may hit the wrong entry.`,
+            focusFor(listName, [...dups])));
     }
 }
 
@@ -74,18 +96,21 @@ export function checkDataSanity(s) {
         e => `${e.seriesId || e.label}|${e.amount}|${e.date}`)) {
         const label = rows[0].label || 'income';
         out.push(w(`dup-income-${key}`, 'incomeEntries', 'warning',
-            `${rows.length} identical income entries "${label}" ($${rows[0].amount} on ${rows[0].date || 'no date'}).`));
+            `${rows.length} identical income entries "${label}" ($${rows[0].amount} on ${rows[0].date || 'no date'}).`,
+            focusFor('incomeEntries', rows.map(r => r.id))));
     }
     for (const [key, rows] of dupGroups(recurringCosts,
         c => `${c.name}|${c.amount}|${c.dueDay}`)) {
         out.push(w(`dup-cost-${key}`, 'recurringCosts', 'warning',
-            `${rows.length} identical bills "${rows[0].name}" ($${rows[0].amount}, day ${rows[0].dueDay}).`));
+            `${rows.length} identical bills "${rows[0].name}" ($${rows[0].amount}, day ${rows[0].dueDay}).`,
+            focusFor('recurringCosts', rows.map(r => r.id))));
     }
     for (const b of budgets) {
         for (const [key, rows] of dupGroups((b.expenses || []).filter(e => !e.autoCard),
             e => `${e.description}|${e.amount}|${e.date || ''}`)) {
             out.push(w(`dup-exp-${b.id}-${key}`, 'spendingBudgets', 'warning',
-                `${rows.length} identical expenses "${rows[0].description}" ($${rows[0].amount}) in budget "${b.name}".`));
+                `${rows.length} identical expenses "${rows[0].description}" ($${rows[0].amount}) in budget "${b.name}".`,
+                { tab: 'budgets', kind: 'expense', ids: rows.map(r => r.id) }));
         }
     }
 
@@ -93,10 +118,12 @@ export function checkDataSanity(s) {
     const negCheck = (list, field, noun) => {
         const neg = list.filter(x => typeof x.amount === 'number' && x.amount < 0);
         if (neg.length) out.push(w(`neg-${field}`, field, 'warning',
-            `${neg.length} ${noun} with negative amounts (e.g. "${neg[0].name || neg[0].label || neg[0].description}" $${neg[0].amount}).`));
+            `${neg.length} ${noun} with negative amounts (e.g. "${neg[0].name || neg[0].label || neg[0].description}" $${neg[0].amount}).`,
+            focusFor(field, [neg[0].id])));
         const huge = list.filter(x => typeof x.amount === 'number' && x.amount > 1_000_000);
         if (huge.length) out.push(w(`huge-${field}`, field, 'notice',
-            `${huge.length} ${noun} over $1M — verify these aren't typos.`));
+            `${huge.length} ${noun} over $1M — verify these aren't typos.`,
+            focusFor(field, [huge[0].id])));
     };
     negCheck(recurringCosts, 'recurringCosts', 'bill(s)');
     negCheck(oneTimeCosts,   'oneTimeCosts',   'cost(s)');
@@ -105,11 +132,13 @@ export function checkDataSanity(s) {
     for (const d of debts) {
         if (typeof d.balance === 'number' && d.balance < 0) {
             out.push(w(`neg-debt-${d.id}`, 'debts', 'warning',
-                `Debt "${d.name}" has a negative balance ($${d.balance}).`));
+                `Debt "${d.name}" has a negative balance ($${d.balance}).`,
+                focusFor('debts', [d.id])));
         }
         if (typeof d.apr === 'number' && (d.apr < 0 || d.apr > 60)) {
             out.push(w(`apr-${d.id}`, 'debts', 'warning',
-                `Debt "${d.name}" has an unusual APR (${d.apr}%).`));
+                `Debt "${d.name}" has an unusual APR (${d.apr}%).`,
+                focusFor('debts', [d.id])));
         }
     }
 
@@ -120,19 +149,30 @@ export function checkDataSanity(s) {
     const danglingPaid = Object.keys(s.paidStatus || {}).filter(id => !knownIds.has(id));
     if (danglingPaid.length) {
         out.push(w('dangling-paid', 'paidStatus', 'notice',
-            `${danglingPaid.length} paid mark(s) reference bills/debts that no longer exist.`));
+            `${danglingPaid.length} paid mark(s) reference bills/debts that no longer exist. Fix removes those marks.`,
+            null,
+            { type: 'drop-paid', ids: danglingPaid }));
     }
     const danglingSkips = (s.cardExpenseSkips || []).filter(k => !knownIds.has(String(k).split(':')[1]));
     if (danglingSkips.length) {
         out.push(w('dangling-skips', 'cardExpenseSkips', 'notice',
-            `${danglingSkips.length} card-expense skip(s) reference deleted bills — they can never match.`));
+            `${danglingSkips.length} card-expense skip(s) reference deleted bills — they can never match. Fix removes those skips.`,
+            null,
+            { type: 'drop-skips', keys: danglingSkips }));
     }
-    // Manual expenses charged to a card that no longer exists
-    const danglingCard = budgets.reduce((n, b) =>
-        n + (b.expenses || []).filter(e => e.cardDebtId && !knownIds.has(e.cardDebtId)).length, 0);
-    if (danglingCard) {
+    // Manual expenses charged to a card that no longer exists. The expense
+    // stays; only the dead card link is cleared.
+    const danglingCardIds = [];
+    for (const b of budgets) {
+        for (const e of b.expenses || []) {
+            if (e.cardDebtId && !knownIds.has(e.cardDebtId) && e.id) danglingCardIds.push(e.id);
+        }
+    }
+    if (danglingCardIds.length) {
         out.push(w('dangling-carddebt', 'spendingBudgets', 'notice',
-            `${danglingCard} expense(s) charged to a card that no longer exists — they won't count toward any card's total.`));
+            `${danglingCardIds.length} expense(s) charged to a card that no longer exists. Fix clears that card link and keeps the expense.`,
+            null,
+            { type: 'clear-card-link', ids: danglingCardIds }));
     }
     // A bill linked to a card but marked 'direct' is silently misclassified:
     // excluded from card totals AND wrongly counted as a cash outflow.
@@ -140,7 +180,8 @@ export function checkDataSanity(s) {
         .filter(c => c.cardDebtId && c.paymentMethod !== 'card');
     if (misrouted.length) {
         out.push(w('card-method-mismatch', 'recurringCosts', 'warning',
-            `${misrouted.length} bill(s) linked to a card but marked "direct" (e.g. "${misrouted[0].name}") — they're excluded from card totals and counted as cash. Edit the bill's Payment Method to Card.`));
+            `${misrouted.length} bill(s) linked to a card but marked "direct" (e.g. "${misrouted[0].name}") — they're excluded from card totals and counted as cash. Edit the bill's Payment Method to Card.`,
+            focusFor('recurringCosts', misrouted.map(c => c.id))));
     }
 
     // ─── Month-scoped consistency ────────────────────────────────────────────
@@ -164,7 +205,8 @@ export function checkDataSanity(s) {
         const countJump = (curr, old, field, noun) => {
             if (old > 0 && curr > Math.max(3, old * 2)) {
                 out.push(w(`count-${field}`, field, 'warning',
-                    `${noun} count jumped from ${old} last month to ${curr} — possible duplication bug.`));
+                    `${noun} count jumped from ${old} last month to ${curr} — possible duplication bug.`,
+                    focusFor(field)));
             }
         };
         countJump(incomeEntries.length,  (prev.incomeEntries  || []).length, 'incomeEntries',  'Income entries');
@@ -173,16 +215,19 @@ export function checkDataSanity(s) {
         const incomeTotal = incomeEntries.reduce((x, e) => x + (e.amount || 0), 0);
         if (prev.totalIncome > 0 && incomeTotal > prev.totalIncome * 2.5) {
             out.push(w('income-jump', 'incomeEntries', 'warning',
-                `This month's income ($${Math.round(incomeTotal)}) is ${(incomeTotal / prev.totalIncome).toFixed(1)}× last month's — possible duplication.`));
+                `This month's income ($${Math.round(incomeTotal)}) is ${(incomeTotal / prev.totalIncome).toFixed(1)}× last month's — possible duplication.`,
+                focusFor('incomeEntries')));
         }
         if (prev.totalIncome > 0 && incomeTotal > 0 && incomeTotal < prev.totalIncome * 0.4) {
             out.push(w('income-drop', 'incomeEntries', 'notice',
-                `This month's income ($${Math.round(incomeTotal)}) is less than half of last month's — worth verifying.`));
+                `This month's income ($${Math.round(incomeTotal)}) is less than half of last month's — worth verifying.`,
+                focusFor('incomeEntries')));
         }
         const costTotal = recurringCosts.reduce((x, c) => x + (c.amount || 0), 0);
         if (prev.totalCosts > 0 && costTotal > prev.totalCosts * 2.5) {
             out.push(w('cost-jump', 'recurringCosts', 'warning',
-                `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}× last month's — possible duplication.`));
+                `This month's bills ($${Math.round(costTotal)}) are ${(costTotal / prev.totalCosts).toFixed(1)}× last month's — possible duplication.`,
+                focusFor('recurringCosts')));
         }
 
         // A manual expense repeated from last month's archive is probably a
@@ -203,7 +248,8 @@ export function checkDataSanity(s) {
     // ─── Coverage ────────────────────────────────────────────────────────────
     if (!incomeEntries.length && (recurringCosts.length || debts.length)) {
         out.push(w('no-income', 'incomeEntries', 'notice',
-            'Bills/debts exist but no income is configured — the cash flow will only ever go down.'));
+            'Bills/debts exist but no income is configured — the cash flow will only ever go down.',
+            focusFor('incomeEntries')));
     }
 
     return out;

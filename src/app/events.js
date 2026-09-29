@@ -429,6 +429,44 @@ function setupEventListeners() {
 
     // Sanity warnings badge — reopens the anomaly review modal
     appState._root.getElementById('sanity-badge')?.addEventListener('click', showSanityWarningsModal);
+    appState._root.addEventListener('health-goto', (e) => {
+        const focus = e.detail;
+        if (!focus?.tab) return;
+        if (focus.kind === 'cost') {
+            for (const id of focus.ids || []) {
+                const cost = [...appState.recurringCosts, ...appState.oneTimeCosts].find(c => c.id === id);
+                const key = cost?.category || 'other';
+                if (key === 'utility' || key === 'subscription' || key === 'maintenance') appState.expandedCostSections.add(key);
+            }
+            renderRecurringCostsList();
+        }
+        if (focus.kind === 'expense' || focus.kind === 'budget') {
+            for (const budget of appState.spendingBudgets) {
+                const hit = (focus.ids || []).includes(budget.id)
+                    || (budget.expenses || []).some(exp => (focus.ids || []).includes(exp.id));
+                if (hit) appState.expandedBudgets.add(budget.id);
+            }
+            renderSpendingBudgets();
+        }
+        appState._root.querySelector(`[data-tab="${focus.tab}"]`)?.click();
+        appState._root.querySelectorAll('.health-locate').forEach(el => el.classList.remove('health-locate'));
+        const selectorFor = {
+            income: id => `.btn-edit-income[data-id="${CSS.escape(id)}"]`,
+            cost: id => `.btn-edit-cost[data-id="${CSS.escape(id)}"]`,
+            debt: id => `.btn-edit[data-id="${CSS.escape(id)}"]`,
+            budget: id => `.btn-edit-budget[data-budget-id="${CSS.escape(id)}"]`,
+            expense: id => `.budget-expense-row[data-expense-id="${CSS.escape(id)}"]`,
+            checkpoint: id => `.delete-checkpoint-btn[data-id="${CSS.escape(id)}"]`,
+        }[focus.kind];
+        const nodes = [];
+        for (const id of focus.ids || []) {
+            const el = selectorFor && appState._root.querySelector(selectorFor(id));
+            const card = el?.closest('.income-card, .cost-card, .debt-card, .budget-card, .budget-expense-row, .checkpoint-chip') || el;
+            if (card) nodes.push(card);
+        }
+        nodes.forEach(node => node.classList.add('health-locate'));
+        nodes[0]?.scrollIntoView({ block: 'center' });
+    });
 
     // Archive / History
     appState._root.getElementById('history-btn').addEventListener('click', openArchiveModal);

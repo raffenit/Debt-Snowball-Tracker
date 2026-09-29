@@ -268,14 +268,25 @@ async function _renderServerBackups(body) {
 //   context 'load'    — review-only; repairs already applied in memory.
 //   context 'confirm' — gate a destructive action (import/restore) on the
 //                       repair list. Resolves 'confirm' | 'export' | 'cancel'.
-function showDataHealthModal(issues, { context = 'load', title, body, confirmLabel = 'Fix & Continue', hasData = false } = {}) {
+function showDataHealthModal(issues, { context = 'load', title, body, confirmLabel = 'Fix & Continue', hasData = false, onFix = null } = {}) {
     const tags = { repaired: 'Repaired', warning: 'Warning', notice: 'Notice', info: 'Notice', fatal: 'Blocked' };
     const rows = issues.map(i => {
         const kind = tags[i.severity] ? (i.severity === 'info' ? 'notice' : i.severity) : 'notice';
+        const show = i.focus
+            ? `<button type="button" class="health-issue-link" data-health-focus="${escHtml(JSON.stringify(i.focus))}">Show</button>`
+            : '';
+        const fix = i.fix
+            ? `<button type="button" class="health-issue-link" data-health-fix="${escHtml(JSON.stringify(i.fix))}">Fix</button>`
+            : '';
         return `
         <div class="health-issue">
             <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || 'Notice')}</span>
             <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
+            <span class="health-issue-actions">
+                <button type="button" class="health-issue-copy">Copy</button>
+                ${show}
+                ${fix}
+            </span>
         </div>`;
     }).join('');
 
@@ -306,6 +317,40 @@ function showDataHealthModal(issues, { context = 'load', title, body, confirmLab
             </div>`;
         appState._root.appendChild(overlay);
         const done = v => { overlay.remove(); resolve(v); };
+        overlay.querySelectorAll('.health-issue-copy').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const text = btn.closest('.health-issue').querySelector('.health-issue-text').innerText;
+                try {
+                    await navigator.clipboard.writeText(text);
+                    btn.textContent = 'Copied';
+                } catch {
+                    const node = btn.closest('.health-issue').querySelector('.health-issue-text');
+                    const range = document.createRange();
+                    range.selectNodeContents(node);
+                    const sel = window.getSelection();
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    btn.textContent = 'Selected';
+                }
+            });
+        });
+        overlay.querySelectorAll('.health-issue-link').forEach(btn => {
+            btn.addEventListener('click', () => {
+                let focus = null;
+                try { focus = JSON.parse(btn.dataset.healthFocus); } catch { /* ignore */ }
+                if (focus) overlay.dispatchEvent(new CustomEvent('health-goto', { bubbles: true, detail: focus }));
+                done('ok');
+            });
+        });
+        overlay.querySelectorAll('[data-health-fix]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                let fix = null;
+                try { fix = JSON.parse(btn.dataset.healthFix); } catch { /* ignore */ }
+                if (fix && onFix) await onFix(fix);
+                done('fix');
+            });
+        });
         overlay.querySelector('#health-ok-btn')?.addEventListener('click',      () => done('ok'));
         overlay.querySelector('#health-confirm-btn')?.addEventListener('click', () => done('confirm'));
         overlay.querySelector('#health-export-btn')?.addEventListener('click',  () => done('export'));

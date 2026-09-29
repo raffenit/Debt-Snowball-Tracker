@@ -78,7 +78,10 @@ async function loadBackendData() {
             // health modal, and a raw pre-repair snapshot is preserved in a
             // server backup slot before anything gets saved over it.
             const { data: clean, issues } = sanitizeData(result);
-            if (issues.some(i => i.severity !== 'info')) {
+            let repairsNeedSave = false;
+            const repairIssues = issues.filter(i => i.severity !== 'info');
+            if (repairIssues.length) {
+                repairsNeedSave = true;
                 try {
                     await preserveRawConfig(result, 'pre-repair snapshot');
                 } catch (err) {
@@ -161,7 +164,7 @@ async function loadBackendData() {
             // not persist across months.
             const workingKey = data.paidMonth || currentMonthKey();
             const workingIdx = monthKeyToIndex(workingKey);
-            let needsCleanupSave = incomeMigrated;
+            let needsCleanupSave = incomeMigrated || repairsNeedSave;
             const staleOneTime = appState.oneTimeCosts.filter(c => {
                 if (!c.addedMonth) return true; // legacy entries with no addedMonth — remove
                 return monthKeyToIndex(c.addedMonth) < workingIdx;

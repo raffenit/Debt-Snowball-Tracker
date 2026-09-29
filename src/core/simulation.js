@@ -37,10 +37,11 @@ export function getStrategyOrder(debtList, strat) {
 // made after sufficient cash has arrived. Returns a rich result object used
 // for both the chart and the debt cards.
 //
-// NOTE: effectiveBudget = income - DIRECT costs only (excluding one-time costs).
-// Card-charged recurring costs do NOT reduce the immediate cash available
-// for debt payoff — they are assumed to be folded into card minimum payments.
-// One-time costs are excluded because timeline projects multi-month future.
+// NOTE: effectiveBudget = repeating income - DIRECT costs (excluding one-time
+// costs and one-time income). Card-charged recurring costs do NOT reduce the
+// cash available for debt payoff — they are folded into card minimum payments.
+// One-time costs and one-time income are this-month only. The payoff timeline
+// may spend one-time income in month 1, then continues on repeating income.
 /**
  * Pure payoff simulation over an explicit state snapshot.
  * `state.monthKey` (optional): when set, income is scoped to that month and
@@ -60,7 +61,13 @@ export function simulatePayoff(state, strat) {
         ? incomes.filter(e => (e.date || '').slice(0, 7) === keyToHtmlMonth(monthKey))
         : incomes;
 
-    const totalIncome          = scopedIncome.reduce((s,e) => s + e.amount, 0);
+    const isOneTimeIncome      = e => (e.scheduleType || e.schedule) === 'one-time';
+    const oneTimeIncome        = scopedIncome.filter(isOneTimeIncome);
+    const repeatingIncomeRows  = scopedIncome.filter(e => !isOneTimeIncome(e));
+    const oneTimeTotal         = oneTimeIncome.reduce((s,e) => s + e.amount, 0);
+    // Timeline repeats monthly and biweekly income. An explicit one-time row
+    // is cash this month only — it must not be baked into every future month.
+    const totalIncome          = repeatingIncomeRows.reduce((s,e) => s + e.amount, 0);
     // Timeline projection uses recurring costs due this month only; one-time costs are separate.
     const activeCosts          = costs.filter(c => isCostDueThisMonth(c, monthKey));
     const totalRecurringDirect = activeCosts.filter(c => c.paymentMethod !== 'card').reduce((s,c) => s + c.amount, 0);
@@ -80,9 +87,11 @@ export function simulatePayoff(state, strat) {
         return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
     }
 
-    const incomeDays = scopedIncome
+    const toIncomeDays = rows => rows
         .map(e => ({ day: parseInt((e.date || '').split('-')[2]) || 1, amount: e.amount }))
         .sort((a,b) => a.day - b.day);
+    const repeatingIncomeDays = toIncomeDays(repeatingIncomeRows);
+    const firstMonthIncomeDays = toIncomeDays(scopedIncome);
 
     let simDebts = simDebtsInput.map(d => ({ ...d, interestPaid: 0 }));
     let monthsElapsed = 0, totalInterestPaid = 0, payoffLog = [];
@@ -113,7 +122,9 @@ export function simulatePayoff(state, strat) {
         const ordered   = getStrategyOrder(alive, strat);
         const targetId  = ordered[0]?.id;
         const aliveMinSum  = alive.reduce((s,d) => s + d.minPayment, 0);
-        const extraAvail   = Math.max(0, effectiveBudget - aliveMinSum);
+        const monthBudget  = monthsElapsed === 1 ? effectiveBudget + oneTimeTotal : effectiveBudget;
+        const incomeDays   = monthsElapsed === 1 ? firstMonthIncomeDays : repeatingIncomeDays;
+        const extraAvail   = Math.max(0, monthBudget - aliveMinSum);
 
         const paymentQueue = alive.map(d => ({
             id:     d.id,
