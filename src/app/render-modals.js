@@ -723,7 +723,7 @@ function showSanityWarningsModal() {
     if (!appState.sanityWarnings?.length) return;
     showDataHealthModal(appState.sanityWarnings, {
         context: 'load',
-        title:   '⚠️ Unusual data detected',
+        title:   'Unusual data detected',
         body:    'These patterns look suspicious — often a sign of a bug (e.g. duplicated entries). Nothing was changed automatically; review and fix manually if needed.',
     });
 }

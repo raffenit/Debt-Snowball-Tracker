@@ -74,8 +74,16 @@ function renderRecurringCostsList() {
     const grandTotal       = totalRecurring + totalOneTime;
 
     if (recurringSummaryEl) {
-        const otLabel = totalOneTime > 0 ? ` + ${formatMoney(totalOneTime)} one-time` : '';
-        recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span><span class="recurring-due-breakdown">🏦 Direct ${formatMoney(directRecurring)} &nbsp;·&nbsp; 💳 Card ${formatMoney(cardRecurring)}${otLabel}</span>`;
+        const parts = [];
+        if (directRecurring > 0) parts.push(`<span class="debt-type-badge direct-badge">🏦 Direct ${formatMoney(directRecurring)}</span>`);
+        if (cardRecurring > 0) parts.push(`<span class="debt-type-badge card-badge">💳 Card ${formatMoney(cardRecurring)}</span>`);
+        if (totalOneTime > 0) parts.push(`<span class="interval-badge">One-time ${formatMoney(totalOneTime)}</span>`);
+        recurringSummaryEl.innerHTML = `
+            <div class="recurring-due-main">
+                <span class="recurring-due-total">${formatMoney(grandTotal)}</span>
+                <span class="recurring-due-label">Due this month</span>
+            </div>
+            ${parts.length ? `<div class="recurring-due-breakdown">${parts.join('')}</div>` : ''}`;
     }
 
     const hasAnyCosts = visibleRecurring.length > 0 || appState.oneTimeCosts.length > 0;
@@ -99,7 +107,7 @@ function renderRecurringCostsList() {
     const recurringSorted = [...visibleRecurring].sort((a,b) => (a.dueDay||1) - (b.dueDay||1));
     const categories = [
         { key: 'utility',      label: '⚡ Utilities (Monthly Bills)',           cls: 'cost-subsection-utility' },
-        { key: 'subscription', label: '📱 Subscriptions (Recurring Services)',   cls: 'cost-subsection-subscription' },
+        { key: 'subscription', label: '📱 Subscriptions',   cls: 'cost-subsection-subscription' },
         { key: 'maintenance',  label: '🔧 Maintenance (Home & Auto)',            cls: 'cost-subsection-maintenance' },
         { key: 'other',        label: '📦 Other Recurring Bills',               cls: 'cost-subsection-other' },
     ];
@@ -111,8 +119,7 @@ function renderRecurringCostsList() {
         const section = document.createElement('div');
         section.className = `cost-subsection ${cls}`;
 
-        const isCompact     = key === 'utility' || key === 'subscription' || key === 'maintenance';
-        const isCollapsible = isCompact;
+        const isCollapsible = key === 'utility' || key === 'subscription' || key === 'maintenance';
         const isExpanded    = appState.expandedCostSections.has(key);
         const groupTotal    = group.reduce((s, c) => s + c.amount, 0);
 
@@ -129,10 +136,8 @@ function renderRecurringCostsList() {
             const grid = document.createElement('div');
             grid.className = 'debts-list';
             grid.style.display = 'grid';
-            if (isCompact) {
-                grid.style.gridTemplateColumns = '1fr';
-                grid.style.gap = '0.4rem';
-            }
+            grid.style.gridTemplateColumns = '1fr';
+            grid.style.gap = '0.65rem';
 
             group.forEach(cost => renderCostCard(cost, grid, false, currentDay));
             section.appendChild(grid);
@@ -154,6 +159,8 @@ function renderRecurringCostsList() {
         const otGrid = document.createElement('div');
         otGrid.className = 'debts-list';
         otGrid.style.display = 'grid';
+        otGrid.style.gridTemplateColumns = '1fr';
+        otGrid.style.gap = '0.65rem';
         appState.oneTimeCosts.forEach(cost => renderCostCard(cost, otGrid, true, currentDay));
         otSection.appendChild(otGrid);
         appState.costsListContainer.appendChild(otSection);
@@ -201,57 +208,32 @@ function renderCostCard(cost, grid, isOneTime, currentDay) {
     }
 
     const el = document.createElement('div');
-    const isCompact = !isOneTime && (cost.category === 'utility' || cost.category === 'subscription' || cost.category === 'maintenance');
-
-    if (isCompact) {
-        el.className = 'debt-card cost-card cost-card-compact' +
-            (isCard ? ' cost-card-credit' : ' cost-card-direct') +
-            (paidState ? ' card-paid' : '') +
-            (isDue ? '' : ' not-due-month');
-        const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
-        const metaParts  = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
-        el.innerHTML = `
-            ${paidOverlay}
-            <div class="cost-compact-body">
-                <div class="cost-compact-info">
-                    <div class="cost-compact-name-row">
-                        <span class="cost-compact-name">${escHtml(cost.name)}</span>
-                        <span class="cost-amount cost-compact-amount">${formatMoney(cost.amount)}</span>
-                    </div>
-                    ${badgesHtml ? `<div class="cost-compact-badges">${badgesHtml}</div>` : ''}
-                    <div class="cost-compact-meta">${metaParts.map((p, i) => i < metaParts.length - 1 ? `<span>${p}</span><span class="cost-meta-dot">·</span>` : `<span>${p}</span>`).join('')}</div>
+    el.className = 'debt-card cost-card cost-card-compact' +
+        (isCard ? ' cost-card-credit' : ' cost-card-direct') +
+        (paidState ? ' card-paid' : '') +
+        (isDue ? '' : ' not-due-month') +
+        (isOneTime ? ' cost-card-onetime' : '');
+    const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
+    const metaParts  = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
+    el.innerHTML = `
+        ${paidOverlay}
+        <div class="cost-compact-body">
+            <div class="cost-compact-top">
+                <span class="cost-compact-name">${escHtml(cost.name)}</span>
+                <span class="cost-compact-amount-group">
+                    <span class="cost-amount cost-compact-amount">${formatMoney(cost.amount)}</span>
+                    ${isDue ? `<span class="cost-compact-paid">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue, { payoff: false })}</span>` : ''}
+                </span>
+            </div>
+            ${badgesHtml ? `<div class="cost-compact-badges">${badgesHtml}</div>` : ''}
+            <div class="cost-compact-bottom">
+                <div class="cost-compact-meta">${metaParts.map((p, i) => i < metaParts.length - 1 ? `<span>${p}</span><span class="cost-meta-dot">·</span>` : `<span>${p}</span>`).join('')}</div>
+                <div class="cost-mini-actions">
+                    <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
+                    <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
                 </div>
-                <div class="cost-compact-actions">
-                    ${isDue ? `<div class="cost-compact-paid">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue)}</div>` : ''}
-                    <div class="cost-mini-actions">
-                        <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
-                        <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
-                    </div>
-                </div>
-            </div>`;
-    } else {
-        el.className = 'debt-card cost-card' +
-            (isCard ? ' cost-card-credit' : ' cost-card-direct') +
-            (paidState ? ' card-paid' : '') +
-            (isDue ? '' : ' not-due-month') +
-            (isOneTime ? ' cost-card-onetime' : '');
-        const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join('');
-        const amountLabel = isOneTime ? 'One-Time Amount' : (intN > 1 ? 'Amount' : 'Monthly Amount');
-        const paymentMethodLabel = isCard ? 'Credit / Debit Card' : 'Direct Pay (Bank / Cash)';
-        const dueValue = `${formatOrdinal(cost.dueDay||1)} (${dueFreq})`;
-        el.innerHTML = `
-            ${paidOverlay}
-            <div class="debt-name">${escHtml(cost.name)}</div>
-            ${badgesHtml ? `<div class="cost-badges-line">${badgesHtml}</div>` : ''}
-            <div class="debt-detail"><span class="debt-detail-label">${amountLabel}</span><span class="debt-detail-value cost-amount">${formatMoney(cost.amount)}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Due</span><span class="debt-detail-value">${dueValue}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Payment</span><span class="debt-detail-value">${paymentMethodLabel}</span></div>
-            <div class="paid-action-row">${isDue ? buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue) : ''}</div>
-            <div class="cost-icon-actions">
-                <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">✎</button>
-                <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">✕</button>
-            </div>`;
-    }
+            </div>
+        </div>`;
     grid.appendChild(el);
 }
 
@@ -378,8 +360,11 @@ function renderDebtsList(simResults) {
             ${paidOverlay}
             <div class="debt-order-badge" title="${appState.strategy === 'snowball' ? 'Payoff order: smallest balance first' : 'Payoff order: highest interest first'}">${globalIdx + 1}</div>
             <div class="debt-name">${escHtml(debt.name)}</div>
-            <div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.35rem;">${typeBadge}${promoBadge}${autoBadge}</div>
-            ${targetBadge}
+            <div class="debt-label-stack">
+                ${typeBadge}
+                ${targetBadge}
+                ${(promoBadge || autoBadge) ? `<div class="debt-flag-row">${promoBadge}${autoBadge}</div>` : ''}
+            </div>
             <div class="debt-detail debt-balance-row"><span class="debt-detail-label">Balance</span><span class="debt-detail-value debt-balance-value">${formatMoney(debt.balance)}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Interest Rate</span><span class="debt-detail-value">${rateDisplay}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Min Payment</span><span class="debt-detail-value">${formatMoney(debt.minPayment)} ${minPayNote}</span></div>
@@ -471,7 +456,8 @@ function renderDebtsList(simResults) {
     }));
 }
 
-function buildPaidButton(id, autoPay, paidState, isPastDue) {
+function buildPaidButton(id, autoPay, paidState, isPastDue, options = {}) {
+    const allowPayoff = options.payoff !== false;
     if (paidState) {
         return `<button class="btn btn-paid-undo btn-mark-paid" data-id="${id}" data-autopay="${!!autoPay}">✓ Paid this month — tap to undo</button>`;
     }
@@ -482,10 +468,11 @@ function buildPaidButton(id, autoPay, paidState, isPastDue) {
             return `<button class="btn" disabled style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); width: 100%; font-size: 0.8rem; padding: 0.5rem 1rem; cursor: not-allowed;">⚡ Scheduled for Auto-Pay</button>`;
         }
     }
-    // Two buttons: mark paid this month, or pay off in full
+    const markPaid = `<button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false" style="flex:1;">Mark Paid</button>`;
+    if (!allowPayoff) return markPaid;
     return `
         <div style="display:flex; gap:0.5rem; width:100%;">
-            <button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false" style="flex:1;">Mark Paid</button>
+            ${markPaid}
             <button class="btn btn-warning btn-payoff-full" data-id="${id}" style="flex:1;">Pay Off Full</button>
         </div>`;
 }

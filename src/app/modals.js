@@ -245,7 +245,7 @@ async function _renderServerBackups(body) {
             if (issues.length) {
                 const choice = await showDataHealthModal(issues, {
                     context:  'confirm',
-                    title:    '🩹 Backup needs repair',
+                    title:    'Backup needs repair',
                     body:     `The snapshot from ${new Date(b.savedAt).toLocaleString()} has problems that will be auto-fixed on restore. Restoring replaces ALL current data.`,
                     confirmLabel: 'Repair & Restore',
                 });
@@ -269,14 +269,17 @@ async function _renderServerBackups(body) {
 //   context 'confirm' — gate a destructive action (import/restore) on the
 //                       repair list. Resolves 'confirm' | 'export' | 'cancel'.
 function showDataHealthModal(issues, { context = 'load', title, body, confirmLabel = 'Fix & Continue', hasData = false } = {}) {
-    const icons = { repaired: '⚠️', warning: '⚠️', notice: 'ℹ️', info: 'ℹ️', fatal: '⛔' };
-    const rows = issues.map(i => `
-        <div style="display:flex;gap:0.5rem;align-items:baseline;padding:0.3rem 0;font-size:0.85rem;color:var(--text-secondary);line-height:1.4;">
-            <span>${icons[i.severity] || 'ℹ️'}</span>
-            <span><strong style="color:var(--text-primary);">${escHtml(i.field)}</strong> — ${escHtml(i.detail)}</span>
-        </div>`).join('');
+    const tags = { repaired: 'Repaired', warning: 'Warning', notice: 'Notice', info: 'Notice', fatal: 'Blocked' };
+    const rows = issues.map(i => {
+        const kind = tags[i.severity] ? (i.severity === 'info' ? 'notice' : i.severity) : 'notice';
+        return `
+        <div class="health-issue">
+            <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || 'Notice')}</span>
+            <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
+        </div>`;
+    }).join('');
 
-    const defaultTitle = context === 'confirm' ? '🩹 Data needs repair' : '🩹 Data repairs applied';
+    const defaultTitle = context === 'confirm' ? 'Data needs repair' : 'Data repairs applied';
     const defaultBody  = context === 'confirm'
         ? 'The incoming data has problems that can be fixed automatically. Review the fixes before continuing.'
         : 'The stored data had problems — automatic fixes were applied. A raw pre-repair snapshot was saved to your server backups (History → Server Backups) in case anything looks wrong.';
@@ -286,14 +289,14 @@ function showDataHealthModal(issues, { context = 'load', title, body, confirmLab
         overlay.className    = 'modal active';
         overlay.style.zIndex = '210';
         overlay.innerHTML = `
-            <div class="modal-content" style="max-width:460px;">
+            <div class="modal-content health-modal">
                 <div class="modal-header"><h3>${escHtml(title || defaultTitle)}</h3></div>
-                <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:0.5rem;line-height:1.6;">
+                <p class="health-body">
                     ${escHtml(body || defaultBody)}
-                    ${context === 'confirm' && hasData ? ' <strong style="color:var(--text-primary);">This replaces all your current data.</strong>' : ''}
+                    ${context === 'confirm' && hasData ? ' <strong>This replaces all your current data.</strong>' : ''}
                 </p>
-                <div style="max-height:40vh;overflow-y:auto;border-top:1px solid var(--border-color,rgba(128,128,128,0.25));margin-bottom:1rem;">${rows}</div>
-                <div style="display:flex;gap:0.75rem;justify-content:flex-end;flex-wrap:wrap;">
+                <div class="health-issues">${rows}</div>
+                <div class="health-actions">
                     ${context === 'confirm' ? `
                         <button class="btn btn-secondary" id="health-cancel-btn">Cancel</button>
                         ${hasData ? '<button class="btn btn-secondary" id="health-export-btn">Export First</button>' : ''}

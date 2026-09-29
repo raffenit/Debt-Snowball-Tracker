@@ -44,7 +44,7 @@ function renderVisualization(simResults) {
     // Show archive notice for historical months
     if (isArchiveViewTimeline) {
         countdownBox.style.display    = 'none';
-        payoffBoxAlt.style.display    = 'block';
+        payoffBoxAlt.style.display    = 'flex';
         appState._root.getElementById('stat-payoff-date-alt').textContent = 'Historical Data';
         statTotalInterest.textContent = '-';
         statSavingsBox.style.display  = 'none';
@@ -73,7 +73,7 @@ function renderVisualization(simResults) {
 
     if (appState.debts.length === 0) {
         countdownBox.style.display    = 'none';
-        payoffBoxAlt.style.display    = 'block';
+        payoffBoxAlt.style.display    = 'flex';
         appState._root.getElementById('stat-payoff-date-alt').textContent = '-';
         statTotalInterest.textContent = '$0.00';
         statSavingsBox.style.display  = 'none';
@@ -95,7 +95,7 @@ function renderVisualization(simResults) {
     if (!simResults.valid) {
         const { totalIncome, totalRecurring, effectiveBudget, totalMinPayments } = simResults;
         countdownBox.style.display    = 'none';
-        payoffBoxAlt.style.display    = 'block';
+        payoffBoxAlt.style.display    = 'flex';
         appState._root.getElementById('stat-payoff-date-alt').textContent = 'Budget Too Low!';
         statTotalInterest.textContent = 'N/A';
         statSavingsBox.style.display  = 'none';
@@ -233,7 +233,7 @@ function renderVisualization(simResults) {
 
     if (simResults.monthsElapsed >= 1200) {
         countdownBox.style.display    = 'none';
-        payoffBoxAlt.style.display    = 'block';
+        payoffBoxAlt.style.display    = 'flex';
         appState._root.getElementById('stat-payoff-date-alt').textContent = '> 100 Years';
         statTotalInterest.textContent = 'Too High';
         statSavingsBox.style.display  = 'none';
@@ -258,7 +258,7 @@ function renderVisualization(simResults) {
     statTotalInterest.textContent = formatMoney(simResults.totalInterestPaid);
 
     // Countdown box
-    countdownBox.style.display = 'block';
+    countdownBox.style.display = 'flex';
     payoffBoxAlt.style.display = 'none';
     windfallBar.style.display  = 'flex';
     appState._root.getElementById('stat-payoff-date').textContent =
@@ -271,7 +271,7 @@ function renderVisualization(simResults) {
     const otherResult = runSimulation(otherStrat);
     if (otherResult.valid) {
         const interestDiff = otherResult.totalInterestPaid - simResults.totalInterestPaid;
-        statSavingsBox.style.display  = 'block';
+        statSavingsBox.style.display  = 'flex';
         statSavingsLabel.textContent  = `vs. ${otherLabel}`;
         if (interestDiff > 0.01) {
             statSavings.textContent = `Save ${formatMoney(interestDiff)}`;
@@ -293,7 +293,13 @@ function renderVisualization(simResults) {
 // ─── Monthly Cash Flow Plan ───────────────────────────────────────────────────
 function renderPaymentPlan() {
     const section = appState._root.getElementById('payment-plan-section');
+    const overviewCard = appState._root.getElementById('month-overview-card');
     const list    = appState._root.getElementById('payment-plan-list');
+    const setPlanVisible = (visible) => {
+        const display = visible ? 'block' : 'none';
+        section.style.display = display;
+        if (overviewCard) overviewCard.style.display = display;
+    };
 
     // ── Archive-view wiring ────────────────────────────────────────────────────
     const isArchiveView = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
@@ -333,7 +339,7 @@ function renderPaymentPlan() {
 
     list.innerHTML = '';
 
-    if (_income.length === 0 && _checkpoints.length === 0) { section.style.display = 'none'; return; }
+    if (_income.length === 0 && _checkpoints.length === 0) { setPlanVisible(false); return; }
 
     const events = [];
     const today = new Date();
@@ -509,7 +515,7 @@ function renderPaymentPlan() {
         }
     }
 
-    if (schedule.length === 0) { section.style.display = 'none'; return; }
+    if (schedule.length === 0) { setPlanVisible(false); return; }
 
     // --- MATH ONLY: Cash runway estimate (current month only) ---
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -627,7 +633,7 @@ function renderPaymentPlan() {
         ovBudgetsContainer.style.display = 'none';
     }
 
-    section.style.display = 'block';
+    setPlanVisible(true);
 
     // --- UI CREATION: Build the visual rows ---
     let todayMarkerInserted = !isLiveMonth; // only the real current month has a "today"
@@ -666,7 +672,7 @@ function renderPaymentPlan() {
         } else if (item.type === 'recurring') {
             icon = '🏦';
 
-            const methodBadge = '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🏦 Direct</span>';
+            const methodBadge = '<span class="schedule-badge direct-badge">🏦 Direct</span>';
 
             const amtBadge = item.amountType === 'flexible'
                 ? '<span class="schedule-badge flexible-badge">〜 Flexible</span>'
@@ -684,14 +690,14 @@ function renderPaymentPlan() {
 
         } else if (item.type === 'expense') {
             icon        = '🛒';
-            typeBadge   = `<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🛒 ${escHtml(item.budgetName || 'Budget')}</span>`;
+            typeBadge   = `<span class="schedule-badge direct-badge">🛒 ${escHtml(item.budgetName || 'Budget')}</span>`;
             amountClass = 'schedule-amount-expense';
             dayLabel    = formatOrdinal(item.day);
             rowBgClass  = 'schedule-expense schedule-row-paid';
 
         } else {
             icon        = '🧾';
-            const directBadge = '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">🏦 Direct</span>';
+            const directBadge = '<span class="schedule-badge direct-badge">🏦 Direct</span>';
             const targetBadge = item.isSnowballTarget
                 ? `<span class="snowball-badge">${appState.strategy==='snowball'?'❄️':'🌊'} ${appState.strategy==='snowball'?'Snowball':'Avalanche'} Target</span>`
                 : '';
@@ -783,11 +789,11 @@ function renderPaymentPlan() {
                 </div>
             </div>` : '';
 
-        const detailText = item.type === 'debt' && item.isSnowballTarget ? 'Minimum + Snowball Extra'
-            : item.type === 'debt' ? 'Minimum Payment'
-            : item.type === 'recurring' ? 'Paid from bank account'
-            : item.type === 'expense' ? (isArchiveView ? 'Logged budget spending — deducted from cash' : 'Logged budget spending — deducted from cash · drag to re-date')
-            : item.type === 'checkpoint' ? 'Resets the running balance for calculations below'
+        const detailText = item.type === 'debt' && item.isSnowballTarget ? 'Minimum + extra'
+            : item.type === 'debt' ? 'Minimum'
+            : item.type === 'recurring' ? 'From bank'
+            : item.type === 'expense' ? 'Budget spending'
+            : item.type === 'checkpoint' ? 'Resets balance'
             : '';
 
         row.innerHTML = `

@@ -78,7 +78,7 @@ function importData(e) {
             }
             const choice = await showDataHealthModal(issues, {
                 context: 'confirm', hasData,
-                title: '🩹 Repair backup & import?',
+                title: 'Repair backup and import?',
                 body: 'This backup has problems that can be fixed automatically. Review the repairs — anything not listed is imported as-is.',
                 confirmLabel: 'Repair & Import',
             });

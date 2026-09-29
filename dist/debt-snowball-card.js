@@ -1163,7 +1163,7 @@ var DebtSnowballApp = (() => {
         const choice = await showDataHealthModal(issues, {
           context: "confirm",
           hasData,
-          title: "\u{1FA79} Repair backup & import?",
+          title: "Repair backup and import?",
           body: "This backup has problems that can be fixed automatically. Review the repairs \u2014 anything not listed is imported as-is.",
           confirmLabel: "Repair & Import"
         });
@@ -1530,9 +1530,25 @@ var DebtSnowballApp = (() => {
     }
     requestAnimationFrame(draw);
   }
+  function fitTabLabels() {
+    const nav = appState._root.querySelector(".tab-nav");
+    if (!nav || nav.dataset.fitting === "1") return;
+    nav.dataset.fitting = "1";
+    nav.classList.remove("tabs-icons");
+    const overflows = nav.scrollWidth > nav.clientWidth + 1;
+    nav.classList.toggle("tabs-icons", overflows);
+    delete nav.dataset.fitting;
+  }
+  function syncTabPageTitle() {
+    const titleEl = appState._root.querySelector(".tab-page-title");
+    const active = appState._root.querySelector(".tab-btn.active");
+    if (!titleEl || !active) return;
+    titleEl.textContent = active.getAttribute("title") || "";
+  }
   function initTabs() {
     const tabBtns = appState._root.querySelectorAll(".tab-btn");
     const tabPanels = appState._root.querySelectorAll(".tab-panel");
+    const nav = appState._root.querySelector(".tab-nav");
     tabBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
         const target = btn.dataset.tab;
@@ -1541,6 +1557,7 @@ var DebtSnowballApp = (() => {
         btn.classList.add("active");
         const panel = appState._root.getElementById("tab-" + target);
         if (panel) panel.classList.add("active");
+        syncTabPageTitle();
         localStorage.setItem("snowball_active_tab", target);
       });
     });
@@ -1548,6 +1565,12 @@ var DebtSnowballApp = (() => {
     if (savedTab) {
       const savedBtn = appState._root.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
       if (savedBtn) savedBtn.click();
+    }
+    syncTabPageTitle();
+    fitTabLabels();
+    if (nav && typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => fitTabLabels());
+      observer.observe(nav);
     }
   }
   var init_render_support = __esm({
@@ -2086,7 +2109,7 @@ var DebtSnowballApp = (() => {
         if (issues.length) {
           const choice = await showDataHealthModal(issues, {
             context: "confirm",
-            title: "\u{1FA79} Backup needs repair",
+            title: "Backup needs repair",
             body: `The snapshot from ${new Date(b.savedAt).toLocaleString()} has problems that will be auto-fixed on restore. Restoring replaces ALL current data.`,
             confirmLabel: "Repair & Restore"
           });
@@ -2105,27 +2128,30 @@ This replaces ALL current data with that snapshot.`)) {
     }));
   }
   function showDataHealthModal(issues, { context = "load", title, body, confirmLabel = "Fix & Continue", hasData = false } = {}) {
-    const icons = { repaired: "\u26A0\uFE0F", warning: "\u26A0\uFE0F", notice: "\u2139\uFE0F", info: "\u2139\uFE0F", fatal: "\u26D4" };
-    const rows = issues.map((i) => `
-        <div style="display:flex;gap:0.5rem;align-items:baseline;padding:0.3rem 0;font-size:0.85rem;color:var(--text-secondary);line-height:1.4;">
-            <span>${icons[i.severity] || "\u2139\uFE0F"}</span>
-            <span><strong style="color:var(--text-primary);">${escHtml(i.field)}</strong> \u2014 ${escHtml(i.detail)}</span>
-        </div>`).join("");
-    const defaultTitle = context === "confirm" ? "\u{1FA79} Data needs repair" : "\u{1FA79} Data repairs applied";
+    const tags = { repaired: "Repaired", warning: "Warning", notice: "Notice", info: "Notice", fatal: "Blocked" };
+    const rows = issues.map((i) => {
+      const kind = tags[i.severity] ? i.severity === "info" ? "notice" : i.severity : "notice";
+      return `
+        <div class="health-issue">
+            <span class="health-issue-tag health-issue-${kind}">${escHtml(tags[i.severity] || "Notice")}</span>
+            <span class="health-issue-text"><strong>${escHtml(i.field)}</strong> ${escHtml(i.detail)}</span>
+        </div>`;
+    }).join("");
+    const defaultTitle = context === "confirm" ? "Data needs repair" : "Data repairs applied";
     const defaultBody = context === "confirm" ? "The incoming data has problems that can be fixed automatically. Review the fixes before continuing." : "The stored data had problems \u2014 automatic fixes were applied. A raw pre-repair snapshot was saved to your server backups (History \u2192 Server Backups) in case anything looks wrong.";
     return new Promise((resolve) => {
       const overlay = document.createElement("div");
       overlay.className = "modal active";
       overlay.style.zIndex = "210";
       overlay.innerHTML = `
-            <div class="modal-content" style="max-width:460px;">
+            <div class="modal-content health-modal">
                 <div class="modal-header"><h3>${escHtml(title || defaultTitle)}</h3></div>
-                <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:0.5rem;line-height:1.6;">
+                <p class="health-body">
                     ${escHtml(body || defaultBody)}
-                    ${context === "confirm" && hasData ? ' <strong style="color:var(--text-primary);">This replaces all your current data.</strong>' : ""}
+                    ${context === "confirm" && hasData ? " <strong>This replaces all your current data.</strong>" : ""}
                 </p>
-                <div style="max-height:40vh;overflow-y:auto;border-top:1px solid var(--border-color,rgba(128,128,128,0.25));margin-bottom:1rem;">${rows}</div>
-                <div style="display:flex;gap:0.75rem;justify-content:flex-end;flex-wrap:wrap;">
+                <div class="health-issues">${rows}</div>
+                <div class="health-actions">
                     ${context === "confirm" ? `
                         <button class="btn btn-secondary" id="health-cancel-btn">Cancel</button>
                         ${hasData ? '<button class="btn btn-secondary" id="health-export-btn">Export First</button>' : ""}
@@ -2230,22 +2256,13 @@ This replaces ALL current data with that snapshot.`)) {
         maximumFractionDigits: 2
       }).format(n);
     };
-    const listHtml = sorted.map((cp) => `
-        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: rgba(168,85,247,0.06); border-radius: 6px; border: 1px solid rgba(168,85,247,0.2);">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(168,85,247,0.15); padding: 0.2rem 0.4rem; border-radius: 4px;"${cp.autoRollover ? ` title="Carried over from last month's final balance"` : ""}>Day ${cp.day}${cp.autoRollover ? " \xB7 auto" : ""}</span>
-                <span style="font-weight: 500; color: var(--text-primary);">${formatMoneyLocal(cp.amount)}</span>
-            </div>
-            ${archive ? "" : `
-            <button class="btn btn-icon delete-checkpoint-btn" data-id="${cp.id}" title="Remove checkpoint" style="padding: 0.25rem; font-size: 0.75rem; background: transparent; color: var(--danger-color); border: none; cursor: pointer;">
-                \u2715
-            </button>`}
+    container.innerHTML = sorted.map((cp) => `
+        <div class="checkpoint-chip">
+            <span class="checkpoint-day"${cp.autoRollover ? ` title="Carried over from last month's final balance"` : ""}>Day ${cp.day}${cp.autoRollover ? " \xB7 auto" : ""}</span>
+            <span class="checkpoint-amount">${formatMoneyLocal(cp.amount)}</span>
+            ${archive ? "" : `<button class="btn btn-icon delete-checkpoint-btn" data-id="${cp.id}" title="Remove checkpoint">\u2715</button>`}
         </div>
     `).join("");
-    container.innerHTML = `
-        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${archive ? "Checkpoints (archived):" : "Mid-month checkpoints:"}</div>
-        ${listHtml}
-    `;
   }
   function openCheckpointModal(cpId = null) {
     appState.checkpointForm.reset();
@@ -2329,6 +2346,7 @@ This replaces ALL current data with that snapshot.`)) {
   }
   function renderSpendingBudgets() {
     const container = appState._root.getElementById("budgets-list");
+    const summaryEl = appState._root.getElementById("budget-summary");
     if (!container) return;
     const archive = getArchive();
     const budgets = getWorkingBudgets();
@@ -2346,8 +2364,6 @@ This replaces ALL current data with that snapshot.`)) {
     }
     const totalBudgeted = budgets.reduce((s, b) => s + getBudgetAmount(b), 0);
     const totalSpent = budgets.reduce((s, b) => s + (b.expenses || []).reduce((x, e) => x + e.amount, 0), 0);
-    const totalOver = totalSpent - totalBudgeted;
-    const metaSpentClass = totalOver > 0 ? "budget-meta-over" : "budget-meta-ok";
     const archiveBanner = archive ? `
         <div class="budget-meta-bar" style="border-color:var(--warning-color);">
             <span class="budget-meta-month">&#x1F5C4;&#xFE0F; Archived month \u2014 ${escHtml(monthName)}</span>
@@ -2356,14 +2372,17 @@ This replaces ALL current data with that snapshot.`)) {
         </div>` : "";
     const metaBar = `
         <div class="budget-meta-bar">
-            <span class="budget-meta-month">\u{1F4C5} ${monthName}</span>
-            <div class="budget-meta-divider"></div>
-            <span class="budget-meta-budgeted">${budgets.length} budget${budgets.length !== 1 ? "s" : ""} \xB7 ${formatMoney(totalBudgeted)} total limit</span>
+            <span class="budget-meta-month">${monthName}</span>
             <span class="budget-meta-total">
-                <span class="budget-meta-budgeted">Spent:</span>
-                <span class="${metaSpentClass}">${formatMoney(totalSpent)}</span>
-                ${totalOver > 0 ? `<span class="budget-meta-over" style="font-size:0.75rem;">\u26A0 ${formatMoney(totalOver)} over</span>` : `<span class="budget-meta-ok" style="font-size:0.75rem;">${formatMoney(totalBudgeted - totalSpent)} left</span>`}
+                <span class="budget-meta-budgeted">Spent</span>
+                <span class="budget-meta-ratio">${formatMoney(totalSpent)} / ${formatMoney(totalBudgeted)}</span>
             </span>
+        </div>`;
+    const remaining = totalBudgeted - totalSpent;
+    const remainingBlock = `
+        <div class="budget-summary-remaining${remaining < 0 ? " is-over" : ""}">
+            <span class="budget-summary-remaining-amount">${formatMoney(Math.abs(remaining))}</span>
+            <span class="budget-summary-remaining-label">${remaining < 0 ? "Over Budget" : "Total Budget Remaining"}</span>
         </div>`;
     const _mk = monthKey;
     const payoff = computeCardPayoffStatus({
@@ -2382,17 +2401,16 @@ This replaces ALL current data with that snapshot.`)) {
       return `<div class="card-charge-item"><span>${escHtml(it.name)}</span><span>${formatMoney(it.amount)} \xB7 ${escHtml(cardName)}</span></div>`;
     }).join("");
     const cardStrip = !archive && payoff.cardCharges > 0 ? `
-        <div class="budget-meta-bar" style="margin-top:0.5rem; flex-wrap:wrap; row-gap:0.35rem;">
+        <div class="budget-summary-charges">
             <details class="card-charges-detail">
-                <summary class="budget-meta-budgeted" title="Click to see which charges make up this total">\u{1F4B3} Charged to cards this month: ${formatMoney(payoff.cardCharges)}</summary>
+                <summary class="budget-meta-budgeted" title="Click to see which charges make up this total">Card charges ${formatMoney(payoff.cardCharges)}</summary>
                 <div class="card-charge-items">
                     ${chargeItems}
                     <div class="card-charge-item card-charge-hint">Missing a charge? A bill or expense only counts when its payment method is set to a card.</div>
                 </div>
             </details>
-            ${perCard.length > 0 ? `<span style="font-size:0.75rem; color:var(--text-secondary);">${perCard.join(" \xB7 ")}</span>` : ""}
-            <div class="budget-meta-divider"></div>
-            ${payoff.sustainable ? `<span class="budget-meta-ok" title="Income covers this month's charges on top of direct costs, cash spending, and planned card payments">\u2713 Covered \u2014 card charges funded by income/card payments</span>` : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover after costs and payments \u2014 the card balance will grow">\u26A0 ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
+            ${perCard.length > 1 ? `<span class="budget-cover-note">${perCard.join(" \xB7 ")}</span>` : ""}
+            ${payoff.sustainable ? `<span class="budget-cover-status" title="Income covers this month's card charges on top of direct costs and planned card payments"><span class="budget-cover-badge">Covered</span><span class="budget-cover-note">Card expenses covered by income</span></span>` : `<span class="budget-cover-status is-short" title="Card charges exceed what this month's income can cover after costs and payments"><span class="budget-cover-badge">Short</span><span class="budget-cover-note">${formatMoney(payoff.shortfall)} beyond income</span></span>`}
         </div>` : "";
     const prefMethod = (appState.expenseDefaults || {}).paymentMethod === "direct" ? "direct" : "card";
     const cards = budgets.map((budget, cardIdx) => {
@@ -2429,7 +2447,7 @@ This replaces ALL current data with that snapshot.`)) {
                     <span class="expense-amount" style="color:var(--expense-color);">\u2212${formatMoney(exp.amount)}</span>
                     <div class="expense-actions">
                         ${exp.autoCard ? "" : `<button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">\u270E</button>`}
-                        ${exp.autoCard ? "" : `<button class="btn-icon btn-expense-torecurring" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Convert to recurring bill">\u{1F501}</button>`}
+                        ${exp.autoCard ? "" : `<button class="btn-icon btn-expense-torecurring" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Convert to recurring bill" aria-label="Convert to recurring bill"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 12a8 8 0 0 1 13.7-5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M16 3.5h2.5V6M8 20.5H5.5V18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`}
                         <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">\u2715</button>
                     </div>
                 </div>`;
@@ -2502,7 +2520,16 @@ This replaces ALL current data with that snapshot.`)) {
             </div>` : ""}
         </div>`;
     }).join("");
-    container.innerHTML = archiveBanner + metaBar + cardStrip + cards;
+    if (summaryEl) {
+      summaryEl.innerHTML = `
+            <div class="budget-summary-card">
+                ${archiveBanner}
+                ${metaBar}
+                ${remainingBlock}
+                ${cardStrip}
+            </div>`;
+    }
+    container.innerHTML = cards;
     const defMethod = appState._root.getElementById("expense-default-method");
     const defCard = appState._root.getElementById("expense-default-card");
     if (defMethod && defCard) {
@@ -2814,8 +2841,16 @@ This replaces ALL current data with that snapshot.`)) {
     const totalOneTime = appState.oneTimeCosts.reduce((sum, c) => sum + c.amount, 0);
     const grandTotal = totalRecurring + totalOneTime;
     if (recurringSummaryEl) {
-      const otLabel = totalOneTime > 0 ? ` + ${formatMoney(totalOneTime)} one-time` : "";
-      recurringSummaryEl.innerHTML = `<span class="recurring-due-label">Due This Month</span><span class="recurring-due-total">$${grandTotal.toLocaleString(void 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><span class="recurring-due-breakdown">\u{1F3E6} Direct ${formatMoney(directRecurring)} &nbsp;\xB7&nbsp; \u{1F4B3} Card ${formatMoney(cardRecurring)}${otLabel}</span>`;
+      const parts = [];
+      if (directRecurring > 0) parts.push(`<span class="debt-type-badge direct-badge">\u{1F3E6} Direct ${formatMoney(directRecurring)}</span>`);
+      if (cardRecurring > 0) parts.push(`<span class="debt-type-badge card-badge">\u{1F4B3} Card ${formatMoney(cardRecurring)}</span>`);
+      if (totalOneTime > 0) parts.push(`<span class="interval-badge">One-time ${formatMoney(totalOneTime)}</span>`);
+      recurringSummaryEl.innerHTML = `
+            <div class="recurring-due-main">
+                <span class="recurring-due-total">${formatMoney(grandTotal)}</span>
+                <span class="recurring-due-label">Due this month</span>
+            </div>
+            ${parts.length ? `<div class="recurring-due-breakdown">${parts.join("")}</div>` : ""}`;
     }
     const hasAnyCosts = visibleRecurring.length > 0 || appState.oneTimeCosts.length > 0;
     if (!hasAnyCosts) {
@@ -2835,7 +2870,7 @@ This replaces ALL current data with that snapshot.`)) {
     const recurringSorted = [...visibleRecurring].sort((a, b) => (a.dueDay || 1) - (b.dueDay || 1));
     const categories = [
       { key: "utility", label: "\u26A1 Utilities (Monthly Bills)", cls: "cost-subsection-utility" },
-      { key: "subscription", label: "\u{1F4F1} Subscriptions (Recurring Services)", cls: "cost-subsection-subscription" },
+      { key: "subscription", label: "\u{1F4F1} Subscriptions", cls: "cost-subsection-subscription" },
       { key: "maintenance", label: "\u{1F527} Maintenance (Home & Auto)", cls: "cost-subsection-maintenance" },
       { key: "other", label: "\u{1F4E6} Other Recurring Bills", cls: "cost-subsection-other" }
     ];
@@ -2844,8 +2879,7 @@ This replaces ALL current data with that snapshot.`)) {
       if (group.length === 0) return;
       const section = document.createElement("div");
       section.className = `cost-subsection ${cls}`;
-      const isCompact = key === "utility" || key === "subscription" || key === "maintenance";
-      const isCollapsible = isCompact;
+      const isCollapsible = key === "utility" || key === "subscription" || key === "maintenance";
       const isExpanded = appState.expandedCostSections.has(key);
       const groupTotal = group.reduce((s, c) => s + c.amount, 0);
       const header = document.createElement("div");
@@ -2858,10 +2892,8 @@ This replaces ALL current data with that snapshot.`)) {
         const grid = document.createElement("div");
         grid.className = "debts-list";
         grid.style.display = "grid";
-        if (isCompact) {
-          grid.style.gridTemplateColumns = "1fr";
-          grid.style.gap = "0.4rem";
-        }
+        grid.style.gridTemplateColumns = "1fr";
+        grid.style.gap = "0.65rem";
         group.forEach((cost) => renderCostCard(cost, grid, false, currentDay));
         section.appendChild(grid);
       }
@@ -2878,6 +2910,8 @@ This replaces ALL current data with that snapshot.`)) {
       const otGrid = document.createElement("div");
       otGrid.className = "debts-list";
       otGrid.style.display = "grid";
+      otGrid.style.gridTemplateColumns = "1fr";
+      otGrid.style.gap = "0.65rem";
       appState.oneTimeCosts.forEach((cost) => renderCostCard(cost, otGrid, true, currentDay));
       otSection.appendChild(otGrid);
       appState.costsListContainer.appendChild(otSection);
@@ -2914,49 +2948,28 @@ This replaces ALL current data with that snapshot.`)) {
       dueFreq = "Monthly";
     }
     const el = document.createElement("div");
-    const isCompact = !isOneTime && (cost.category === "utility" || cost.category === "subscription" || cost.category === "maintenance");
-    if (isCompact) {
-      el.className = "debt-card cost-card cost-card-compact" + (isCard ? " cost-card-credit" : " cost-card-direct") + (paidState ? " card-paid" : "") + (isDue ? "" : " not-due-month");
-      const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join("");
-      const metaParts = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
-      el.innerHTML = `
-            ${paidOverlay}
-            <div class="cost-compact-body">
-                <div class="cost-compact-info">
-                    <div class="cost-compact-name-row">
-                        <span class="cost-compact-name">${escHtml(cost.name)}</span>
-                        <span class="cost-amount cost-compact-amount">${formatMoney(cost.amount)}</span>
-                    </div>
-                    ${badgesHtml ? `<div class="cost-compact-badges">${badgesHtml}</div>` : ""}
-                    <div class="cost-compact-meta">${metaParts.map((p, i) => i < metaParts.length - 1 ? `<span>${p}</span><span class="cost-meta-dot">\xB7</span>` : `<span>${p}</span>`).join("")}</div>
+    el.className = "debt-card cost-card cost-card-compact" + (isCard ? " cost-card-credit" : " cost-card-direct") + (paidState ? " card-paid" : "") + (isDue ? "" : " not-due-month") + (isOneTime ? " cost-card-onetime" : "");
+    const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join("");
+    const metaParts = [`Due ${formatOrdinal(cost.dueDay || 1)}`, `Repeats: ${dueFreq}`].filter(Boolean);
+    el.innerHTML = `
+        ${paidOverlay}
+        <div class="cost-compact-body">
+            <div class="cost-compact-top">
+                <span class="cost-compact-name">${escHtml(cost.name)}</span>
+                <span class="cost-compact-amount-group">
+                    <span class="cost-amount cost-compact-amount">${formatMoney(cost.amount)}</span>
+                    ${isDue ? `<span class="cost-compact-paid">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue, { payoff: false })}</span>` : ""}
+                </span>
+            </div>
+            ${badgesHtml ? `<div class="cost-compact-badges">${badgesHtml}</div>` : ""}
+            <div class="cost-compact-bottom">
+                <div class="cost-compact-meta">${metaParts.map((p, i) => i < metaParts.length - 1 ? `<span>${p}</span><span class="cost-meta-dot">\xB7</span>` : `<span>${p}</span>`).join("")}</div>
+                <div class="cost-mini-actions">
+                    <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">\u270E</button>
+                    <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">\u2715</button>
                 </div>
-                <div class="cost-compact-actions">
-                    ${isDue ? `<div class="cost-compact-paid">${buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue)}</div>` : ""}
-                    <div class="cost-mini-actions">
-                        <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">\u270E</button>
-                        <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">\u2715</button>
-                    </div>
-                </div>
-            </div>`;
-    } else {
-      el.className = "debt-card cost-card" + (isCard ? " cost-card-credit" : " cost-card-direct") + (paidState ? " card-paid" : "") + (isDue ? "" : " not-due-month") + (isOneTime ? " cost-card-onetime" : "");
-      const badgesHtml = [freqBadge, paymentMethodBadge, amountTypeBadge, autoBadge, notDueBadge].filter(Boolean).join("");
-      const amountLabel = isOneTime ? "One-Time Amount" : intN > 1 ? "Amount" : "Monthly Amount";
-      const paymentMethodLabel = isCard ? "Credit / Debit Card" : "Direct Pay (Bank / Cash)";
-      const dueValue = `${formatOrdinal(cost.dueDay || 1)} (${dueFreq})`;
-      el.innerHTML = `
-            ${paidOverlay}
-            <div class="debt-name">${escHtml(cost.name)}</div>
-            ${badgesHtml ? `<div class="cost-badges-line">${badgesHtml}</div>` : ""}
-            <div class="debt-detail"><span class="debt-detail-label">${amountLabel}</span><span class="debt-detail-value cost-amount">${formatMoney(cost.amount)}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Due</span><span class="debt-detail-value">${dueValue}</span></div>
-            <div class="debt-detail"><span class="debt-detail-label">Payment</span><span class="debt-detail-value">${paymentMethodLabel}</span></div>
-            <div class="paid-action-row">${isDue ? buildPaidButton(cost.id, cost.autoPay, paidState, isPastDue) : ""}</div>
-            <div class="cost-icon-actions">
-                <button class="btn-icon btn-edit-cost" data-id="${cost.id}" title="Edit">\u270E</button>
-                <button class="btn-icon btn-delete-cost" data-id="${cost.id}" title="Delete">\u2715</button>
-            </div>`;
-    }
+            </div>
+        </div>`;
     grid.appendChild(el);
   }
   function renderDebtsList(simResults) {
@@ -3034,8 +3047,11 @@ This replaces ALL current data with that snapshot.`)) {
             ${paidOverlay}
             <div class="debt-order-badge" title="${appState.strategy === "snowball" ? "Payoff order: smallest balance first" : "Payoff order: highest interest first"}">${globalIdx + 1}</div>
             <div class="debt-name">${escHtml(debt.name)}</div>
-            <div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.35rem;">${typeBadge}${promoBadge}${autoBadge}</div>
-            ${targetBadge}
+            <div class="debt-label-stack">
+                ${typeBadge}
+                ${targetBadge}
+                ${promoBadge || autoBadge ? `<div class="debt-flag-row">${promoBadge}${autoBadge}</div>` : ""}
+            </div>
             <div class="debt-detail debt-balance-row"><span class="debt-detail-label">Balance</span><span class="debt-detail-value debt-balance-value">${formatMoney(debt.balance)}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Interest Rate</span><span class="debt-detail-value">${rateDisplay}</span></div>
             <div class="debt-detail"><span class="debt-detail-label">Min Payment</span><span class="debt-detail-value">${formatMoney(debt.minPayment)} ${minPayNote}</span></div>
@@ -3121,7 +3137,8 @@ This replaces ALL current data with that snapshot.`)) {
       });
     }));
   }
-  function buildPaidButton(id, autoPay, paidState, isPastDue) {
+  function buildPaidButton(id, autoPay, paidState, isPastDue, options = {}) {
+    const allowPayoff = options.payoff !== false;
     if (paidState) {
       return `<button class="btn btn-paid-undo btn-mark-paid" data-id="${id}" data-autopay="${!!autoPay}">\u2713 Paid this month \u2014 tap to undo</button>`;
     }
@@ -3132,9 +3149,11 @@ This replaces ALL current data with that snapshot.`)) {
         return `<button class="btn" disabled style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); width: 100%; font-size: 0.8rem; padding: 0.5rem 1rem; cursor: not-allowed;">\u26A1 Scheduled for Auto-Pay</button>`;
       }
     }
+    const markPaid = `<button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false" style="flex:1;">Mark Paid</button>`;
+    if (!allowPayoff) return markPaid;
     return `
         <div style="display:flex; gap:0.5rem; width:100%;">
-            <button class="btn btn-mark-paid-action btn-mark-paid" data-id="${id}" data-autopay="false" style="flex:1;">Mark Paid</button>
+            ${markPaid}
             <button class="btn btn-warning btn-payoff-full" data-id="${id}" style="flex:1;">Pay Off Full</button>
         </div>`;
   }
@@ -3187,6 +3206,7 @@ This replaces ALL current data with that snapshot.`)) {
   // src/app/render-charts.js
   function renderPaydownChart(monthlyTotals, perDebtMonthly) {
     const canvas = appState._root.getElementById("paydown-chart");
+    const chartTitle = appState._root.getElementById("paydown-chart-title");
     if (!canvas) return;
     if (appState.paydownChart) {
       try {
@@ -3195,12 +3215,15 @@ This replaces ALL current data with that snapshot.`)) {
       }
       appState.paydownChart = null;
     }
+    const frame = canvas.parentElement;
     const maxLen = monthlyTotals.length;
     if (maxLen === 0) {
-      canvas.style.height = "0";
+      if (frame) frame.style.height = "0";
+      if (chartTitle) chartTitle.style.display = "none";
       return;
     }
-    canvas.style.height = "300px";
+    if (chartTitle) chartTitle.style.display = "";
+    if (frame) frame.style.height = "";
     const labels = monthlyTotals.map((_, i) => {
       const d = /* @__PURE__ */ new Date();
       d.setMonth(d.getMonth() + i + 1);
@@ -3327,7 +3350,7 @@ This replaces ALL current data with that snapshot.`)) {
     stratDesc.textContent = appState.strategy === "snowball" ? "Snowball: paying the smallest balance first. Quick wins build momentum and keep you motivated." : "Avalanche: paying the highest interest rate first. Mathematically optimal \u2014 minimises total interest paid.";
     if (isArchiveViewTimeline) {
       countdownBox.style.display = "none";
-      payoffBoxAlt.style.display = "block";
+      payoffBoxAlt.style.display = "flex";
       appState._root.getElementById("stat-payoff-date-alt").textContent = "Historical Data";
       statTotalInterest.textContent = "-";
       statSavingsBox.style.display = "none";
@@ -3353,7 +3376,7 @@ This replaces ALL current data with that snapshot.`)) {
     }
     if (appState.debts.length === 0) {
       countdownBox.style.display = "none";
-      payoffBoxAlt.style.display = "block";
+      payoffBoxAlt.style.display = "flex";
       appState._root.getElementById("stat-payoff-date-alt").textContent = "-";
       statTotalInterest.textContent = "$0.00";
       statSavingsBox.style.display = "none";
@@ -3374,7 +3397,7 @@ This replaces ALL current data with that snapshot.`)) {
     if (!simResults.valid) {
       const { totalIncome, totalRecurring, effectiveBudget, totalMinPayments } = simResults;
       countdownBox.style.display = "none";
-      payoffBoxAlt.style.display = "block";
+      payoffBoxAlt.style.display = "flex";
       appState._root.getElementById("stat-payoff-date-alt").textContent = "Budget Too Low!";
       statTotalInterest.textContent = "N/A";
       statSavingsBox.style.display = "none";
@@ -3506,7 +3529,7 @@ This replaces ALL current data with that snapshot.`)) {
     }
     if (simResults.monthsElapsed >= 1200) {
       countdownBox.style.display = "none";
-      payoffBoxAlt.style.display = "block";
+      payoffBoxAlt.style.display = "flex";
       appState._root.getElementById("stat-payoff-date-alt").textContent = "> 100 Years";
       statTotalInterest.textContent = "Too High";
       statSavingsBox.style.display = "none";
@@ -3528,7 +3551,7 @@ This replaces ALL current data with that snapshot.`)) {
     const payoffDate = new Date(today.getFullYear(), today.getMonth() + simResults.monthsElapsed, 1);
     appState.lastSimPayoffDate = payoffDate;
     statTotalInterest.textContent = formatMoney(simResults.totalInterestPaid);
-    countdownBox.style.display = "block";
+    countdownBox.style.display = "flex";
     payoffBoxAlt.style.display = "none";
     windfallBar.style.display = "flex";
     appState._root.getElementById("stat-payoff-date").textContent = payoffDate.toLocaleDateString(void 0, { month: "long", day: "numeric", year: "numeric" });
@@ -3538,7 +3561,7 @@ This replaces ALL current data with that snapshot.`)) {
     const otherResult = runSimulation3(otherStrat);
     if (otherResult.valid) {
       const interestDiff = otherResult.totalInterestPaid - simResults.totalInterestPaid;
-      statSavingsBox.style.display = "block";
+      statSavingsBox.style.display = "flex";
       statSavingsLabel.textContent = `vs. ${otherLabel}`;
       if (interestDiff > 0.01) {
         statSavings.textContent = `Save ${formatMoney(interestDiff)}`;
@@ -3558,7 +3581,13 @@ This replaces ALL current data with that snapshot.`)) {
   }
   function renderPaymentPlan() {
     const section = appState._root.getElementById("payment-plan-section");
+    const overviewCard = appState._root.getElementById("month-overview-card");
     const list = appState._root.getElementById("payment-plan-list");
+    const setPlanVisible = (visible) => {
+      const display = visible ? "block" : "none";
+      section.style.display = display;
+      if (overviewCard) overviewCard.style.display = display;
+    };
     const isArchiveView = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
     const archiveData = isArchiveView ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
     const _monthKey = archiveData ? archiveData.month : appState.workingMonthKey || currentMonthKey();
@@ -3587,7 +3616,7 @@ This replaces ALL current data with that snapshot.`)) {
     if (nextBtn) nextBtn.style.visibility = isArchiveView ? "visible" : "hidden";
     list.innerHTML = "";
     if (_income.length === 0 && _checkpoints.length === 0) {
-      section.style.display = "none";
+      setPlanVisible(false);
       return;
     }
     const events = [];
@@ -3730,7 +3759,7 @@ This replaces ALL current data with that snapshot.`)) {
       }
     }
     if (schedule.length === 0) {
-      section.style.display = "none";
+      setPlanVisible(false);
       return;
     }
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -3809,7 +3838,7 @@ This replaces ALL current data with that snapshot.`)) {
     } else if (ovBudgetsContainer) {
       ovBudgetsContainer.style.display = "none";
     }
-    section.style.display = "block";
+    setPlanVisible(true);
     let todayMarkerInserted = !isLiveMonth;
     schedule.forEach((item, index) => {
       if (!todayMarkerInserted && (item.day || 1) >= currentDay) {
@@ -3837,7 +3866,7 @@ This replaces ALL current data with that snapshot.`)) {
         rowBgClass = "schedule-income";
       } else if (item.type === "recurring") {
         icon = "\u{1F3E6}";
-        const methodBadge = '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">\u{1F3E6} Direct</span>';
+        const methodBadge = '<span class="schedule-badge direct-badge">\u{1F3E6} Direct</span>';
         const amtBadge = item.amountType === "flexible" ? '<span class="schedule-badge flexible-badge">\u301C Flexible</span>' : '<span class="schedule-badge fixed-badge">= Fixed</span>';
         typeBadge = methodBadge + amtBadge;
         if (item.autoPay && !itemPaid) {
@@ -3848,13 +3877,13 @@ This replaces ALL current data with that snapshot.`)) {
         rowBgClass = "schedule-recurring-direct";
       } else if (item.type === "expense") {
         icon = "\u{1F6D2}";
-        typeBadge = `<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">\u{1F6D2} ${escHtml(item.budgetName || "Budget")}</span>`;
+        typeBadge = `<span class="schedule-badge direct-badge">\u{1F6D2} ${escHtml(item.budgetName || "Budget")}</span>`;
         amountClass = "schedule-amount-expense";
         dayLabel = formatOrdinal(item.day);
         rowBgClass = "schedule-expense schedule-row-paid";
       } else {
         icon = "\u{1F9FE}";
-        const directBadge = '<span class="schedule-badge direct-badge" style="border: 1px solid rgba(20, 184, 166, 0.45);">\u{1F3E6} Direct</span>';
+        const directBadge = '<span class="schedule-badge direct-badge">\u{1F3E6} Direct</span>';
         const targetBadge = item.isSnowballTarget ? `<span class="snowball-badge">${appState.strategy === "snowball" ? "\u2744\uFE0F" : "\u{1F30A}"} ${appState.strategy === "snowball" ? "Snowball" : "Avalanche"} Target</span>` : "";
         typeBadge = directBadge + targetBadge;
         if (item.autoPay && !itemPaid) {
@@ -3914,7 +3943,7 @@ This replaces ALL current data with that snapshot.`)) {
                     <button class="btn-override-cancel" data-id="${item.id}" style="padding:0.2rem 0.5rem; font-size:0.78rem; background:transparent; border:none; color:var(--text-secondary); cursor:pointer;">\u2715</button>
                 </div>
             </div>` : "";
-      const detailText = item.type === "debt" && item.isSnowballTarget ? "Minimum + Snowball Extra" : item.type === "debt" ? "Minimum Payment" : item.type === "recurring" ? "Paid from bank account" : item.type === "expense" ? isArchiveView ? "Logged budget spending \u2014 deducted from cash" : "Logged budget spending \u2014 deducted from cash \xB7 drag to re-date" : item.type === "checkpoint" ? "Resets the running balance for calculations below" : "";
+      const detailText = item.type === "debt" && item.isSnowballTarget ? "Minimum + extra" : item.type === "debt" ? "Minimum" : item.type === "recurring" ? "From bank" : item.type === "expense" ? "Budget spending" : item.type === "checkpoint" ? "Resets balance" : "";
       row.innerHTML = `
             <div class="schedule-date-col"><span class="schedule-icon">${icon}</span><span class="schedule-day">${dayLabel}</span></div>
             <div class="schedule-info-col">
@@ -4848,7 +4877,7 @@ This replaces ALL current data with that snapshot.`)) {
     if (!appState.sanityWarnings?.length) return;
     showDataHealthModal(appState.sanityWarnings, {
       context: "load",
-      title: "\u26A0\uFE0F Unusual data detected",
+      title: "Unusual data detected",
       body: "These patterns look suspicious \u2014 often a sign of a bug (e.g. duplicated entries). Nothing was changed automatically; review and fix manually if needed."
     });
   }
@@ -5571,7 +5600,7 @@ One-time bills will be removed, income will be cleared, and interval bills will 
 }
 
 :root {
-    --bg-color: #07061a;           /* Deep midnight */
+    --bg-color: #020108;           /* Near-black midnight */
     --card-bg: #0f0d2a;            /* Dark indigo */
     --card-bg-2: #13113a;          /* Slightly lighter indigo */
     --text-primary: #ede9ff;       /* Lavender white */
@@ -5606,74 +5635,206 @@ debt-snowball-card {
     max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
+    container-type: inline-size;
+    container-name: snowball;
 }
 
 body {
     font-family: 'DM Sans', 'Outfit', ui-sans-serif, system-ui, sans-serif;
     background-color: var(--bg-color);
     background-image:
-        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(60, 80, 220, 0.18) 0%, transparent 70%),
-        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(40, 60, 180, 0.12) 0%, transparent 60%);
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(40, 50, 140, 0.10) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(30, 40, 110, 0.06) 0%, transparent 60%);
     color: var(--text-primary);
     line-height: 1.5;
     min-height: 100vh;
 }
 
+debt-snowball-card {
+    background-color: var(--bg-color);
+    background-image:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(40, 50, 140, 0.10) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(30, 40, 110, 0.06) 0%, transparent 60%);
+}
+
 .app-container {
+    --page-pad: 1rem;
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
-    padding: 1rem;
+    padding: 0 0 var(--page-pad);
     min-height: 100vh;
     box-sizing: border-box;
 }
 
+.app-container > :not(.header) {
+    margin-left: var(--page-pad);
+    margin-right: var(--page-pad);
+}
+
 .header {
-    display: flex;
-    justify-content: space-between;
+    --header-size: clamp(1.15rem, 6.2cqi, 2rem);
+    --header-ink: #1b1630;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 1rem;
+    row-gap: 0.28rem;
     align-items: center;
-    margin-bottom: 1rem;
+    margin: 0 0 1.15rem;
+    padding: 0.9rem var(--page-pad) 0.8rem;
+    background: linear-gradient(110deg, #7ab0ff 0%, #5b7fff 42%, #9b6dff 100%);
+    color: var(--header-ink);
+    border-bottom: 1px solid rgba(27, 22, 48, 0.28);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.header-title {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    min-width: 0;
 }
 
 .header h1 {
-    font-size: 1.5rem;
+    font-size: var(--header-size);
     font-weight: 700;
     letter-spacing: -0.04em;
+    line-height: 1;
+    white-space: nowrap;
     font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
-    background: linear-gradient(110deg, #7ab0ff 0%, #5b7fff 40%, #9b6dff 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--header-ink);
+}
+
+.version-badge {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+    font-size: 0.65rem;
+    color: #241e38;
+    opacity: 1;
+    line-height: 1;
 }
 
 .header-actions {
+    grid-column: 2;
+    grid-row: 1;
     display: flex;
-    gap: 0.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.header-actions .header-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: var(--header-size);
+    height: var(--header-size);
+    min-width: var(--header-size);
+    min-height: 0;
+    padding: 0;
+    line-height: 1;
+    background: rgba(27, 22, 48, 0.14);
+    border: 1px solid rgba(27, 22, 48, 0.32);
+    color: var(--header-ink);
+    border-radius: 8px;
+}
+
+.header-actions .header-action:hover {
+    background: rgba(27, 22, 48, 0.22);
+    color: var(--header-ink);
+}
+
+.header-action-icon {
+    width: calc(var(--header-size) * 0.48);
+    height: calc(var(--header-size) * 0.48);
+    display: block;
+}
+
+#sanity-badge.header-action {
+    width: auto;
+    gap: 0.28rem;
+    padding: 0 0.55rem;
+    background: rgba(168, 96, 16, 0.14);
+    border-color: rgba(140, 78, 8, 0.35);
+    color: #8a4b08;
+}
+
+.header-action-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
 }
 
 .month-nav {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    padding: 0.15rem 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.month-nav-slot {
     display: flex;
     align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.month-nav-slot-end {
+    justify-content: flex-end;
+}
+
+.month-nav-btn {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
-    padding: 0.5rem;
-    background: linear-gradient(135deg, rgba(91,127,255,0.08) 0%, rgba(168,85,247,0.05) 50%, rgba(91,127,255,0.08) 100%);
-    border-radius: 10px;
-    border: 1px solid rgba(91,127,255,0.15);
+    flex: 0 0 auto;
+    width: 2.5rem;
+    height: 2.5rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-primary);
+    font-family: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.month-nav-icon {
+    width: 1.2rem;
+    height: 1.2rem;
+    display: block;
+}
+
+.month-nav-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--border-bright);
 }
 
 .month-title {
-    font-size: 1.25rem;
+    font-size: clamp(1.2rem, 4.5cqi, 1.45rem);
     font-weight: 700;
-    letter-spacing: -0.01em;
+    white-space: nowrap;
+    letter-spacing: 0.04em;
+    line-height: 1.15;
     background: linear-gradient(110deg, #a5b8ff 0%, #c084fc 50%, #a5b8ff 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
     text-transform: uppercase;
-    min-width: 140px;
     text-align: center;
+    min-width: 0;
 }
 
 .btn {
@@ -5980,6 +6141,104 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     margin-bottom: 1.5rem;
 }
 
+.health-modal {
+    max-width: 460px;
+    text-align: left;
+}
+
+.health-modal .modal-header {
+    margin-bottom: 0.65rem;
+}
+
+.health-modal .modal-header h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    line-height: 1.25;
+}
+
+.health-body {
+    margin: 0 0 0.85rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    text-align: left;
+}
+
+.health-body strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.health-issues {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+    max-height: 40vh;
+    overflow-y: auto;
+    margin: 0 0 1rem;
+    text-align: left;
+}
+
+.health-issue {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+}
+
+.health-issue-tag {
+    flex-shrink: 0;
+    margin-top: 0.12rem;
+    padding: 0.12rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1.3;
+}
+
+.health-issue-repaired,
+.health-issue-warning {
+    background: rgba(245, 158, 11, 0.16);
+    color: #fbbf24;
+}
+
+.health-issue-notice {
+    background: rgba(91, 127, 255, 0.14);
+    color: #c5d0ff;
+}
+
+.health-issue-fatal {
+    background: rgba(244, 88, 122, 0.16);
+    color: #ffc2d0;
+}
+
+.health-issue-text {
+    font-size: 0.85rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    text-align: left;
+}
+
+.health-issue-text strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.health-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.health-actions .btn {
+    width: auto;
+    min-height: 0;
+    white-space: nowrap;
+}
+
 .close-modal, .close-income-modal, .close-cost-modal {
     background: transparent;
     border: none;
@@ -6004,25 +6263,33 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* Summary Stats */
 .summary-stats {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1.25rem;
-    margin-bottom: 2rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+    margin-bottom: 1.25rem;
 }
 
 .stat-box {
     background-color: rgba(7, 6, 26, 0.6);
-    padding: 1.25rem;
+    padding: 0.7rem 0.8rem;
     border-radius: 8px;
     border: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.15rem;
     box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
 }
 
+.stat-label,
+.stat-value,
+.stat-countdown-date {
+    display: block;
+    width: 100%;
+}
+
 .stat-label {
-    font-size: 0.875rem;
+    font-size: 0.8rem;
     font-weight: 500;
+    line-height: 1.2;
     color: var(--text-secondary);
 }
 
@@ -6048,9 +6315,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     margin-bottom: 1rem;
 }
 
+.chart-title {
+    margin: 0 0 0.45rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.chart-canvas-frame {
+    position: relative;
+    height: 260px;
+}
+
 #paydown-chart {
     width: 100%;
-    height: 260px;
+    height: 100%;
     display: block;
 }
 
@@ -6149,7 +6430,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ===== Tablet (\u2264 1024px) ===== */
 @media (max-width: 1024px) {
     .app-container {
-        padding: 0.875rem;
+        --page-pad: 0.875rem;
     }
 
     .summary-stats {
@@ -6208,18 +6489,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ===== Mobile (\u2264 640px) ===== */
 @media (max-width: 640px) {
     .app-container {
-        padding: 0.75rem;
+        --page-pad: 0.75rem;
     }
 
     .header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.5rem;
         margin-bottom: 0.75rem;
-    }
-
-    .header h1 {
-        font-size: 1.25rem;
     }
 
     .tab-nav {
@@ -6240,24 +6514,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     .month-nav .btn-sm {
         padding: 0.35rem 0.625rem;
         font-size: 0.75rem;
-    }
-
-    .month-title {
-        font-size: 1rem;
-        min-width: 100px;
-    }
-
-    .header-actions {
-        width: 100%;
-        flex-wrap: wrap;
-    }
-
-    .header-actions .btn {
-        flex: 1;
-        min-width: 0;
-        font-size: 0.875rem;
-        padding: 0.75rem 0.875rem;
-        min-height: 44px;
     }
 
     .debts-list {
@@ -6342,7 +6598,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         padding: 0.3rem;
         gap: 0.2rem;
         margin-bottom: 1.25rem;
-        overflow-x: auto;
     }
 
     .tab-btn {
@@ -6472,21 +6727,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ===== Small phone (\u2264 480px) ===== */
 @media (max-width: 480px) {
     .app-container {
-        padding: 0.625rem;
-    }
-    
-    .month-title {
-        font-size: 0.875rem;
-        min-width: 80px;
+        --page-pad: 0.625rem;
     }
     
     .month-nav .btn-sm {
         padding: 0.3rem 0.5rem;
         font-size: 0.7rem;
-    }
-
-    .header h1 {
-        font-size: 1.5rem;
     }
 
     .summary-stats {
@@ -6495,7 +6741,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }
 
     .stat-box {
-        padding: 1rem 0.875rem;
+        padding: 0.65rem 0.75rem;
     }
 
     .stat-label {
@@ -6521,14 +6767,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     .tab-btn {
         padding: 0.6rem 0.375rem;
         font-size: 0.8rem;
-    }
-
-    .tab-label {
-        display: none;
-    }
-
-    .tab-icon {
-        font-size: 1.15rem;
     }
 
     .timeline-header {
@@ -6967,44 +7205,55 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 /* ===== Recurring Due-This-Month Summary Bar ===== */
 .recurring-due-summary {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.5rem 1.25rem;
-    padding: 0.7rem 1rem;
-    margin-bottom: 1.25rem;
-    border-radius: 0.4rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: 10px;
     background: rgba(240,160,80,0.08);
-    border-left: 3px solid var(--warning-color);
-    font-size: 1.1rem;
-    font-weight: 700;
+    border: 1px solid rgba(240,160,80,0.22);
     color: var(--text-primary);
-    min-height: 2.5rem;
 }
 
 .recurring-due-summary:empty {
     display: none;
 }
 
+.recurring-due-main {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 0.55rem;
+    width: 100%;
+}
+
 .recurring-due-label {
-    font-size: 0.72rem;
+    font-size: 0.78rem;
     font-weight: 600;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--warning-color);
-    margin-right: 0.25rem;
 }
 
 .recurring-due-total {
     font-size: 1.35rem;
     font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1;
     color: var(--warning-color);
 }
 
 .recurring-due-breakdown {
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
 }
 
 /* ===== Cost Sub-section Headers ===== */
@@ -7077,7 +7326,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     background: rgba(148,163,184,0.12);
     color: #94a3b8;
     border: 1px solid rgba(148,163,184,0.2);
-    margin-left: 0.3rem;
+    margin-left: 0;
 }
 
 .cost-card.not-due-month {
@@ -7093,23 +7342,21 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
 /* ===== Compact Cost Card Layout (Utility / Subscription) ===== */
 .cost-card-compact {
-    padding: 0.65rem 0.9rem !important;
+    padding: 0.85rem 1rem !important;
 }
 .cost-compact-body {
     display: flex;
-    align-items: center;
-    gap: 0.6rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
 }
-.cost-compact-info {
-    flex: 1;
-    min-width: 0;
-}
-.cost-compact-name-row {
+.cost-compact-top,
+.cost-compact-bottom {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: baseline;
-    gap: 0.5rem;
-    margin-bottom: 0.18rem;
+    gap: 0.65rem;
+    width: 100%;
 }
 .cost-compact-name {
     font-weight: 600;
@@ -7119,17 +7366,43 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     white-space: nowrap;
     min-width: 0;
     flex: 1;
+    text-align: left;
+}
+.cost-compact-amount-group {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.55rem;
+    flex-shrink: 0;
 }
 .cost-compact-amount {
     font-weight: 700;
     font-size: 0.95rem;
     flex-shrink: 0;
+    line-height: 1;
 }
 .cost-compact-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem;
-    margin-bottom: 0.25rem;
+    justify-content: flex-start;
+    align-items: center;
+    align-content: flex-start;
+    gap: 0.35rem;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+}
+.cost-compact-badges > span {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.16rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
 }
 .cost-compact-meta {
     font-size: 0.75rem;
@@ -7151,10 +7424,17 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     flex-shrink: 0;
 }
 .cost-compact-paid .btn {
-    font-size: 0.73rem !important;
-    padding: 0.28rem 0.55rem !important;
+    font-size: 0.75rem !important;
+    padding: 0.35rem 0.7rem !important;
     width: auto !important;
+    min-height: 0;
+    height: auto;
     white-space: nowrap;
+}
+.cost-mini-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
 }
 
 /* Badges on own line for full-layout cost cards */
@@ -7203,7 +7483,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     background: rgba(100,116,139,0.1);
     color: #64748b;
     border: 1px dashed rgba(100,116,139,0.3);
-    margin-left: 0.3rem;
+    margin-left: 0;
 }
 
 /* ===== Spending Budgets ===== */
@@ -7449,25 +7729,13 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 .expense-method-toggle {
-    background: rgba(91,127,255,0.12);
-    border: 1px solid rgba(91,127,255,0.25);
-    border-radius: 999px;
-    color: var(--text-secondary);
-    font-size: 0.7rem;
     font-family: inherit;
-    padding: 0.1rem 0.45rem;
     margin-left: 0.35rem;
     cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 .expense-method-toggle:hover {
-    background: rgba(91,127,255,0.25);
-    color: var(--text-primary);
-}
-.expense-method-toggle.is-card {
-    background: rgba(251,191,36,0.12);
-    border-color: rgba(251,191,36,0.3);
+    filter: brightness(1.15);
 }
 
 /* ===== Expense defaults picker ===== */
@@ -7478,17 +7746,84 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     flex-wrap: wrap;
     justify-content: flex-end;
 }
+.budget-add-footer {
+    margin-top: 0.85rem;
+}
 .expense-defaults {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.4rem;
+    margin: 0 0 1rem;
     font-size: 0.78rem;
     color: var(--text-secondary);
 }
+
+.budget-summary-card {
+    background: rgba(91, 127, 255, 0.06);
+    border: 1px solid rgba(91, 127, 255, 0.15);
+    border-radius: 10px;
+    margin-bottom: 0.85rem;
+    overflow: hidden;
+}
+
+.budget-summary-card .budget-meta-bar {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    background: transparent;
+}
+
+.budget-summary-card .budget-meta-bar + .budget-meta-bar {
+    border-top: 1px solid rgba(91, 127, 255, 0.15);
+}
+
+.budget-summary-remaining {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.65rem;
+    padding: 0.1rem 1rem 0.7rem;
+}
+
+.budget-summary-remaining-amount {
+    font-size: 1.65rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: var(--success-color);
+}
+
+.budget-summary-remaining.is-over .budget-summary-remaining-amount {
+    color: var(--danger-color);
+}
+
+.budget-summary-remaining-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.budget-summary-charges {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+    padding: 0.55rem 1rem;
+    border-top: 1px solid rgba(91, 127, 255, 0.15);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
 .expense-defaults select {
-    padding: 0.25rem 0.45rem;
+    width: auto;
+    min-width: 7.5rem;
+    max-width: 100%;
+    min-height: 0;
+    height: auto;
+    padding: 0.35rem 1.6rem 0.35rem 0.55rem;
     font-size: 0.78rem;
-    background: rgba(7,6,26,0.7);
+    line-height: 1.2;
+    background-color: rgba(7,6,26,0.7);
     border: 1px solid var(--border-bright);
     border-radius: 6px;
     color: var(--text-primary);
@@ -7644,6 +7979,11 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 .btn-icon.btn-delete-expense:hover {
     color: var(--danger-color);
 }
+.btn-expense-torecurring svg {
+    width: 1rem;
+    height: 1rem;
+    display: block;
+}
 .budget-card-actions {
     display: flex;
     gap: 0.5rem;
@@ -7778,9 +8118,50 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 .budget-meta-total {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 0.35rem;
-    margin-left: auto;
+    margin-left: 0;
     font-weight: 600;
+}
+
+.budget-meta-ratio {
+    color: #c5d0ff;
+    font-weight: 600;
+}
+
+.budget-cover-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.budget-cover-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.22rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(52, 201, 122, 0.2);
+    border: 1px solid rgba(52, 201, 122, 0.55);
+    color: #b8f5d4;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    line-height: 1.2;
+}
+
+.budget-cover-status.is-short .budget-cover-badge {
+    background: rgba(244, 88, 122, 0.18);
+    border-color: rgba(244, 88, 122, 0.5);
+    color: #ffc2d0;
+}
+
+.budget-cover-note {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    opacity: 0.7;
 }
 
 .budget-meta-budgeted {
@@ -8024,11 +8405,28 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
 /* ===== Month Overview ===== */
 .month-overview {
-    margin-bottom: 1.25rem;
-    padding: 1rem;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.05));
-    border: 1px solid rgba(99, 102, 241, 0.24);
-    border-radius: 12px;
+    margin-bottom: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+}
+
+.month-overview-card #runway-dashboard {
+    margin-top: 1rem;
+}
+
+.cashflow-card-title {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.month-overview-header .cashflow-card-title,
+.checkpoints-bar .cashflow-card-title {
+    margin-bottom: 0;
 }
 
 .month-overview-header {
@@ -8037,12 +8435,6 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     align-items: baseline;
     gap: 1rem;
     margin-bottom: 0.85rem;
-}
-
-.month-overview-title {
-    color: var(--text-primary);
-    font-size: 0.85rem;
-    font-weight: 700;
 }
 
 .month-overview-subtitle {
@@ -8183,6 +8575,32 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
     .month-overview-budgets > summary {
         flex-wrap: wrap;
+    }
+}
+
+/* A narrow card on a wide monitor never matches the viewport query above. */
+@container snowball (max-width: 760px) {
+    .month-overview-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .budget-header-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .expense-defaults {
+        flex-wrap: wrap;
+    }
+
+    .section-header .btn {
+        white-space: nowrap;
     }
 }
 
@@ -8477,11 +8895,18 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
 .timeline-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 0.35rem;
+    gap: 0.25rem;
+}
+
+.timeline-interest {
+    display: block;
+    margin-bottom: 0.65rem;
+    font-size: 0.85rem;
+    line-height: 1.25;
+    color: var(--text-secondary);
 }
 
 .timeline-name {
@@ -8571,28 +8996,41 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     white-space: nowrap;
 }
 
-.debt-type-badge {
-    background: rgba(96, 165, 250, 0.18);
-    color: #93c5fd;
-    padding: 0.15rem 0.5rem;
-    border-radius: 12px;
-    font-size: 0.7rem;
+.debt-type-badge,
+.schedule-badge.card-badge,
+.schedule-badge.direct-badge,
+.expense-method-toggle {
+    display: inline-block;
+    width: auto;
+    margin: 0;
+    padding: 0.22rem 0.55rem;
+    border-radius: 8px;
+    font-size: 0.72rem;
     font-weight: 600;
-    border: 1px solid rgba(96, 165, 250, 0.3);
-    margin-left: 0.5rem;
+    letter-spacing: 0.01em;
+    line-height: 1.3;
     white-space: nowrap;
+    box-shadow: none;
+    text-shadow: none;
+    background: rgba(148, 163, 184, 0.12);
+    color: #cbd5e1;
+    border: 1px solid rgba(148, 163, 184, 0.35);
 }
 
-.card-badge {
-    background: rgba(99, 102, 241, 0.18);
+.card-badge,
+.schedule-badge.card-badge,
+.expense-method-toggle.is-card {
+    background: rgba(99, 102, 241, 0.14);
     color: #c7d2fe;
-    border-color: rgba(99, 102, 241, 0.45);
+    border-color: rgba(99, 102, 241, 0.4);
 }
 
-.direct-badge {
-    background: rgba(20, 184, 166, 0.18);
+.direct-badge,
+.schedule-badge.direct-badge,
+.expense-method-toggle:not(.is-card) {
+    background: rgba(20, 184, 166, 0.14);
     color: #99f6e4;
-    border-color: rgba(20, 184, 166, 0.45);
+    border-color: rgba(20, 184, 166, 0.4);
 }
 
 /* ===== Amount Type Badges ===== */
@@ -8601,7 +9039,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border-radius: 12px;
     font-size: 0.7rem;
     font-weight: 600;
-    margin-left: 0.4rem;
+    margin-left: 0;
     white-space: nowrap;
     display: inline-block;
 }
@@ -8837,17 +9275,35 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     flex-shrink: 0;
 }
 
-/* ===== Snowball/Avalanche Target Banner ===== */
+/* ===== Debt type + payoff-target labels ===== */
+.debt-label-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin-bottom: 0.85rem;
+}
+
+.debt-flag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
 .snowball-target-banner {
-    background: linear-gradient(135deg, rgba(91,127,255,0.22), rgba(52,201,122,0.12));
-    border: 1.5px solid rgba(91,127,255,0.55);
-    border-radius: 8px;
+    display: block;
+    align-self: stretch;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
     padding: 0.5rem 0.85rem;
     font-size: 0.82rem;
     font-weight: 700;
-    color: #c4d0ff;
-    margin-bottom: 0.85rem;
     letter-spacing: 0.01em;
+    line-height: 1.35;
+    background: linear-gradient(135deg, rgba(91,127,255,0.22), rgba(52,201,122,0.12));
+    border: 1.5px solid rgba(91,127,255,0.55);
+    color: #c4d0ff;
     box-shadow: 0 0 12px rgba(91,127,255,0.18), inset 0 0 12px rgba(91,127,255,0.06);
     text-shadow: 0 0 10px rgba(91,127,255,0.5);
 }
@@ -9231,7 +9687,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 .stat-countdown-date {
     font-size: 0.75rem;
     color: var(--text-secondary);
-    margin-top: 0.15rem;
+    margin-top: 0;
     font-weight: 500;
 }
 
@@ -9478,9 +9934,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border: 1px solid var(--border-color);
     border-radius: var(--radius);
     padding: 0.375rem;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-color) transparent;
+    overflow: hidden;
 }
 
 .tab-btn {
@@ -9509,6 +9963,145 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     background: var(--accent-color);
     color: white;
     box-shadow: 0 2px 12px rgba(91, 127, 255, 0.45);
+}
+
+.tab-nav.tabs-icons .tab-label {
+    display: none;
+}
+
+.tab-nav.tabs-icons .tab-btn {
+    flex: 1;
+    justify-content: center;
+    gap: 0;
+    padding: 0.5rem 0.35rem;
+}
+
+.tab-nav.tabs-icons .tab-icon {
+    font-size: 1.15rem;
+}
+
+.tab-page-title {
+    display: none;
+    margin: 0;
+    text-align: left;
+    font-size: 1.3rem;
+    line-height: 1.2;
+}
+
+.tab-nav.tabs-icons ~ .main-content > .tab-page-title {
+    display: block;
+}
+
+.checkpoints-card {
+    margin-bottom: 0;
+}
+
+.checkpoints-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.checkpoints-bar .cashflow-card-title {
+    white-space: nowrap;
+}
+
+.checkpoint-add {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+    min-width: 0;
+}
+
+debt-snowball-card .checkpoint-add select,
+debt-snowball-card .checkpoint-add input {
+    height: 2rem;
+    min-height: 0;
+    padding: 0 0.55rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    font-family: inherit;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+.checkpoint-add select {
+    width: 4.2rem;
+}
+
+.checkpoint-add input {
+    width: 6.5rem;
+}
+
+debt-snowball-card .checkpoint-add .btn {
+    height: 2rem;
+    min-height: 0;
+    padding: 0 0.7rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.checkpoints-list:not(:empty) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 1rem;
+}
+
+.checkpoint-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.02rem 0.4rem 0.02rem 0.55rem;
+    line-height: 1.2;
+    background: rgba(168, 85, 247, 0.08);
+    border: 1px solid rgba(168, 85, 247, 0.28);
+    border-radius: 999px;
+    font-size: 0.75rem;
+}
+
+.checkpoint-day {
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+}
+
+.checkpoint-amount {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+debt-snowball-card .checkpoint-chip .delete-checkpoint-btn {
+    height: auto;
+    min-height: 0;
+    padding: 0 0.1rem;
+    font-size: 0.75rem;
+    line-height: 1;
+    background: transparent;
+    color: var(--danger-color);
+    border: none;
+    cursor: pointer;
+}
+
+@container snowball (max-width: 560px) {
+    .checkpoints-bar {
+        align-items: stretch;
+    }
+
+    .checkpoint-add {
+        margin-left: 0;
+        flex: 1 1 100%;
+    }
+
+    .checkpoint-add input {
+        flex: 1;
+        width: auto;
+        min-width: 0;
+    }
 }
 
 /* ===== Tab Panels ===== */
@@ -9730,70 +10323,183 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
         font-size: 0.7rem;
         padding: 0.18rem 0.4rem;
     }
-}`;
+}
+
+/* Narrow cards: title on its own line, buttons and version underneath. */
+@container snowball (max-width: 560px) {
+    .header {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        row-gap: 0.45rem;
+    }
+
+    .header-title {
+        justify-content: center;
+    }
+
+    .header h1 {
+        font-size: clamp(1.05rem, 5.2cqi, 1.35rem);
+        text-align: center;
+    }
+
+    .header-actions {
+        grid-column: 1;
+        grid-row: 2;
+        justify-content: center;
+    }
+
+    .version-badge {
+        grid-column: 1;
+        grid-row: 3;
+        justify-self: center;
+    }
+
+    .header-actions .header-action {
+        width: 2.25rem;
+        height: 2.25rem;
+        min-width: 2.25rem;
+    }
+
+    .header-action-icon {
+        width: 1.05rem;
+        height: 1.05rem;
+    }
+}
+
+/* Cash-flow rows follow the card width. The viewport media query never
+   fires when a narrow panel sits on a wide screen. */
+@container snowball (max-width: 720px) {
+    .schedule-row {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        min-width: 0;
+    }
+
+    .schedule-date-col {
+        width: auto;
+        min-width: 0;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.15rem;
+        flex-shrink: 0;
+    }
+
+    .schedule-icon {
+        font-size: 1.15rem;
+        line-height: 1;
+    }
+
+    .schedule-day {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        text-align: center;
+    }
+
+    .schedule-info-col {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .schedule-name {
+        font-size: 0.9rem;
+    }
+
+    .schedule-detail {
+        font-size: 0.68rem;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+    }
+
+    .schedule-right-col {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.15rem;
+        flex-shrink: 0;
+    }
+
+    .schedule-amount-col {
+        min-width: 0;
+        font-size: 0.875rem;
+    }
+
+    .schedule-balance-col {
+        font-size: 0.72rem;
+        font-weight: 600;
+        min-width: 0;
+        padding: 0;
+        background: transparent;
+    }
+
+    .col-label {
+        display: none;
+    }
+
+    .schedule-action-col {
+        flex: 1 0 100%;
+        flex-direction: row !important;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 0;
+    }
+
+    .btn-mark-paid,
+    .btn-edit-inline,
+    .btn-override-min {
+        font-size: 0.7rem;
+        padding: 0.22rem 0.45rem;
+        min-height: 0;
+        white-space: nowrap;
+    }
+}
+
+`;
   var PANEL_HTML = `<div class="app-container">
         <header class="header">
-            <div style="display:flex;flex-direction:column;align-items:flex-start;">
+            <div class="header-title">
                 <h1>Debt Snowball Tracker</h1>
-                <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})" style="font-size:0.65rem;color:var(--text-secondary);opacity:0.6;margin-top:0.25rem;">v${PANEL_VERSION}</span>
             </div>
+            <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})">v${PANEL_VERSION}</span>
             <div class="header-actions">
-                <button id="sanity-badge" class="btn btn-secondary" style="display:none; background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4); color: #fbbf24;" title="Unusual data patterns detected \u2014 click to review">\u26A0\uFE0F <span id="sanity-count">0</span></button>
-                <button id="history-btn" class="btn btn-secondary" style="background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.4); color: #c084fc;">\u{1F4C5} History</button>
-                <label for="import-file" class="btn btn-secondary" style="background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: #60a5fa;">
-                    Import Data
-                    <input type="file" id="import-file" accept=".json" style="display: none;">
-                </label>
-                <button id="export-btn" class="btn btn-secondary" style="background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.4); color: #4ade80;">Export Data</button>
+                <button id="sanity-badge" class="btn btn-secondary header-action" style="display:none;" title="Unusual data patterns detected \u2014 click to review" aria-label="Review data warnings"><svg class="header-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 2.5 20h19L12 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="header-action-label"><span id="sanity-count">0</span></span></button>
+                <button id="history-btn" class="btn btn-secondary header-action" title="History" aria-label="History"><svg class="header-action-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+                <label for="import-file" class="btn btn-secondary header-action" title="Import data" aria-label="Import data"><svg class="header-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 11.5 12 16l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><input type="file" id="import-file" accept=".json" style="display: none;"></label>
+                <button id="export-btn" class="btn btn-secondary header-action" title="Export data" aria-label="Export data"><svg class="header-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5M7.5 8.5 12 4l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
             </div>
         </header>
 
         <div class="month-nav">
-            <button id="plan-prev-month-btn" class="btn btn-secondary btn-sm" style="visibility:hidden;">\u2190 Previous</button>
+            <div class="month-nav-slot">
+                <button id="plan-prev-month-btn" class="month-nav-btn" style="visibility:hidden;" title="Previous month" aria-label="Previous month"><svg class="month-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6 8.5 12l6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            </div>
             <div class="month-title" id="global-month-title"></div>
-            <button id="plan-next-month-btn" class="btn btn-primary btn-sm" style="visibility:hidden;">Current Month \u2192</button>
-            <button id="advance-month-btn" class="btn btn-secondary btn-sm" title="Archive this month and start fresh for next month early">\u23ED Skip to Next</button>
+            <div class="month-nav-slot month-nav-slot-end">
+                <button id="plan-next-month-btn" class="month-nav-btn" style="visibility:hidden;" title="Current month" aria-label="Current month"><svg class="month-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6 15.5 12l-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                <button id="advance-month-btn" class="month-nav-btn" title="Generate next month" aria-label="Generate next month"><svg class="month-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 7 11 12l-5.5 5M13 7l5.5 5L13 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            </div>
         </div>
 
         <nav class="tab-nav">
-            <button class="tab-btn active" data-tab="payment-plan"><span class="tab-icon">&#128197;</span><span class="tab-label"> Cash Flow</span></button>
-            <button class="tab-btn" data-tab="budgets"><span class="tab-icon">&#128176;</span><span class="tab-label"> Budgets</span></button>
-            <button class="tab-btn" data-tab="income"><span class="tab-icon">&#128181;</span><span class="tab-label"> Income & Bills</span></button>
-            <button class="tab-btn" data-tab="debts"><span class="tab-icon">&#128179;</span><span class="tab-label"> Debts</span></button>
-            <button class="tab-btn" data-tab="timeline"><span class="tab-icon">&#128202;</span><span class="tab-label"> Timeline</span></button>
+            <button class="tab-btn active" data-tab="payment-plan" title="Cash Flow"><span class="tab-icon">&#128197;</span><span class="tab-label"> Cash Flow</span></button>
+            <button class="tab-btn" data-tab="budgets" title="Budgets"><span class="tab-icon">&#128176;</span><span class="tab-label"> Budgets</span></button>
+            <button class="tab-btn" data-tab="income" title="Income & Bills"><span class="tab-icon">&#128181;</span><span class="tab-label"> Income & Bills</span></button>
+            <button class="tab-btn" data-tab="debts" title="Debts"><span class="tab-icon">&#128179;</span><span class="tab-label"> Debts</span></button>
+            <button class="tab-btn" data-tab="timeline" title="Timeline"><span class="tab-icon">&#128202;</span><span class="tab-label"> Timeline</span></button>
         </nav>
 
         <main class="main-content">
+            <h2 id="tab-page-title" class="tab-page-title"></h2>
 
             <div class="tab-panel active" id="tab-payment-plan">
 
-                <section id="balance-checkpoints-card" class="card" style="margin-bottom: 1.5rem;">
-                    <div style="margin-bottom: 1rem;">
-                        <h2 style="margin-bottom: 0.25rem;">\u{1F4B0} Cash Position</h2>
-                        <p class="subtitle" style="margin-bottom:0; font-size: 0.85rem;">Track your bank balance throughout the month. Add your Day 1 balance as a checkpoint on day 1.</p>
-                    </div>
-
-                    <!-- Existing Checkpoints List -->
-                    <div id="checkpoints-list" style="margin-bottom: 1rem;"></div>
-
-                    <!-- Add New Checkpoint -->
-                    <div id="add-checkpoint-row" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                        <span style="font-size: 0.875rem; color: var(--text-secondary);">Add checkpoint on day</span>
-                        <select id="new-checkpoint-day" style="width: 65px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
-                            ${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("")}
-                        </select>
-                        <span style="font-size: 0.875rem; color: var(--text-secondary);">for</span>
-                        <input type="number" id="new-checkpoint-amount" step="0.01" placeholder="Amount"
-                            style="width: 100px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
-                        <button id="add-checkpoint-btn" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.8rem; white-space: nowrap;">+ Add</button>
-                    </div>
-                </section>
-
-                <section id="payment-plan-section" class="card" style="display: none; margin-bottom: 1.5rem;">
-                    <!-- Month Overview Dashboard (at top) -->
+                <section id="month-overview-card" class="card month-overview-card" style="display: none;">
                     <div class="month-overview">
                         <div class="month-overview-header">
-                            <div class="month-overview-title">\u{1F4CA} Month Overview</div>
+                            <h2 class="cashflow-card-title">Month Overview</h2>
                             <div class="month-overview-subtitle">From the complete Cash Flow schedule</div>
                         </div>
 
@@ -9830,29 +10536,40 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                         </details>
                     </div>
 
-                    <!-- Runway Dashboard -->
-                    <div style="margin-bottom: 1rem;">
-                        <div class="forecast-bar" id="runway-dashboard" style="padding: 0.75rem; background: rgba(7,6,26,0.4); border-radius: 8px;">
-                            <div class="forecast-item">
-                                <span class="forecast-label">Next Paycheck:</span>
-                                <span id="runway-next-paycheck" class="forecast-value">-</span>
-                            </div>
-                            <div class="forecast-item">
-                                <span class="forecast-label">Lowest Balance:</span>
-                                <span id="runway-min-project" class="forecast-value">$0.00</span>
-                            </div>
-                            <div class="forecast-item">
-                                <span class="forecast-label">Status:</span>
-                                <span id="runway-status" class="forecast-value">Safe</span>
-                            </div>
+                    <div class="forecast-bar" id="runway-dashboard" style="padding: 0.75rem; background: rgba(7,6,26,0.4); border-radius: 8px;">
+                        <div class="forecast-item">
+                            <span class="forecast-label">Next Paycheck:</span>
+                            <span id="runway-next-paycheck" class="forecast-value">-</span>
+                        </div>
+                        <div class="forecast-item">
+                            <span class="forecast-label">Lowest Balance:</span>
+                            <span id="runway-min-project" class="forecast-value">$0.00</span>
+                        </div>
+                        <div class="forecast-item">
+                            <span class="forecast-label">Status:</span>
+                            <span id="runway-status" class="forecast-value">Safe</span>
                         </div>
                     </div>
+                </section>
 
-                    <!-- Cash Flow Schedule List -->
-                    <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; font-weight: 600;">\u{1F4CB} Cash Flow Schedule</div>
-                    <div id="payment-plan-list" class="payment-schedule">
+                <section id="balance-checkpoints-card" class="card checkpoints-card">
+                    <div class="checkpoints-bar">
+                        <h2 class="cashflow-card-title">Checkpoints</h2>
+                        <div id="add-checkpoint-row" class="checkpoint-add">
+                            <select id="new-checkpoint-day" aria-label="Checkpoint day">
+                                ${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("")}
+                            </select>
+                            <input type="number" id="new-checkpoint-amount" step="0.01" placeholder="Balance" aria-label="Checkpoint balance">
+                            <button id="add-checkpoint-btn" class="btn btn-secondary">Add</button>
                         </div>
-                    </section>
+                    </div>
+                    <div id="checkpoints-list" class="checkpoints-list"></div>
+                </section>
+
+                <section id="payment-plan-section" class="card" style="display: none;">
+                    <h2 class="cashflow-card-title">Cash Flow Schedule</h2>
+                    <div id="payment-plan-list" class="payment-schedule"></div>
+                </section>
             </div>
 
             <div class="tab-panel" id="tab-budgets">
@@ -9862,19 +10579,20 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                             <h2>Spending Budgets</h2>
                             <p class="subtitle" style="margin-bottom:0;">Set a monthly limit per category and track day-to-day spending against it. Card-charged bills are logged here automatically as they post. Expenses clear at month end.</p>
                         </div>
-                        <div class="budget-header-actions">
-                            <div class="expense-defaults" title="Applied automatically to new expenses \u2014 each entry can still be changed individually">
-                                <label for="expense-default-method">New expenses:</label>
-                                <select id="expense-default-method">
-                                    <option value="card">\u{1F4B3} Card</option>
-                                    <option value="direct">\u{1F3E6} Cash/Debit</option>
-                                </select>
-                                <select id="expense-default-card" title="Default card for new expenses"></select>
-                            </div>
-                            <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
-                        </div>
                     </div>
-                    <div id="budgets-list" style="margin-top: 0.25rem;"></div>
+                    <div id="budget-summary"></div>
+                    <div class="expense-defaults" title="Applied automatically to new expenses \u2014 each entry can still be changed individually">
+                        <label for="expense-default-method">New expenses:</label>
+                        <select id="expense-default-method">
+                            <option value="card">\u{1F4B3} Card</option>
+                            <option value="direct">\u{1F3E6} Cash/Debit</option>
+                        </select>
+                        <select id="expense-default-card" title="Default card for new expenses"></select>
+                    </div>
+                    <div id="budgets-list"></div>
+                    <div class="budget-add-footer">
+                        <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
+                    </div>
                 </section>
             </div>
 
@@ -9896,13 +10614,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                     <div class="section-header">
                         <div>
                             <h2>Fixed Bills</h2>
-                            <p class="subtitle" style="margin-bottom:0;">
-                                Bills with a due date \u2014 <strong>Direct-pay</strong> bills appear in Cash Flow, <strong>card-paid</strong> bills auto-log to Budgets as they post.<br>
-                                <strong>Recurring</strong> = Every month \xB7 
-                                <strong>Quarterly</strong> = Every 3 months \xB7 
-                                <strong>Annual</strong> = Once per year \xB7 
-                                <strong style="color:var(--danger-color);">One-Time</strong> = This month only (deleted next month)
-                            </p>
+                            <p class="subtitle" style="margin-bottom:0;">Direct-pay bills appear in Cash Flow. Card bills are logged to Budgets as they post.</p>
                         </div>
                         <button id="add-cost-btn" class="btn btn-warning">+ Add Bill</button>
                     </div>
@@ -9946,14 +10658,18 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                     </div>
                     <p id="strategy-desc" class="subtitle strategy-desc-text"></p>
                     <div class="summary-stats">
-                        <div class="stat-box">
-                            <span class="stat-label">Total Debt</span>
-                            <span id="stat-total-debt" class="stat-value">$0.00</span>
-                        </div>
                         <div class="stat-box stat-box-countdown" id="stat-countdown-box" style="display:none;">
                             <span class="stat-label">Days Until Debt-Free</span>
                             <span id="stat-countdown" class="stat-value stat-countdown-value">-</span>
                             <span id="stat-payoff-date" class="stat-countdown-date">-</span>
+                        </div>
+                        <div class="stat-box" id="stat-savings-box" style="display:none;">
+                            <span class="stat-label" id="stat-savings-label">vs. Other Strategy</span>
+                            <span id="stat-savings" class="stat-value stat-savings-value">-</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">Total Debt</span>
+                            <span id="stat-total-debt" class="stat-value">$0.00</span>
                         </div>
                         <div class="stat-box" id="stat-payoff-box" style="display:none;">
                             <span class="stat-label">Estimated Debt-Free Date</span>
@@ -9963,17 +10679,16 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                             <span class="stat-label">Total Interest Paid</span>
                             <span id="stat-total-interest" class="stat-value">$0.00</span>
                         </div>
-                        <div class="stat-box" id="stat-savings-box" style="display:none;">
-                            <span class="stat-label" id="stat-savings-label">vs. Other Strategy</span>
-                            <span id="stat-savings" class="stat-value stat-savings-value">-</span>
-                        </div>
                     </div>
                     <div id="windfall-bar" style="display:none;" class="windfall-bar">
                         <span class="windfall-bar-label">&#128176; Got a windfall?</span>
                         <button id="windfall-btn" class="btn btn-windfall">Run Lump Sum Planner</button>
                     </div>
                     <div class="chart-wrapper">
-                        <canvas id="paydown-chart" aria-label="Paydown chart" role="img"></canvas>
+                        <h3 id="paydown-chart-title" class="chart-title">Burndown</h3>
+                        <div class="chart-canvas-frame">
+                            <canvas id="paydown-chart" aria-label="Burndown chart" role="img"></canvas>
+                        </div>
                     </div>
                     <div id="timeline-chart" class="timeline-container">
                         </div>
@@ -10150,7 +10865,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-cost-modal">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Save Bill</button>
+                    <button type="submit" id="cost-save-btn" class="btn btn-secondary">Save Bill</button>
                 </div>
             </form>
         </div>

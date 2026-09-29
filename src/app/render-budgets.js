@@ -35,6 +35,7 @@ function getBudgetAmount(budget) {
 
 function renderSpendingBudgets() {
     const container = appState._root.getElementById('budgets-list');
+    const summaryEl = appState._root.getElementById('budget-summary');
     if (!container) return;
 
     const archive  = getArchive();
@@ -60,8 +61,6 @@ function renderSpendingBudgets() {
     // Budget meta bar — viewed month + totals across all budgets
     const totalBudgeted = budgets.reduce((s, b) => s + getBudgetAmount(b), 0);
     const totalSpent    = budgets.reduce((s, b) => s + (b.expenses || []).reduce((x, e) => x + e.amount, 0), 0);
-    const totalOver     = totalSpent - totalBudgeted;
-    const metaSpentClass = totalOver > 0 ? 'budget-meta-over' : 'budget-meta-ok';
 
     const archiveBanner = archive ? `
         <div class="budget-meta-bar" style="border-color:var(--warning-color);">
@@ -72,16 +71,18 @@ function renderSpendingBudgets() {
 
     const metaBar = `
         <div class="budget-meta-bar">
-            <span class="budget-meta-month">📅 ${monthName}</span>
-            <div class="budget-meta-divider"></div>
-            <span class="budget-meta-budgeted">${budgets.length} budget${budgets.length !== 1 ? 's' : ''} · ${formatMoney(totalBudgeted)} total limit</span>
+            <span class="budget-meta-month">${monthName}</span>
             <span class="budget-meta-total">
-                <span class="budget-meta-budgeted">Spent:</span>
-                <span class="${metaSpentClass}">${formatMoney(totalSpent)}</span>
-                ${totalOver > 0
-                    ? `<span class="budget-meta-over" style="font-size:0.75rem;">⚠ ${formatMoney(totalOver)} over</span>`
-                    : `<span class="budget-meta-ok" style="font-size:0.75rem;">${formatMoney(totalBudgeted - totalSpent)} left</span>`}
+                <span class="budget-meta-budgeted">Spent</span>
+                <span class="budget-meta-ratio">${formatMoney(totalSpent)} / ${formatMoney(totalBudgeted)}</span>
             </span>
+        </div>`;
+
+    const remaining = totalBudgeted - totalSpent;
+    const remainingBlock = `
+        <div class="budget-summary-remaining${remaining < 0 ? ' is-over' : ''}">
+            <span class="budget-summary-remaining-amount">${formatMoney(Math.abs(remaining))}</span>
+            <span class="budget-summary-remaining-label">${remaining < 0 ? 'Over Budget' : 'Total Budget Remaining'}</span>
         </div>`;
 
     // Card pay-in-full check: everything charged to cards this month should be
@@ -107,19 +108,18 @@ function renderSpendingBudgets() {
         return `<div class="card-charge-item"><span>${escHtml(it.name)}</span><span>${formatMoney(it.amount)} · ${escHtml(cardName)}</span></div>`;
     }).join('');
     const cardStrip = !archive && payoff.cardCharges > 0 ? `
-        <div class="budget-meta-bar" style="margin-top:0.5rem; flex-wrap:wrap; row-gap:0.35rem;">
+        <div class="budget-summary-charges">
             <details class="card-charges-detail">
-                <summary class="budget-meta-budgeted" title="Click to see which charges make up this total">💳 Charged to cards this month: ${formatMoney(payoff.cardCharges)}</summary>
+                <summary class="budget-meta-budgeted" title="Click to see which charges make up this total">Card charges ${formatMoney(payoff.cardCharges)}</summary>
                 <div class="card-charge-items">
                     ${chargeItems}
                     <div class="card-charge-item card-charge-hint">Missing a charge? A bill or expense only counts when its payment method is set to a card.</div>
                 </div>
             </details>
-            ${perCard.length > 0 ? `<span style="font-size:0.75rem; color:var(--text-secondary);">${perCard.join(' · ')}</span>` : ''}
-            <div class="budget-meta-divider"></div>
+            ${perCard.length > 1 ? `<span class="budget-cover-note">${perCard.join(' · ')}</span>` : ''}
             ${payoff.sustainable
-                ? `<span class="budget-meta-ok" title="Income covers this month's charges on top of direct costs, cash spending, and planned card payments">✓ Covered — card charges funded by income/card payments</span>`
-                : `<span class="budget-meta-over" title="Card charges exceed what this month's income can cover after costs and payments — the card balance will grow">⚠ ${formatMoney(payoff.shortfall)} beyond what income can cover</span>`}
+                ? `<span class="budget-cover-status" title="Income covers this month's card charges on top of direct costs and planned card payments"><span class="budget-cover-badge">Covered</span><span class="budget-cover-note">Card expenses covered by income</span></span>`
+                : `<span class="budget-cover-status is-short" title="Card charges exceed what this month's income can cover after costs and payments"><span class="budget-cover-badge">Short</span><span class="budget-cover-note">${formatMoney(payoff.shortfall)} beyond income</span></span>`}
         </div>` : '';
 
     // Inline quick-add Paid Via default comes from the user's expense defaults
@@ -172,7 +172,7 @@ function renderSpendingBudgets() {
                     <span class="expense-amount" style="color:var(--expense-color);">−${formatMoney(exp.amount)}</span>
                     <div class="expense-actions">
                         ${exp.autoCard ? '' : `<button class="btn-icon btn-edit-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Edit">✎</button>`}
-                        ${exp.autoCard ? '' : `<button class="btn-icon btn-expense-torecurring" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Convert to recurring bill">🔁</button>`}
+                        ${exp.autoCard ? '' : `<button class="btn-icon btn-expense-torecurring" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Convert to recurring bill" aria-label="Convert to recurring bill"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 12a8 8 0 0 1 13.7-5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M16 3.5h2.5V6M8 20.5H5.5V18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`}
                         <button class="btn-icon btn-delete-expense" data-budget-id="${budget.id}" data-expense-id="${exp.id}" title="Delete">✕</button>
                     </div>
                 </div>`;
@@ -257,7 +257,16 @@ function renderSpendingBudgets() {
         </div>`;
     }).join('');
 
-    container.innerHTML = archiveBanner + metaBar + cardStrip + cards;
+    if (summaryEl) {
+        summaryEl.innerHTML = `
+            <div class="budget-summary-card">
+                ${archiveBanner}
+                ${metaBar}
+                ${remainingBlock}
+                ${cardStrip}
+            </div>`;
+    }
+    container.innerHTML = cards;
 
     // Expense-defaults picker — reflect prefs and the current card list
     const defMethod = appState._root.getElementById('expense-default-method');

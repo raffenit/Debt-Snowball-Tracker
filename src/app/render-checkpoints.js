@@ -41,23 +41,13 @@ function renderCheckpointsList() {
         }).format(n);
     };
 
-    const listHtml = sorted.map(cp => `
-        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: rgba(168,85,247,0.06); border-radius: 6px; border: 1px solid rgba(168,85,247,0.2);">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(168,85,247,0.15); padding: 0.2rem 0.4rem; border-radius: 4px;"${cp.autoRollover ? ' title="Carried over from last month\'s final balance"' : ''}>Day ${cp.day}${cp.autoRollover ? ' · auto' : ''}</span>
-                <span style="font-weight: 500; color: var(--text-primary);">${formatMoneyLocal(cp.amount)}</span>
-            </div>
-            ${archive ? '' : `
-            <button class="btn btn-icon delete-checkpoint-btn" data-id="${cp.id}" title="Remove checkpoint" style="padding: 0.25rem; font-size: 0.75rem; background: transparent; color: var(--danger-color); border: none; cursor: pointer;">
-                ✕
-            </button>`}
+    container.innerHTML = sorted.map(cp => `
+        <div class="checkpoint-chip">
+            <span class="checkpoint-day"${cp.autoRollover ? ' title="Carried over from last month\'s final balance"' : ''}>Day ${cp.day}${cp.autoRollover ? ' · auto' : ''}</span>
+            <span class="checkpoint-amount">${formatMoneyLocal(cp.amount)}</span>
+            ${archive ? '' : `<button class="btn btn-icon delete-checkpoint-btn" data-id="${cp.id}" title="Remove checkpoint">✕</button>`}
         </div>
     `).join('');
-
-    container.innerHTML = `
-        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${archive ? 'Checkpoints (archived):' : 'Mid-month checkpoints:'}</div>
-        ${listHtml}
-    `;
 }
 
 function openCheckpointModal(cpId = null) {

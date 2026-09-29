@@ -20,14 +20,21 @@ const DEBT_COLORS = [
 
 function renderPaydownChart(monthlyTotals, perDebtMonthly) {
     const canvas = appState._root.getElementById('paydown-chart');
+    const chartTitle = appState._root.getElementById('paydown-chart-title');
     if (!canvas) return;
 
     // destroy() can throw if the chart is already torn down — safe to ignore
     if (appState.paydownChart) { try { appState.paydownChart.destroy(); } catch(e) {} appState.paydownChart = null; }
 
+    const frame = canvas.parentElement;
     const maxLen = monthlyTotals.length;
-    if (maxLen === 0) { canvas.style.height = '0'; return; }
-    canvas.style.height = '300px';
+    if (maxLen === 0) {
+        if (frame) frame.style.height = '0';
+        if (chartTitle) chartTitle.style.display = 'none';
+        return;
+    }
+    if (chartTitle) chartTitle.style.display = '';
+    if (frame) frame.style.height = '';
 
     const labels = monthlyTotals.map((_,i) => {
         const d = new Date();

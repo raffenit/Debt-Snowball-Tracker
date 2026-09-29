@@ -16,7 +16,7 @@ const PANEL_CSS = `
 }
 
 :root {
-    --bg-color: #07061a;           /* Deep midnight */
+    --bg-color: #020108;           /* Near-black midnight */
     --card-bg: #0f0d2a;            /* Dark indigo */
     --card-bg-2: #13113a;          /* Slightly lighter indigo */
     --text-primary: #ede9ff;       /* Lavender white */
@@ -51,74 +51,206 @@ debt-snowball-card {
     max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
+    container-type: inline-size;
+    container-name: snowball;
 }
 
 body {
     font-family: 'DM Sans', 'Outfit', ui-sans-serif, system-ui, sans-serif;
     background-color: var(--bg-color);
     background-image:
-        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(60, 80, 220, 0.18) 0%, transparent 70%),
-        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(40, 60, 180, 0.12) 0%, transparent 60%);
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(40, 50, 140, 0.10) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(30, 40, 110, 0.06) 0%, transparent 60%);
     color: var(--text-primary);
     line-height: 1.5;
     min-height: 100vh;
 }
 
+debt-snowball-card {
+    background-color: var(--bg-color);
+    background-image:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(40, 50, 140, 0.10) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(30, 40, 110, 0.06) 0%, transparent 60%);
+}
+
 .app-container {
+    --page-pad: 1rem;
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
-    padding: 1rem;
+    padding: 0 0 var(--page-pad);
     min-height: 100vh;
     box-sizing: border-box;
 }
 
+.app-container > :not(.header) {
+    margin-left: var(--page-pad);
+    margin-right: var(--page-pad);
+}
+
 .header {
-    display: flex;
-    justify-content: space-between;
+    --header-size: clamp(1.15rem, 6.2cqi, 2rem);
+    --header-ink: #1b1630;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 1rem;
+    row-gap: 0.28rem;
     align-items: center;
-    margin-bottom: 1rem;
+    margin: 0 0 1.15rem;
+    padding: 0.9rem var(--page-pad) 0.8rem;
+    background: linear-gradient(110deg, #7ab0ff 0%, #5b7fff 42%, #9b6dff 100%);
+    color: var(--header-ink);
+    border-bottom: 1px solid rgba(27, 22, 48, 0.28);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.header-title {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    min-width: 0;
 }
 
 .header h1 {
-    font-size: 1.5rem;
+    font-size: var(--header-size);
     font-weight: 700;
     letter-spacing: -0.04em;
+    line-height: 1;
+    white-space: nowrap;
     font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
-    background: linear-gradient(110deg, #7ab0ff 0%, #5b7fff 40%, #9b6dff 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--header-ink);
+}
+
+.version-badge {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+    font-size: 0.65rem;
+    color: #241e38;
+    opacity: 1;
+    line-height: 1;
 }
 
 .header-actions {
+    grid-column: 2;
+    grid-row: 1;
     display: flex;
-    gap: 0.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.header-actions .header-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: var(--header-size);
+    height: var(--header-size);
+    min-width: var(--header-size);
+    min-height: 0;
+    padding: 0;
+    line-height: 1;
+    background: rgba(27, 22, 48, 0.14);
+    border: 1px solid rgba(27, 22, 48, 0.32);
+    color: var(--header-ink);
+    border-radius: 8px;
+}
+
+.header-actions .header-action:hover {
+    background: rgba(27, 22, 48, 0.22);
+    color: var(--header-ink);
+}
+
+.header-action-icon {
+    width: calc(var(--header-size) * 0.48);
+    height: calc(var(--header-size) * 0.48);
+    display: block;
+}
+
+#sanity-badge.header-action {
+    width: auto;
+    gap: 0.28rem;
+    padding: 0 0.55rem;
+    background: rgba(168, 96, 16, 0.14);
+    border-color: rgba(140, 78, 8, 0.35);
+    color: #8a4b08;
+}
+
+.header-action-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
 }
 
 .month-nav {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    padding: 0.15rem 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.month-nav-slot {
     display: flex;
     align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.month-nav-slot-end {
+    justify-content: flex-end;
+}
+
+.month-nav-btn {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
-    padding: 0.5rem;
-    background: linear-gradient(135deg, rgba(91,127,255,0.08) 0%, rgba(168,85,247,0.05) 50%, rgba(91,127,255,0.08) 100%);
-    border-radius: 10px;
-    border: 1px solid rgba(91,127,255,0.15);
+    flex: 0 0 auto;
+    width: 2.5rem;
+    height: 2.5rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-primary);
+    font-family: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.month-nav-icon {
+    width: 1.2rem;
+    height: 1.2rem;
+    display: block;
+}
+
+.month-nav-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--border-bright);
 }
 
 .month-title {
-    font-size: 1.25rem;
+    font-size: clamp(1.2rem, 4.5cqi, 1.45rem);
     font-weight: 700;
-    letter-spacing: -0.01em;
+    white-space: nowrap;
+    letter-spacing: 0.04em;
+    line-height: 1.15;
     background: linear-gradient(110deg, #a5b8ff 0%, #c084fc 50%, #a5b8ff 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
     text-transform: uppercase;
-    min-width: 140px;
     text-align: center;
+    min-width: 0;
 }
 
 .btn {
@@ -425,6 +557,104 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     margin-bottom: 1.5rem;
 }
 
+.health-modal {
+    max-width: 460px;
+    text-align: left;
+}
+
+.health-modal .modal-header {
+    margin-bottom: 0.65rem;
+}
+
+.health-modal .modal-header h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    line-height: 1.25;
+}
+
+.health-body {
+    margin: 0 0 0.85rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    text-align: left;
+}
+
+.health-body strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.health-issues {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+    max-height: 40vh;
+    overflow-y: auto;
+    margin: 0 0 1rem;
+    text-align: left;
+}
+
+.health-issue {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+}
+
+.health-issue-tag {
+    flex-shrink: 0;
+    margin-top: 0.12rem;
+    padding: 0.12rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1.3;
+}
+
+.health-issue-repaired,
+.health-issue-warning {
+    background: rgba(245, 158, 11, 0.16);
+    color: #fbbf24;
+}
+
+.health-issue-notice {
+    background: rgba(91, 127, 255, 0.14);
+    color: #c5d0ff;
+}
+
+.health-issue-fatal {
+    background: rgba(244, 88, 122, 0.16);
+    color: #ffc2d0;
+}
+
+.health-issue-text {
+    font-size: 0.85rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    text-align: left;
+}
+
+.health-issue-text strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.health-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.health-actions .btn {
+    width: auto;
+    min-height: 0;
+    white-space: nowrap;
+}
+
 .close-modal, .close-income-modal, .close-cost-modal {
     background: transparent;
     border: none;
@@ -449,25 +679,33 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* Summary Stats */
 .summary-stats {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1.25rem;
-    margin-bottom: 2rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+    margin-bottom: 1.25rem;
 }
 
 .stat-box {
     background-color: rgba(7, 6, 26, 0.6);
-    padding: 1.25rem;
+    padding: 0.7rem 0.8rem;
     border-radius: 8px;
     border: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.15rem;
     box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
 }
 
+.stat-label,
+.stat-value,
+.stat-countdown-date {
+    display: block;
+    width: 100%;
+}
+
 .stat-label {
-    font-size: 0.875rem;
+    font-size: 0.8rem;
     font-weight: 500;
+    line-height: 1.2;
     color: var(--text-secondary);
 }
 
@@ -493,9 +731,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     margin-bottom: 1rem;
 }
 
+.chart-title {
+    margin: 0 0 0.45rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.chart-canvas-frame {
+    position: relative;
+    height: 260px;
+}
+
 #paydown-chart {
     width: 100%;
-    height: 260px;
+    height: 100%;
     display: block;
 }
 
@@ -594,7 +846,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ===== Tablet (≤ 1024px) ===== */
 @media (max-width: 1024px) {
     .app-container {
-        padding: 0.875rem;
+        --page-pad: 0.875rem;
     }
 
     .summary-stats {
@@ -653,18 +905,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ===== Mobile (≤ 640px) ===== */
 @media (max-width: 640px) {
     .app-container {
-        padding: 0.75rem;
+        --page-pad: 0.75rem;
     }
 
     .header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.5rem;
         margin-bottom: 0.75rem;
-    }
-
-    .header h1 {
-        font-size: 1.25rem;
     }
 
     .tab-nav {
@@ -685,24 +930,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     .month-nav .btn-sm {
         padding: 0.35rem 0.625rem;
         font-size: 0.75rem;
-    }
-
-    .month-title {
-        font-size: 1rem;
-        min-width: 100px;
-    }
-
-    .header-actions {
-        width: 100%;
-        flex-wrap: wrap;
-    }
-
-    .header-actions .btn {
-        flex: 1;
-        min-width: 0;
-        font-size: 0.875rem;
-        padding: 0.75rem 0.875rem;
-        min-height: 44px;
     }
 
     .debts-list {
@@ -787,7 +1014,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         padding: 0.3rem;
         gap: 0.2rem;
         margin-bottom: 1.25rem;
-        overflow-x: auto;
     }
 
     .tab-btn {
@@ -917,21 +1143,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ===== Small phone (≤ 480px) ===== */
 @media (max-width: 480px) {
     .app-container {
-        padding: 0.625rem;
-    }
-    
-    .month-title {
-        font-size: 0.875rem;
-        min-width: 80px;
+        --page-pad: 0.625rem;
     }
     
     .month-nav .btn-sm {
         padding: 0.3rem 0.5rem;
         font-size: 0.7rem;
-    }
-
-    .header h1 {
-        font-size: 1.5rem;
     }
 
     .summary-stats {
@@ -940,7 +1157,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }
 
     .stat-box {
-        padding: 1rem 0.875rem;
+        padding: 0.65rem 0.75rem;
     }
 
     .stat-label {
@@ -966,14 +1183,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     .tab-btn {
         padding: 0.6rem 0.375rem;
         font-size: 0.8rem;
-    }
-
-    .tab-label {
-        display: none;
-    }
-
-    .tab-icon {
-        font-size: 1.15rem;
     }
 
     .timeline-header {
@@ -1412,44 +1621,55 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 /* ===== Recurring Due-This-Month Summary Bar ===== */
 .recurring-due-summary {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.5rem 1.25rem;
-    padding: 0.7rem 1rem;
-    margin-bottom: 1.25rem;
-    border-radius: 0.4rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: 10px;
     background: rgba(240,160,80,0.08);
-    border-left: 3px solid var(--warning-color);
-    font-size: 1.1rem;
-    font-weight: 700;
+    border: 1px solid rgba(240,160,80,0.22);
     color: var(--text-primary);
-    min-height: 2.5rem;
 }
 
 .recurring-due-summary:empty {
     display: none;
 }
 
+.recurring-due-main {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 0.55rem;
+    width: 100%;
+}
+
 .recurring-due-label {
-    font-size: 0.72rem;
+    font-size: 0.78rem;
     font-weight: 600;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--warning-color);
-    margin-right: 0.25rem;
 }
 
 .recurring-due-total {
     font-size: 1.35rem;
     font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1;
     color: var(--warning-color);
 }
 
 .recurring-due-breakdown {
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
 }
 
 /* ===== Cost Sub-section Headers ===== */
@@ -1522,7 +1742,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     background: rgba(148,163,184,0.12);
     color: #94a3b8;
     border: 1px solid rgba(148,163,184,0.2);
-    margin-left: 0.3rem;
+    margin-left: 0;
 }
 
 .cost-card.not-due-month {
@@ -1538,23 +1758,21 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
 /* ===== Compact Cost Card Layout (Utility / Subscription) ===== */
 .cost-card-compact {
-    padding: 0.65rem 0.9rem !important;
+    padding: 0.85rem 1rem !important;
 }
 .cost-compact-body {
     display: flex;
-    align-items: center;
-    gap: 0.6rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
 }
-.cost-compact-info {
-    flex: 1;
-    min-width: 0;
-}
-.cost-compact-name-row {
+.cost-compact-top,
+.cost-compact-bottom {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: baseline;
-    gap: 0.5rem;
-    margin-bottom: 0.18rem;
+    gap: 0.65rem;
+    width: 100%;
 }
 .cost-compact-name {
     font-weight: 600;
@@ -1564,17 +1782,43 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     white-space: nowrap;
     min-width: 0;
     flex: 1;
+    text-align: left;
+}
+.cost-compact-amount-group {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.55rem;
+    flex-shrink: 0;
 }
 .cost-compact-amount {
     font-weight: 700;
     font-size: 0.95rem;
     flex-shrink: 0;
+    line-height: 1;
 }
 .cost-compact-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem;
-    margin-bottom: 0.25rem;
+    justify-content: flex-start;
+    align-items: center;
+    align-content: flex-start;
+    gap: 0.35rem;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+}
+.cost-compact-badges > span {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.16rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
 }
 .cost-compact-meta {
     font-size: 0.75rem;
@@ -1596,10 +1840,17 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     flex-shrink: 0;
 }
 .cost-compact-paid .btn {
-    font-size: 0.73rem !important;
-    padding: 0.28rem 0.55rem !important;
+    font-size: 0.75rem !important;
+    padding: 0.35rem 0.7rem !important;
     width: auto !important;
+    min-height: 0;
+    height: auto;
     white-space: nowrap;
+}
+.cost-mini-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
 }
 
 /* Badges on own line for full-layout cost cards */
@@ -1648,7 +1899,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     background: rgba(100,116,139,0.1);
     color: #64748b;
     border: 1px dashed rgba(100,116,139,0.3);
-    margin-left: 0.3rem;
+    margin-left: 0;
 }
 
 /* ===== Spending Budgets ===== */
@@ -1894,25 +2145,13 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 .expense-method-toggle {
-    background: rgba(91,127,255,0.12);
-    border: 1px solid rgba(91,127,255,0.25);
-    border-radius: 999px;
-    color: var(--text-secondary);
-    font-size: 0.7rem;
     font-family: inherit;
-    padding: 0.1rem 0.45rem;
     margin-left: 0.35rem;
     cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 .expense-method-toggle:hover {
-    background: rgba(91,127,255,0.25);
-    color: var(--text-primary);
-}
-.expense-method-toggle.is-card {
-    background: rgba(251,191,36,0.12);
-    border-color: rgba(251,191,36,0.3);
+    filter: brightness(1.15);
 }
 
 /* ===== Expense defaults picker ===== */
@@ -1923,17 +2162,84 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     flex-wrap: wrap;
     justify-content: flex-end;
 }
+.budget-add-footer {
+    margin-top: 0.85rem;
+}
 .expense-defaults {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.4rem;
+    margin: 0 0 1rem;
     font-size: 0.78rem;
     color: var(--text-secondary);
 }
+
+.budget-summary-card {
+    background: rgba(91, 127, 255, 0.06);
+    border: 1px solid rgba(91, 127, 255, 0.15);
+    border-radius: 10px;
+    margin-bottom: 0.85rem;
+    overflow: hidden;
+}
+
+.budget-summary-card .budget-meta-bar {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    background: transparent;
+}
+
+.budget-summary-card .budget-meta-bar + .budget-meta-bar {
+    border-top: 1px solid rgba(91, 127, 255, 0.15);
+}
+
+.budget-summary-remaining {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.65rem;
+    padding: 0.1rem 1rem 0.7rem;
+}
+
+.budget-summary-remaining-amount {
+    font-size: 1.65rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: var(--success-color);
+}
+
+.budget-summary-remaining.is-over .budget-summary-remaining-amount {
+    color: var(--danger-color);
+}
+
+.budget-summary-remaining-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.budget-summary-charges {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+    padding: 0.55rem 1rem;
+    border-top: 1px solid rgba(91, 127, 255, 0.15);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
 .expense-defaults select {
-    padding: 0.25rem 0.45rem;
+    width: auto;
+    min-width: 7.5rem;
+    max-width: 100%;
+    min-height: 0;
+    height: auto;
+    padding: 0.35rem 1.6rem 0.35rem 0.55rem;
     font-size: 0.78rem;
-    background: rgba(7,6,26,0.7);
+    line-height: 1.2;
+    background-color: rgba(7,6,26,0.7);
     border: 1px solid var(--border-bright);
     border-radius: 6px;
     color: var(--text-primary);
@@ -2089,6 +2395,11 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 .btn-icon.btn-delete-expense:hover {
     color: var(--danger-color);
 }
+.btn-expense-torecurring svg {
+    width: 1rem;
+    height: 1rem;
+    display: block;
+}
 .budget-card-actions {
     display: flex;
     gap: 0.5rem;
@@ -2223,9 +2534,50 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 .budget-meta-total {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 0.35rem;
-    margin-left: auto;
+    margin-left: 0;
     font-weight: 600;
+}
+
+.budget-meta-ratio {
+    color: #c5d0ff;
+    font-weight: 600;
+}
+
+.budget-cover-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.budget-cover-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.22rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(52, 201, 122, 0.2);
+    border: 1px solid rgba(52, 201, 122, 0.55);
+    color: #b8f5d4;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    line-height: 1.2;
+}
+
+.budget-cover-status.is-short .budget-cover-badge {
+    background: rgba(244, 88, 122, 0.18);
+    border-color: rgba(244, 88, 122, 0.5);
+    color: #ffc2d0;
+}
+
+.budget-cover-note {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    opacity: 0.7;
 }
 
 .budget-meta-budgeted {
@@ -2469,11 +2821,28 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
 /* ===== Month Overview ===== */
 .month-overview {
-    margin-bottom: 1.25rem;
-    padding: 1rem;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.05));
-    border: 1px solid rgba(99, 102, 241, 0.24);
-    border-radius: 12px;
+    margin-bottom: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+}
+
+.month-overview-card #runway-dashboard {
+    margin-top: 1rem;
+}
+
+.cashflow-card-title {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.month-overview-header .cashflow-card-title,
+.checkpoints-bar .cashflow-card-title {
+    margin-bottom: 0;
 }
 
 .month-overview-header {
@@ -2482,12 +2851,6 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     align-items: baseline;
     gap: 1rem;
     margin-bottom: 0.85rem;
-}
-
-.month-overview-title {
-    color: var(--text-primary);
-    font-size: 0.85rem;
-    font-weight: 700;
 }
 
 .month-overview-subtitle {
@@ -2628,6 +2991,32 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
     .month-overview-budgets > summary {
         flex-wrap: wrap;
+    }
+}
+
+/* A narrow card on a wide monitor never matches the viewport query above. */
+@container snowball (max-width: 760px) {
+    .month-overview-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .budget-header-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .expense-defaults {
+        flex-wrap: wrap;
+    }
+
+    .section-header .btn {
+        white-space: nowrap;
     }
 }
 
@@ -2922,11 +3311,18 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 
 .timeline-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 0.35rem;
+    gap: 0.25rem;
+}
+
+.timeline-interest {
+    display: block;
+    margin-bottom: 0.65rem;
+    font-size: 0.85rem;
+    line-height: 1.25;
+    color: var(--text-secondary);
 }
 
 .timeline-name {
@@ -3016,28 +3412,41 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     white-space: nowrap;
 }
 
-.debt-type-badge {
-    background: rgba(96, 165, 250, 0.18);
-    color: #93c5fd;
-    padding: 0.15rem 0.5rem;
-    border-radius: 12px;
-    font-size: 0.7rem;
+.debt-type-badge,
+.schedule-badge.card-badge,
+.schedule-badge.direct-badge,
+.expense-method-toggle {
+    display: inline-block;
+    width: auto;
+    margin: 0;
+    padding: 0.22rem 0.55rem;
+    border-radius: 8px;
+    font-size: 0.72rem;
     font-weight: 600;
-    border: 1px solid rgba(96, 165, 250, 0.3);
-    margin-left: 0.5rem;
+    letter-spacing: 0.01em;
+    line-height: 1.3;
     white-space: nowrap;
+    box-shadow: none;
+    text-shadow: none;
+    background: rgba(148, 163, 184, 0.12);
+    color: #cbd5e1;
+    border: 1px solid rgba(148, 163, 184, 0.35);
 }
 
-.card-badge {
-    background: rgba(99, 102, 241, 0.18);
+.card-badge,
+.schedule-badge.card-badge,
+.expense-method-toggle.is-card {
+    background: rgba(99, 102, 241, 0.14);
     color: #c7d2fe;
-    border-color: rgba(99, 102, 241, 0.45);
+    border-color: rgba(99, 102, 241, 0.4);
 }
 
-.direct-badge {
-    background: rgba(20, 184, 166, 0.18);
+.direct-badge,
+.schedule-badge.direct-badge,
+.expense-method-toggle:not(.is-card) {
+    background: rgba(20, 184, 166, 0.14);
     color: #99f6e4;
-    border-color: rgba(20, 184, 166, 0.45);
+    border-color: rgba(20, 184, 166, 0.4);
 }
 
 /* ===== Amount Type Badges ===== */
@@ -3046,7 +3455,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border-radius: 12px;
     font-size: 0.7rem;
     font-weight: 600;
-    margin-left: 0.4rem;
+    margin-left: 0;
     white-space: nowrap;
     display: inline-block;
 }
@@ -3282,17 +3691,35 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     flex-shrink: 0;
 }
 
-/* ===== Snowball/Avalanche Target Banner ===== */
+/* ===== Debt type + payoff-target labels ===== */
+.debt-label-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin-bottom: 0.85rem;
+}
+
+.debt-flag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
 .snowball-target-banner {
-    background: linear-gradient(135deg, rgba(91,127,255,0.22), rgba(52,201,122,0.12));
-    border: 1.5px solid rgba(91,127,255,0.55);
-    border-radius: 8px;
+    display: block;
+    align-self: stretch;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
     padding: 0.5rem 0.85rem;
     font-size: 0.82rem;
     font-weight: 700;
-    color: #c4d0ff;
-    margin-bottom: 0.85rem;
     letter-spacing: 0.01em;
+    line-height: 1.35;
+    background: linear-gradient(135deg, rgba(91,127,255,0.22), rgba(52,201,122,0.12));
+    border: 1.5px solid rgba(91,127,255,0.55);
+    color: #c4d0ff;
     box-shadow: 0 0 12px rgba(91,127,255,0.18), inset 0 0 12px rgba(91,127,255,0.06);
     text-shadow: 0 0 10px rgba(91,127,255,0.5);
 }
@@ -3676,7 +4103,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 .stat-countdown-date {
     font-size: 0.75rem;
     color: var(--text-secondary);
-    margin-top: 0.15rem;
+    margin-top: 0;
     font-weight: 500;
 }
 
@@ -3923,9 +4350,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border: 1px solid var(--border-color);
     border-radius: var(--radius);
     padding: 0.375rem;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-color) transparent;
+    overflow: hidden;
 }
 
 .tab-btn {
@@ -3954,6 +4379,145 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     background: var(--accent-color);
     color: white;
     box-shadow: 0 2px 12px rgba(91, 127, 255, 0.45);
+}
+
+.tab-nav.tabs-icons .tab-label {
+    display: none;
+}
+
+.tab-nav.tabs-icons .tab-btn {
+    flex: 1;
+    justify-content: center;
+    gap: 0;
+    padding: 0.5rem 0.35rem;
+}
+
+.tab-nav.tabs-icons .tab-icon {
+    font-size: 1.15rem;
+}
+
+.tab-page-title {
+    display: none;
+    margin: 0;
+    text-align: left;
+    font-size: 1.3rem;
+    line-height: 1.2;
+}
+
+.tab-nav.tabs-icons ~ .main-content > .tab-page-title {
+    display: block;
+}
+
+.checkpoints-card {
+    margin-bottom: 0;
+}
+
+.checkpoints-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.checkpoints-bar .cashflow-card-title {
+    white-space: nowrap;
+}
+
+.checkpoint-add {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+    min-width: 0;
+}
+
+debt-snowball-card .checkpoint-add select,
+debt-snowball-card .checkpoint-add input {
+    height: 2rem;
+    min-height: 0;
+    padding: 0 0.55rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    font-family: inherit;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+.checkpoint-add select {
+    width: 4.2rem;
+}
+
+.checkpoint-add input {
+    width: 6.5rem;
+}
+
+debt-snowball-card .checkpoint-add .btn {
+    height: 2rem;
+    min-height: 0;
+    padding: 0 0.7rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.checkpoints-list:not(:empty) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 1rem;
+}
+
+.checkpoint-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.02rem 0.4rem 0.02rem 0.55rem;
+    line-height: 1.2;
+    background: rgba(168, 85, 247, 0.08);
+    border: 1px solid rgba(168, 85, 247, 0.28);
+    border-radius: 999px;
+    font-size: 0.75rem;
+}
+
+.checkpoint-day {
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+}
+
+.checkpoint-amount {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+debt-snowball-card .checkpoint-chip .delete-checkpoint-btn {
+    height: auto;
+    min-height: 0;
+    padding: 0 0.1rem;
+    font-size: 0.75rem;
+    line-height: 1;
+    background: transparent;
+    color: var(--danger-color);
+    border: none;
+    cursor: pointer;
+}
+
+@container snowball (max-width: 560px) {
+    .checkpoints-bar {
+        align-items: stretch;
+    }
+
+    .checkpoint-add {
+        margin-left: 0;
+        flex: 1 1 100%;
+    }
+
+    .checkpoint-add input {
+        flex: 1;
+        width: auto;
+        min-width: 0;
+    }
 }
 
 /* ===== Tab Panels ===== */
@@ -4175,71 +4739,184 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
         font-size: 0.7rem;
         padding: 0.18rem 0.4rem;
     }
-}`;
+}
+
+/* Narrow cards: title on its own line, buttons and version underneath. */
+@container snowball (max-width: 560px) {
+    .header {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        row-gap: 0.45rem;
+    }
+
+    .header-title {
+        justify-content: center;
+    }
+
+    .header h1 {
+        font-size: clamp(1.05rem, 5.2cqi, 1.35rem);
+        text-align: center;
+    }
+
+    .header-actions {
+        grid-column: 1;
+        grid-row: 2;
+        justify-content: center;
+    }
+
+    .version-badge {
+        grid-column: 1;
+        grid-row: 3;
+        justify-self: center;
+    }
+
+    .header-actions .header-action {
+        width: 2.25rem;
+        height: 2.25rem;
+        min-width: 2.25rem;
+    }
+
+    .header-action-icon {
+        width: 1.05rem;
+        height: 1.05rem;
+    }
+}
+
+/* Cash-flow rows follow the card width. The viewport media query never
+   fires when a narrow panel sits on a wide screen. */
+@container snowball (max-width: 720px) {
+    .schedule-row {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        min-width: 0;
+    }
+
+    .schedule-date-col {
+        width: auto;
+        min-width: 0;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.15rem;
+        flex-shrink: 0;
+    }
+
+    .schedule-icon {
+        font-size: 1.15rem;
+        line-height: 1;
+    }
+
+    .schedule-day {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        text-align: center;
+    }
+
+    .schedule-info-col {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .schedule-name {
+        font-size: 0.9rem;
+    }
+
+    .schedule-detail {
+        font-size: 0.68rem;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+    }
+
+    .schedule-right-col {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.15rem;
+        flex-shrink: 0;
+    }
+
+    .schedule-amount-col {
+        min-width: 0;
+        font-size: 0.875rem;
+    }
+
+    .schedule-balance-col {
+        font-size: 0.72rem;
+        font-weight: 600;
+        min-width: 0;
+        padding: 0;
+        background: transparent;
+    }
+
+    .col-label {
+        display: none;
+    }
+
+    .schedule-action-col {
+        flex: 1 0 100%;
+        flex-direction: row !important;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 0;
+    }
+
+    .btn-mark-paid,
+    .btn-edit-inline,
+    .btn-override-min {
+        font-size: 0.7rem;
+        padding: 0.22rem 0.45rem;
+        min-height: 0;
+        white-space: nowrap;
+    }
+}
+
+`;
 
 const PANEL_HTML = `<div class="app-container">
         <header class="header">
-            <div style="display:flex;flex-direction:column;align-items:flex-start;">
+            <div class="header-title">
                 <h1>Debt Snowball Tracker</h1>
-                <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})" style="font-size:0.65rem;color:var(--text-secondary);opacity:0.6;margin-top:0.25rem;">v${PANEL_VERSION}</span>
             </div>
+            <span class="version-badge" title="v${PANEL_VERSION} (${PANEL_BUILD_DATE})">v${PANEL_VERSION}</span>
             <div class="header-actions">
-                <button id="sanity-badge" class="btn btn-secondary" style="display:none; background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4); color: #fbbf24;" title="Unusual data patterns detected — click to review">⚠️ <span id="sanity-count">0</span></button>
-                <button id="history-btn" class="btn btn-secondary" style="background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.4); color: #c084fc;">📅 History</button>
-                <label for="import-file" class="btn btn-secondary" style="background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: #60a5fa;">
-                    Import Data
-                    <input type="file" id="import-file" accept=".json" style="display: none;">
-                </label>
-                <button id="export-btn" class="btn btn-secondary" style="background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.4); color: #4ade80;">Export Data</button>
+                <button id="sanity-badge" class="btn btn-secondary header-action" style="display:none;" title="Unusual data patterns detected — click to review" aria-label="Review data warnings"><svg class="header-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 2.5 20h19L12 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="header-action-label"><span id="sanity-count">0</span></span></button>
+                <button id="history-btn" class="btn btn-secondary header-action" title="History" aria-label="History"><svg class="header-action-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+                <label for="import-file" class="btn btn-secondary header-action" title="Import data" aria-label="Import data"><svg class="header-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 11.5 12 16l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><input type="file" id="import-file" accept=".json" style="display: none;"></label>
+                <button id="export-btn" class="btn btn-secondary header-action" title="Export data" aria-label="Export data"><svg class="header-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5M7.5 8.5 12 4l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
             </div>
         </header>
 
         <div class="month-nav">
-            <button id="plan-prev-month-btn" class="btn btn-secondary btn-sm" style="visibility:hidden;">← Previous</button>
+            <div class="month-nav-slot">
+                <button id="plan-prev-month-btn" class="month-nav-btn" style="visibility:hidden;" title="Previous month" aria-label="Previous month"><svg class="month-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6 8.5 12l6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            </div>
             <div class="month-title" id="global-month-title"></div>
-            <button id="plan-next-month-btn" class="btn btn-primary btn-sm" style="visibility:hidden;">Current Month →</button>
-            <button id="advance-month-btn" class="btn btn-secondary btn-sm" title="Archive this month and start fresh for next month early">⏭ Skip to Next</button>
+            <div class="month-nav-slot month-nav-slot-end">
+                <button id="plan-next-month-btn" class="month-nav-btn" style="visibility:hidden;" title="Current month" aria-label="Current month"><svg class="month-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6 15.5 12l-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                <button id="advance-month-btn" class="month-nav-btn" title="Generate next month" aria-label="Generate next month"><svg class="month-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 7 11 12l-5.5 5M13 7l5.5 5L13 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            </div>
         </div>
 
         <nav class="tab-nav">
-            <button class="tab-btn active" data-tab="payment-plan"><span class="tab-icon">&#128197;</span><span class="tab-label"> Cash Flow</span></button>
-            <button class="tab-btn" data-tab="budgets"><span class="tab-icon">&#128176;</span><span class="tab-label"> Budgets</span></button>
-            <button class="tab-btn" data-tab="income"><span class="tab-icon">&#128181;</span><span class="tab-label"> Income & Bills</span></button>
-            <button class="tab-btn" data-tab="debts"><span class="tab-icon">&#128179;</span><span class="tab-label"> Debts</span></button>
-            <button class="tab-btn" data-tab="timeline"><span class="tab-icon">&#128202;</span><span class="tab-label"> Timeline</span></button>
+            <button class="tab-btn active" data-tab="payment-plan" title="Cash Flow"><span class="tab-icon">&#128197;</span><span class="tab-label"> Cash Flow</span></button>
+            <button class="tab-btn" data-tab="budgets" title="Budgets"><span class="tab-icon">&#128176;</span><span class="tab-label"> Budgets</span></button>
+            <button class="tab-btn" data-tab="income" title="Income & Bills"><span class="tab-icon">&#128181;</span><span class="tab-label"> Income & Bills</span></button>
+            <button class="tab-btn" data-tab="debts" title="Debts"><span class="tab-icon">&#128179;</span><span class="tab-label"> Debts</span></button>
+            <button class="tab-btn" data-tab="timeline" title="Timeline"><span class="tab-icon">&#128202;</span><span class="tab-label"> Timeline</span></button>
         </nav>
 
         <main class="main-content">
+            <h2 id="tab-page-title" class="tab-page-title"></h2>
 
             <div class="tab-panel active" id="tab-payment-plan">
 
-                <section id="balance-checkpoints-card" class="card" style="margin-bottom: 1.5rem;">
-                    <div style="margin-bottom: 1rem;">
-                        <h2 style="margin-bottom: 0.25rem;">💰 Cash Position</h2>
-                        <p class="subtitle" style="margin-bottom:0; font-size: 0.85rem;">Track your bank balance throughout the month. Add your Day 1 balance as a checkpoint on day 1.</p>
-                    </div>
-
-                    <!-- Existing Checkpoints List -->
-                    <div id="checkpoints-list" style="margin-bottom: 1rem;"></div>
-
-                    <!-- Add New Checkpoint -->
-                    <div id="add-checkpoint-row" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                        <span style="font-size: 0.875rem; color: var(--text-secondary);">Add checkpoint on day</span>
-                        <select id="new-checkpoint-day" style="width: 65px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
-                            ${Array.from({length: 31}, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}
-                        </select>
-                        <span style="font-size: 0.875rem; color: var(--text-secondary);">for</span>
-                        <input type="number" id="new-checkpoint-amount" step="0.01" placeholder="Amount"
-                            style="width: 100px; padding: 0.4rem; font-size: 0.875rem; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
-                        <button id="add-checkpoint-btn" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.8rem; white-space: nowrap;">+ Add</button>
-                    </div>
-                </section>
-
-                <section id="payment-plan-section" class="card" style="display: none; margin-bottom: 1.5rem;">
-                    <!-- Month Overview Dashboard (at top) -->
+                <section id="month-overview-card" class="card month-overview-card" style="display: none;">
                     <div class="month-overview">
                         <div class="month-overview-header">
-                            <div class="month-overview-title">📊 Month Overview</div>
+                            <h2 class="cashflow-card-title">Month Overview</h2>
                             <div class="month-overview-subtitle">From the complete Cash Flow schedule</div>
                         </div>
 
@@ -4276,29 +4953,40 @@ const PANEL_HTML = `<div class="app-container">
                         </details>
                     </div>
 
-                    <!-- Runway Dashboard -->
-                    <div style="margin-bottom: 1rem;">
-                        <div class="forecast-bar" id="runway-dashboard" style="padding: 0.75rem; background: rgba(7,6,26,0.4); border-radius: 8px;">
-                            <div class="forecast-item">
-                                <span class="forecast-label">Next Paycheck:</span>
-                                <span id="runway-next-paycheck" class="forecast-value">-</span>
-                            </div>
-                            <div class="forecast-item">
-                                <span class="forecast-label">Lowest Balance:</span>
-                                <span id="runway-min-project" class="forecast-value">$0.00</span>
-                            </div>
-                            <div class="forecast-item">
-                                <span class="forecast-label">Status:</span>
-                                <span id="runway-status" class="forecast-value">Safe</span>
-                            </div>
+                    <div class="forecast-bar" id="runway-dashboard" style="padding: 0.75rem; background: rgba(7,6,26,0.4); border-radius: 8px;">
+                        <div class="forecast-item">
+                            <span class="forecast-label">Next Paycheck:</span>
+                            <span id="runway-next-paycheck" class="forecast-value">-</span>
+                        </div>
+                        <div class="forecast-item">
+                            <span class="forecast-label">Lowest Balance:</span>
+                            <span id="runway-min-project" class="forecast-value">$0.00</span>
+                        </div>
+                        <div class="forecast-item">
+                            <span class="forecast-label">Status:</span>
+                            <span id="runway-status" class="forecast-value">Safe</span>
                         </div>
                     </div>
+                </section>
 
-                    <!-- Cash Flow Schedule List -->
-                    <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; font-weight: 600;">📋 Cash Flow Schedule</div>
-                    <div id="payment-plan-list" class="payment-schedule">
+                <section id="balance-checkpoints-card" class="card checkpoints-card">
+                    <div class="checkpoints-bar">
+                        <h2 class="cashflow-card-title">Checkpoints</h2>
+                        <div id="add-checkpoint-row" class="checkpoint-add">
+                            <select id="new-checkpoint-day" aria-label="Checkpoint day">
+                                ${Array.from({length: 31}, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}
+                            </select>
+                            <input type="number" id="new-checkpoint-amount" step="0.01" placeholder="Balance" aria-label="Checkpoint balance">
+                            <button id="add-checkpoint-btn" class="btn btn-secondary">Add</button>
                         </div>
-                    </section>
+                    </div>
+                    <div id="checkpoints-list" class="checkpoints-list"></div>
+                </section>
+
+                <section id="payment-plan-section" class="card" style="display: none;">
+                    <h2 class="cashflow-card-title">Cash Flow Schedule</h2>
+                    <div id="payment-plan-list" class="payment-schedule"></div>
+                </section>
             </div>
 
             <div class="tab-panel" id="tab-budgets">
@@ -4308,19 +4996,20 @@ const PANEL_HTML = `<div class="app-container">
                             <h2>Spending Budgets</h2>
                             <p class="subtitle" style="margin-bottom:0;">Set a monthly limit per category and track day-to-day spending against it. Card-charged bills are logged here automatically as they post. Expenses clear at month end.</p>
                         </div>
-                        <div class="budget-header-actions">
-                            <div class="expense-defaults" title="Applied automatically to new expenses — each entry can still be changed individually">
-                                <label for="expense-default-method">New expenses:</label>
-                                <select id="expense-default-method">
-                                    <option value="card">💳 Card</option>
-                                    <option value="direct">🏦 Cash/Debit</option>
-                                </select>
-                                <select id="expense-default-card" title="Default card for new expenses"></select>
-                            </div>
-                            <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
-                        </div>
                     </div>
-                    <div id="budgets-list" style="margin-top: 0.25rem;"></div>
+                    <div id="budget-summary"></div>
+                    <div class="expense-defaults" title="Applied automatically to new expenses — each entry can still be changed individually">
+                        <label for="expense-default-method">New expenses:</label>
+                        <select id="expense-default-method">
+                            <option value="card">💳 Card</option>
+                            <option value="direct">🏦 Cash/Debit</option>
+                        </select>
+                        <select id="expense-default-card" title="Default card for new expenses"></select>
+                    </div>
+                    <div id="budgets-list"></div>
+                    <div class="budget-add-footer">
+                        <button id="add-budget-btn" class="btn btn-primary">+ Add Budget</button>
+                    </div>
                 </section>
             </div>
 
@@ -4342,13 +5031,7 @@ const PANEL_HTML = `<div class="app-container">
                     <div class="section-header">
                         <div>
                             <h2>Fixed Bills</h2>
-                            <p class="subtitle" style="margin-bottom:0;">
-                                Bills with a due date — <strong>Direct-pay</strong> bills appear in Cash Flow, <strong>card-paid</strong> bills auto-log to Budgets as they post.<br>
-                                <strong>Recurring</strong> = Every month · 
-                                <strong>Quarterly</strong> = Every 3 months · 
-                                <strong>Annual</strong> = Once per year · 
-                                <strong style="color:var(--danger-color);">One-Time</strong> = This month only (deleted next month)
-                            </p>
+                            <p class="subtitle" style="margin-bottom:0;">Direct-pay bills appear in Cash Flow. Card bills are logged to Budgets as they post.</p>
                         </div>
                         <button id="add-cost-btn" class="btn btn-warning">+ Add Bill</button>
                     </div>
@@ -4392,14 +5075,18 @@ const PANEL_HTML = `<div class="app-container">
                     </div>
                     <p id="strategy-desc" class="subtitle strategy-desc-text"></p>
                     <div class="summary-stats">
-                        <div class="stat-box">
-                            <span class="stat-label">Total Debt</span>
-                            <span id="stat-total-debt" class="stat-value">$0.00</span>
-                        </div>
                         <div class="stat-box stat-box-countdown" id="stat-countdown-box" style="display:none;">
                             <span class="stat-label">Days Until Debt-Free</span>
                             <span id="stat-countdown" class="stat-value stat-countdown-value">-</span>
                             <span id="stat-payoff-date" class="stat-countdown-date">-</span>
+                        </div>
+                        <div class="stat-box" id="stat-savings-box" style="display:none;">
+                            <span class="stat-label" id="stat-savings-label">vs. Other Strategy</span>
+                            <span id="stat-savings" class="stat-value stat-savings-value">-</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">Total Debt</span>
+                            <span id="stat-total-debt" class="stat-value">$0.00</span>
                         </div>
                         <div class="stat-box" id="stat-payoff-box" style="display:none;">
                             <span class="stat-label">Estimated Debt-Free Date</span>
@@ -4409,17 +5096,16 @@ const PANEL_HTML = `<div class="app-container">
                             <span class="stat-label">Total Interest Paid</span>
                             <span id="stat-total-interest" class="stat-value">$0.00</span>
                         </div>
-                        <div class="stat-box" id="stat-savings-box" style="display:none;">
-                            <span class="stat-label" id="stat-savings-label">vs. Other Strategy</span>
-                            <span id="stat-savings" class="stat-value stat-savings-value">-</span>
-                        </div>
                     </div>
                     <div id="windfall-bar" style="display:none;" class="windfall-bar">
                         <span class="windfall-bar-label">&#128176; Got a windfall?</span>
                         <button id="windfall-btn" class="btn btn-windfall">Run Lump Sum Planner</button>
                     </div>
                     <div class="chart-wrapper">
-                        <canvas id="paydown-chart" aria-label="Paydown chart" role="img"></canvas>
+                        <h3 id="paydown-chart-title" class="chart-title">Burndown</h3>
+                        <div class="chart-canvas-frame">
+                            <canvas id="paydown-chart" aria-label="Burndown chart" role="img"></canvas>
+                        </div>
                     </div>
                     <div id="timeline-chart" class="timeline-container">
                         </div>
@@ -4596,7 +5282,7 @@ const PANEL_HTML = `<div class="app-container">
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary close-cost-modal">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Save Bill</button>
+                    <button type="submit" id="cost-save-btn" class="btn btn-secondary">Save Bill</button>
                 </div>
             </form>
         </div>

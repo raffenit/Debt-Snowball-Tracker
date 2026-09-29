@@ -323,9 +323,27 @@ function launchConfetti() {
 
 
 // ─── Tab Navigation ───────────────────────────────────────────────────────────
+function fitTabLabels() {
+    const nav = appState._root.querySelector('.tab-nav');
+    if (!nav || nav.dataset.fitting === '1') return;
+    nav.dataset.fitting = '1';
+    nav.classList.remove('tabs-icons');
+    const overflows = nav.scrollWidth > nav.clientWidth + 1;
+    nav.classList.toggle('tabs-icons', overflows);
+    delete nav.dataset.fitting;
+}
+
+function syncTabPageTitle() {
+    const titleEl = appState._root.querySelector('.tab-page-title');
+    const active = appState._root.querySelector('.tab-btn.active');
+    if (!titleEl || !active) return;
+    titleEl.textContent = active.getAttribute('title') || '';
+}
+
 function initTabs() {
     const tabBtns   = appState._root.querySelectorAll('.tab-btn');
     const tabPanels = appState._root.querySelectorAll('.tab-panel');
+    const nav       = appState._root.querySelector('.tab-nav');
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -337,6 +355,7 @@ function initTabs() {
             btn.classList.add('active');
             const panel = appState._root.getElementById('tab-' + target);
             if (panel) panel.classList.add('active');
+            syncTabPageTitle();
 
             // Persist active tab
             localStorage.setItem('snowball_active_tab', target);
@@ -348,6 +367,13 @@ function initTabs() {
     if (savedTab) {
         const savedBtn = appState._root.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
         if (savedBtn) savedBtn.click();
+    }
+
+    syncTabPageTitle();
+    fitTabLabels();
+    if (nav && typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(() => fitTabLabels());
+        observer.observe(nav);
     }
 }
 
