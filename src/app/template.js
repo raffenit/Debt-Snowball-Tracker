@@ -482,6 +482,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     margin-bottom: 1.5rem;
 }
 
+.section-header-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
 .debts-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1239,6 +1247,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         flex-direction: column;
         align-items: flex-start;
         gap: 0.625rem;
+    }
+
+    .section-header-actions {
+        width: 100%;
+        flex-direction: column;
     }
 
     .section-header .btn {
@@ -5205,7 +5218,10 @@ const PANEL_HTML = `<div class="app-container">
                             <h2>Fixed Bills</h2>
                             <p class="subtitle" style="margin-bottom:0;">Direct-pay bills appear in Cash Flow. Card bills are logged to Budgets as they post.</p>
                         </div>
-                        <button id="add-cost-btn" class="btn btn-warning">+ Add Bill</button>
+                        <div class="section-header-actions">
+                            <button id="all-bills-btn" class="btn btn-secondary" type="button" aria-pressed="false">All bills</button>
+                            <button id="add-cost-btn" class="btn btn-warning">+ Add Bill</button>
+                        </div>
                     </div>
                     <div id="recurring-summary" class="recurring-due-summary"></div>
                     <div id="costs-list" class="debts-list">

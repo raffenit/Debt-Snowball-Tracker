@@ -65,11 +65,20 @@ function renderRecurringCostsList() {
     appState.costsListContainer.innerHTML = '';
     const recurringSummaryEl = appState._root.getElementById('recurring-summary');
 
-    // Recurring costs only (one-time costs are rendered separately)
-    const visibleRecurring = appState.recurringCosts.filter(c => isCostDueThisMonth(c, appState.workingMonthKey || currentMonthKey()));
-    const totalRecurring   = visibleRecurring.reduce((sum, c) => sum + c.amount, 0);
-    const directRecurring  = visibleRecurring.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
-    const cardRecurring    = visibleRecurring.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
+    // The money summary stays "due this month". All bills lists every
+    // recurring definition, including ones scheduled for a later month.
+    const monthKey = appState.workingMonthKey || currentMonthKey();
+    const showAll = !!appState.showAllRecurringCosts;
+    const dueRecurring = appState.recurringCosts.filter(c => isCostDueThisMonth(c, monthKey));
+    const listedRecurring = showAll ? appState.recurringCosts : dueRecurring;
+    const allBillsBtn = appState._root.getElementById('all-bills-btn');
+    if (allBillsBtn) {
+        allBillsBtn.textContent = showAll ? 'Due this month' : 'All bills';
+        allBillsBtn.setAttribute('aria-pressed', showAll ? 'true' : 'false');
+    }
+    const totalRecurring   = dueRecurring.reduce((sum, c) => sum + c.amount, 0);
+    const directRecurring  = dueRecurring.filter(c => c.paymentMethod === 'direct').reduce((sum, c) => sum + c.amount, 0);
+    const cardRecurring    = dueRecurring.filter(c => c.paymentMethod === 'card').reduce((sum, c) => sum + c.amount, 0);
     const totalOneTime     = appState.oneTimeCosts.reduce((sum, c) => sum + c.amount, 0);
     const grandTotal       = totalRecurring + totalOneTime;
 
@@ -86,16 +95,29 @@ function renderRecurringCostsList() {
             ${parts.length ? `<div class="recurring-due-breakdown">${parts.join('')}</div>` : ''}`;
     }
 
-    const hasAnyCosts = visibleRecurring.length > 0 || appState.oneTimeCosts.length > 0;
+    const hasAnyCosts = listedRecurring.length > 0 || appState.oneTimeCosts.length > 0;
     if (!hasAnyCosts) {
+        const hidden = appState.recurringCosts.length - dueRecurring.length;
+        const laterNote = !showAll && hidden > 0
+            ? `<br>${hidden} recurring bill${hidden === 1 ? ' is' : 's are'} scheduled for a later month.`
+            : '<br>Add your recurring bills, subscriptions, and one-time expenses.';
+        const laterBtn = !showAll && hidden > 0
+            ? '<br><button class="empty-cta-btn" id="empty-all-bills-btn">Show all bills</button>'
+            : '';
         appState.costsListContainer.innerHTML = `
             <div class="empty-state">
-                No bills yet.<br>Add your recurring bills, subscriptions, and one-time expenses.
+                ${hidden > 0 && !showAll ? 'No bills due this month.' : 'No bills yet.'}${laterNote}
+                ${laterBtn}
                 <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Bill</button>
             </div>`;
         appState.costsListContainer.style.display = 'block';
         const emptyBtn = appState.costsListContainer.querySelector('#empty-add-cost-btn');
         if (emptyBtn) emptyBtn.addEventListener('click', () => openCostModal());
+        const showAllBtn = appState.costsListContainer.querySelector('#empty-all-bills-btn');
+        if (showAllBtn) showAllBtn.addEventListener('click', () => {
+            appState.showAllRecurringCosts = true;
+            renderRecurringCostsList();
+        });
         return;
     }
 
@@ -104,7 +126,15 @@ function renderRecurringCostsList() {
     let cardIndex = 0;
 
     // ── Recurring sections ──────────────────────────────────────────────────
-    const recurringSorted = [...visibleRecurring].sort((a,b) => (a.dueDay||1) - (b.dueDay||1));
+    const recurringSorted = [...listedRecurring].sort((a, b) => {
+        if (showAll) {
+            const byName = (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+            if (byName) return byName;
+        }
+        return (a.dueDay || 1) - (b.dueDay || 1);
+    });
+    const knownCategories = new Set(['utility', 'subscription', 'maintenance', 'other']);
+    const categoryOf = c => knownCategories.has(c.category) ? c.category : 'other';
     const categories = [
         { key: 'utility',      label: '⚡ Utilities (Monthly Bills)',           cls: 'cost-subsection-utility' },
         { key: 'subscription', label: '📱 Subscriptions',   cls: 'cost-subsection-subscription' },
@@ -113,7 +143,7 @@ function renderRecurringCostsList() {
     ];
 
     categories.forEach(({ key, label, cls }) => {
-        const group = recurringSorted.filter(c => (c.category || 'other') === key);
+        const group = recurringSorted.filter(c => categoryOf(c) === key);
         if (group.length === 0) return;
 
         const section = document.createElement('div');

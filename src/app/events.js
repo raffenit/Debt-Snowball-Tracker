@@ -1,5 +1,5 @@
 import { appState } from './state.js';
-import { currentMonthKey } from '../core/date-utils.js';
+import { currentMonthKey, isCostDueThisMonth } from '../core/date-utils.js';
 import { formatOrdinal } from '../core/pure-utils.js';
 import { advanceToNextMonth } from './advance.js';
 import { closeArchiveModal, openArchiveModal, updateCostModalIntervalVisibility } from './modals.js';
@@ -433,8 +433,12 @@ function setupEventListeners() {
         const focus = e.detail;
         if (!focus?.tab) return;
         if (focus.kind === 'cost') {
+            const monthKey = appState.workingMonthKey || currentMonthKey();
             for (const id of focus.ids || []) {
                 const cost = [...appState.recurringCosts, ...appState.oneTimeCosts].find(c => c.id === id);
+                if (cost && appState.recurringCosts.some(c => c.id === cost.id) && !isCostDueThisMonth(cost, monthKey)) {
+                    appState.showAllRecurringCosts = true;
+                }
                 const key = cost?.category || 'other';
                 if (key === 'utility' || key === 'subscription' || key === 'maintenance') appState.expandedCostSections.add(key);
             }
@@ -509,6 +513,12 @@ function setupEventListeners() {
     appState._root.getElementById('auto-min-btn').addEventListener('click', autoCalcMinPaymentCC);
     appState._root.getElementById('debt-balance').addEventListener('input', updateAutoMinHint);
     appState._root.getElementById('debt-rate').addEventListener('input', updateAutoMinHint);
+
+    // Fixed Bills: due this month vs every recurring bill
+    appState._root.getElementById('all-bills-btn')?.addEventListener('click', () => {
+        appState.showAllRecurringCosts = !appState.showAllRecurringCosts;
+        renderRecurringCostsList();
+    });
 
     // Mortgage toggle
     appState._root.getElementById('mortgage-toggle-btn').addEventListener('click', () => {
