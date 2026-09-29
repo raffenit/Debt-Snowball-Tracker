@@ -21,6 +21,7 @@ import {
     getStrategyOrder,
     runSimulation,
     runSimulationWithWindfall,
+    simulatePayoff,
     setDebts,
     setRecurringCosts,
     setOneTimeCosts,
@@ -442,8 +443,6 @@ describe('getStrategyOrder — ties and large lists', () => {
 });
 
 // ─── simulatePayoff (explicit-state variant) ──────────────────────────────────
-import { runSimulation, simulatePayoff } from './helpers.js';
-
 describe('simulatePayoff — state snapshot + month scoping', () => {
     const debts = [
         { id: 'd1', name: 'Card', balance: 5000, rate: 20, minPayment: 150, dueDay: 15 },
