@@ -53,6 +53,8 @@ var DebtSnowballApp = (() => {
         // 'snowball' | 'avalanche'
         showMortgage: true,
         // toggle mortgage visibility
+        showAllRecurringCosts: false,
+        // Fixed Bills: false = due this month, true = every recurring bill
         paidStatus: {},
         // { [id]: { status: 'paid'|'autopay', amount: number } } — resets each calendar month
         monthlyArchives: [],
@@ -1095,7 +1097,7 @@ var DebtSnowballApp = (() => {
   var PANEL_VERSION, PANEL_BUILD_DATE, currentScript, scriptSrc, installType;
   var init_header = __esm({
     "src/app/header.js"() {
-      PANEL_VERSION = "2.8.16";
+      PANEL_VERSION = "2.8.17";
       PANEL_BUILD_DATE = "2026-09-29";
       currentScript = document.currentScript;
       scriptSrc = currentScript?.src || "unknown";
@@ -2958,10 +2960,18 @@ This replaces ALL current data with that snapshot.`)) {
   function renderRecurringCostsList() {
     appState.costsListContainer.innerHTML = "";
     const recurringSummaryEl = appState._root.getElementById("recurring-summary");
-    const visibleRecurring = appState.recurringCosts.filter((c) => isCostDueThisMonth(c, appState.workingMonthKey || currentMonthKey()));
-    const totalRecurring = visibleRecurring.reduce((sum, c) => sum + c.amount, 0);
-    const directRecurring = visibleRecurring.filter((c) => c.paymentMethod === "direct").reduce((sum, c) => sum + c.amount, 0);
-    const cardRecurring = visibleRecurring.filter((c) => c.paymentMethod === "card").reduce((sum, c) => sum + c.amount, 0);
+    const monthKey = appState.workingMonthKey || currentMonthKey();
+    const showAll = !!appState.showAllRecurringCosts;
+    const dueRecurring = appState.recurringCosts.filter((c) => isCostDueThisMonth(c, monthKey));
+    const listedRecurring = showAll ? appState.recurringCosts : dueRecurring;
+    const allBillsBtn = appState._root.getElementById("all-bills-btn");
+    if (allBillsBtn) {
+      allBillsBtn.textContent = showAll ? "Due this month" : "All bills";
+      allBillsBtn.setAttribute("aria-pressed", showAll ? "true" : "false");
+    }
+    const totalRecurring = dueRecurring.reduce((sum, c) => sum + c.amount, 0);
+    const directRecurring = dueRecurring.filter((c) => c.paymentMethod === "direct").reduce((sum, c) => sum + c.amount, 0);
+    const cardRecurring = dueRecurring.filter((c) => c.paymentMethod === "card").reduce((sum, c) => sum + c.amount, 0);
     const totalOneTime = appState.oneTimeCosts.reduce((sum, c) => sum + c.amount, 0);
     const grandTotal = totalRecurring + totalOneTime;
     if (recurringSummaryEl) {
@@ -2976,22 +2986,39 @@ This replaces ALL current data with that snapshot.`)) {
             </div>
             ${parts.length ? `<div class="recurring-due-breakdown">${parts.join("")}</div>` : ""}`;
     }
-    const hasAnyCosts = visibleRecurring.length > 0 || appState.oneTimeCosts.length > 0;
+    const hasAnyCosts = listedRecurring.length > 0 || appState.oneTimeCosts.length > 0;
     if (!hasAnyCosts) {
+      const hidden = appState.recurringCosts.length - dueRecurring.length;
+      const laterNote = !showAll && hidden > 0 ? `<br>${hidden} recurring bill${hidden === 1 ? " is" : "s are"} scheduled for a later month.` : "<br>Add your recurring bills, subscriptions, and one-time expenses.";
+      const laterBtn = !showAll && hidden > 0 ? '<br><button class="empty-cta-btn" id="empty-all-bills-btn">Show all bills</button>' : "";
       appState.costsListContainer.innerHTML = `
             <div class="empty-state">
-                No bills yet.<br>Add your recurring bills, subscriptions, and one-time expenses.
+                ${hidden > 0 && !showAll ? "No bills due this month." : "No bills yet."}${laterNote}
+                ${laterBtn}
                 <br><button class="empty-cta-btn" id="empty-add-cost-btn">+ Add Bill</button>
             </div>`;
       appState.costsListContainer.style.display = "block";
       const emptyBtn = appState.costsListContainer.querySelector("#empty-add-cost-btn");
       if (emptyBtn) emptyBtn.addEventListener("click", () => openCostModal());
+      const showAllBtn = appState.costsListContainer.querySelector("#empty-all-bills-btn");
+      if (showAllBtn) showAllBtn.addEventListener("click", () => {
+        appState.showAllRecurringCosts = true;
+        renderRecurringCostsList();
+      });
       return;
     }
     appState.costsListContainer.style.display = "block";
     const currentDay = (/* @__PURE__ */ new Date()).getDate();
     let cardIndex = 0;
-    const recurringSorted = [...visibleRecurring].sort((a, b) => (a.dueDay || 1) - (b.dueDay || 1));
+    const recurringSorted = [...listedRecurring].sort((a, b) => {
+      if (showAll) {
+        const byName = (a.name || "").localeCompare(b.name || "", void 0, { sensitivity: "base" });
+        if (byName) return byName;
+      }
+      return (a.dueDay || 1) - (b.dueDay || 1);
+    });
+    const knownCategories = /* @__PURE__ */ new Set(["utility", "subscription", "maintenance", "other"]);
+    const categoryOf = (c) => knownCategories.has(c.category) ? c.category : "other";
     const categories = [
       { key: "utility", label: "\u26A1 Utilities (Monthly Bills)", cls: "cost-subsection-utility" },
       { key: "subscription", label: "\u{1F4F1} Subscriptions", cls: "cost-subsection-subscription" },
@@ -2999,7 +3026,7 @@ This replaces ALL current data with that snapshot.`)) {
       { key: "other", label: "\u{1F4E6} Other Recurring Bills", cls: "cost-subsection-other" }
     ];
     categories.forEach(({ key, label, cls }) => {
-      const group = recurringSorted.filter((c) => (c.category || "other") === key);
+      const group = recurringSorted.filter((c) => categoryOf(c) === key);
       if (group.length === 0) return;
       const section = document.createElement("div");
       section.className = `cost-subsection ${cls}`;
@@ -5678,8 +5705,12 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       const focus = e.detail;
       if (!focus?.tab) return;
       if (focus.kind === "cost") {
+        const monthKey = appState.workingMonthKey || currentMonthKey();
         for (const id of focus.ids || []) {
           const cost = [...appState.recurringCosts, ...appState.oneTimeCosts].find((c) => c.id === id);
+          if (cost && appState.recurringCosts.some((c) => c.id === cost.id) && !isCostDueThisMonth(cost, monthKey)) {
+            appState.showAllRecurringCosts = true;
+          }
           const key = cost?.category || "other";
           if (key === "utility" || key === "subscription" || key === "maintenance") appState.expandedCostSections.add(key);
         }
@@ -5747,6 +5778,10 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     appState._root.getElementById("auto-min-btn").addEventListener("click", autoCalcMinPaymentCC);
     appState._root.getElementById("debt-balance").addEventListener("input", updateAutoMinHint);
     appState._root.getElementById("debt-rate").addEventListener("input", updateAutoMinHint);
+    appState._root.getElementById("all-bills-btn")?.addEventListener("click", () => {
+      appState.showAllRecurringCosts = !appState.showAllRecurringCosts;
+      renderRecurringCostsList();
+    });
     appState._root.getElementById("mortgage-toggle-btn").addEventListener("click", () => {
       appState.showMortgage = !appState.showMortgage;
       saveData().then(() => renderUI()).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
@@ -6355,6 +6390,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1.5rem;
+}
+
+.section-header-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .debts-list {
@@ -7114,6 +7157,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         flex-direction: column;
         align-items: flex-start;
         gap: 0.625rem;
+    }
+
+    .section-header-actions {
+        width: 100%;
+        flex-direction: column;
     }
 
     .section-header .btn {
@@ -11079,7 +11127,10 @@ debt-snowball-card .checkpoint-chip .delete-checkpoint-btn {
                             <h2>Fixed Bills</h2>
                             <p class="subtitle" style="margin-bottom:0;">Direct-pay bills appear in Cash Flow. Card bills are logged to Budgets as they post.</p>
                         </div>
-                        <button id="add-cost-btn" class="btn btn-warning">+ Add Bill</button>
+                        <div class="section-header-actions">
+                            <button id="all-bills-btn" class="btn btn-secondary" type="button" aria-pressed="false">All bills</button>
+                            <button id="add-cost-btn" class="btn btn-warning">+ Add Bill</button>
+                        </div>
                     </div>
                     <div id="recurring-summary" class="recurring-due-summary"></div>
                     <div id="costs-list" class="debts-list">
