@@ -4,7 +4,7 @@ import { formatOrdinal } from '../core/pure-utils.js';
 import { advanceToNextMonth } from './advance.js';
 import { closeArchiveModal, openArchiveModal, updateCostModalIntervalVisibility } from './modals.js';
 import { closeCostModal, closeDebtModal, closeIncomeModal, openCostModal, openDebtModal, openIncomeModal, payoffDebt, renderUI, saveCost, saveDebt, saveIncome, showErrorToast, showSanityWarningsModal, showSavedToast, togglePaid, updateIncomeScheduleHint, moveBillToCategory } from './render-modals.js';
-import { applyWindfall, autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, openWindfallModal, updateAutoMinHint } from './render-support.js';
+import { applyWindfall, autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, openWindfallModal, renderBabySteps, updateAutoMinHint } from './render-support.js';
 import { closeCheckpointModal, openCheckpointModal, renderCheckpointsList, saveCheckpoint } from './render-checkpoints.js';
 import { closeBudgetModal, closeExpenseModal, convertExpenseToBill, deleteBudget, deleteExpense, getWorkingBudgets, moveExpenseToBudget, openBudgetModal, openExpenseModal, renderSpendingBudgets, saveBudget, saveExpense } from './render-budgets.js';
 import { reorderBudgets } from '../core/budgets.js';
@@ -577,6 +577,11 @@ function setupEventListeners() {
     });
 
     appState._root.getElementById('baby-steps')?.addEventListener('click', e => {
+        if (e.target.closest('[data-baby-steps-toggle]')) {
+            appState.babyStepsOpen = !appState.babyStepsOpen;
+            renderBabySteps();
+            return;
+        }
         const btn = e.target.closest('[data-baby-step]');
         if (!btn) return;
         const key = btn.dataset.babyStep;

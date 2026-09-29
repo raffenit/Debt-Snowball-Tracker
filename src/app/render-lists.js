@@ -34,6 +34,8 @@ function renderIncomeList() {
 
     sorted.forEach((entry, idx) => {
         const dateStr = new Date(entry.date+'T00:00:00').toLocaleDateString(undefined, { month:'short', day:'numeric' });
+        const sched = String(entry.scheduleType || entry.schedule || 'monthly').trim().toLowerCase();
+        const schedLabel = sched === 'one-time' ? 'One-time' : sched === 'biweekly' ? 'Every 2 weeks' : 'Monthly';
         const el = document.createElement('div');
         el.className = 'debt-card income-card';
         el.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${idx * 0.08}s`;
@@ -41,7 +43,7 @@ function renderIncomeList() {
             <div class="income-compact-inner">
                 <div class="income-compact-info">
                     <span class="income-compact-name">${escHtml(entry.label)}</span>
-                    <span class="income-compact-date">${dateStr}</span>
+                    <span class="income-compact-date">${dateStr} · ${schedLabel}</span>
                 </div>
                 <div class="income-compact-right">
                     <span class="income-compact-amount">${formatMoney(entry.amount)}</span>

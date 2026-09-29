@@ -57,6 +57,8 @@ var DebtSnowballApp = (() => {
         // payoff graph and dates leave the house out until asked
         babySteps: {},
         // manual baby-step checkoffs: { "1": true, "3": true, ... }
+        babyStepsOpen: false,
+        // timeline baby-step list is collapsed to the current step
         showAllRecurringCosts: false,
         // Fixed Bills: false = due this month, true = every recurring bill
         paidStatus: {},
@@ -193,12 +195,35 @@ var DebtSnowballApp = (() => {
   function biweeklySeriesKey(e) {
     return e.seriesId || `${e.scheduleAnchorDate || e.anchorDate}|${e.label}|${e.amount}`;
   }
+  function incomeScheduleOf(entry) {
+    return String(entry?.scheduleType || entry?.schedule || "").trim().toLowerCase();
+  }
+  function reconcileLoadedIncome(entries, monthKey) {
+    const htmlMk = monthKey ? keyToHtmlMonth(monthKey) : null;
+    let changed = false;
+    const prepared = (entries || []).map((e) => {
+      if (incomeScheduleOf(e)) return e;
+      changed = true;
+      const day = parseInt((e.date || "").split("-")[2]) || 1;
+      return { ...e, scheduleType: "monthly", scheduleDay: day };
+    });
+    const isOneTime = (e) => incomeScheduleOf(e) === "one-time";
+    const oneTime = prepared.filter(isOneTime);
+    const recurring = prepared.filter((e) => !isOneTime(e));
+    if (!htmlMk) return { entries: prepared, changed };
+    const stale = recurring.some((e) => (e.date || "").slice(0, 7) !== htmlMk);
+    if (!stale) return { entries: prepared, changed };
+    const keptIds = new Set(oneTime.map((e) => e.id).filter((id) => id != null));
+    const regenerated = generateRecurringIncomeForMonth(recurring, monthKey).filter((e) => !keptIds.has(e.id));
+    const keptOneTime = oneTime.filter((e) => (e.date || "").slice(0, 7) === htmlMk).map((e) => ({ ...e, scheduleType: "one-time" }));
+    return { entries: [...regenerated, ...keptOneTime], changed: true };
+  }
   function generateRecurringIncomeForMonth(entries, monthKey) {
     const [y, m] = monthKey.split("-").map(Number);
     const out = [];
     const seenSeries = /* @__PURE__ */ new Set();
     for (const e of entries) {
-      const schedule = e.scheduleType || e.schedule || "monthly";
+      const schedule = incomeScheduleOf(e) || "monthly";
       if (schedule === "one-time") continue;
       if (schedule === "biweekly" && (e.scheduleAnchorDate || e.anchorDate)) {
         const anchorDate = e.scheduleAnchorDate || e.anchorDate;
@@ -762,7 +787,11 @@ var DebtSnowballApp = (() => {
     ].filter((x) => x.day >= syncDay).reduce((s, x) => s + x.amount, 0);
     const finalBalance = poolAtSync + incomeAfter - outflowsAfter;
     archive.finalBalance = finalBalance;
-    const nextIncome = generateRecurringIncomeForMonth(incomeEntries2, nextMonthKey);
+    const nextHtml = keyToHtmlMonth(nextMonthKey);
+    const nextIncome = [
+      ...generateRecurringIncomeForMonth(incomeEntries2, nextMonthKey),
+      ...incomeEntries2.filter((e) => incomeScheduleOf(e) === "one-time" && (e.date || "").slice(0, 7) === nextHtml)
+    ];
     const nextCheckpoints = [{ id: "cp_" + Date.now(), day: 1, amount: finalBalance, autoRollover: true }];
     const cleanRecurring = recurringCosts2.filter((c) => (c.category || "other") !== "one-time");
     const nextCosts = cleanRecurring.map((c) => {
@@ -1644,7 +1673,9 @@ var DebtSnowballApp = (() => {
       return !!marked[String(step.n)];
     };
     const current = steps.find((step) => !done(step));
-    host.innerHTML = `<p class="baby-steps-title">Baby steps</p>` + steps.map((step) => {
+    const shown = current || { n: "\u2713", title: "All baby steps are done", detail: "" };
+    const open = !!appState.babyStepsOpen;
+    const list = steps.map((step) => {
       const isDone = done(step);
       const isCurrent = current && current.n === step.n;
       const mark = step.manual ? `<button type="button" class="baby-step-mark" data-baby-step="${step.n}">${isDone ? "Done" : "Mark done"}</button>` : "";
@@ -1655,6 +1686,17 @@ var DebtSnowballApp = (() => {
             <span class="baby-step-detail">${escHtml(step.detail)}</span>
         </div>`;
     }).join("");
+    host.classList.toggle("is-open", open);
+    host.innerHTML = `
+        <button type="button" class="baby-steps-summary" data-baby-steps-toggle aria-expanded="${open ? "true" : "false"}">
+            <span class="baby-step-index">${escHtml(String(shown.n))}</span>
+            <span class="baby-steps-summary-text">
+                <span class="baby-step-title">${escHtml(shown.title)}</span>
+                ${shown.detail ? `<span class="baby-step-detail">${escHtml(shown.detail)}</span>` : ""}
+            </span>
+            <span class="baby-steps-chevron" aria-hidden="true">${open ? "\u25BE" : "\u25B8"}</span>
+        </button>
+        <div class="baby-steps-list">${list}</div>`;
   }
   var init_render_support = __esm({
     "src/app/render-support.js"() {
@@ -1741,19 +1783,6 @@ var DebtSnowballApp = (() => {
         appState.spendingBudgets = data.spendingBudgets || [];
         appState.cardExpenseSkips = data.cardExpenseSkips || [];
         appState.acknowledgedAlerts = data.acknowledgedAlerts || [];
-        let incomeMigrated = false;
-        appState.incomeEntries = appState.incomeEntries.map((e) => {
-          const sched = e.scheduleType || e.schedule;
-          if (!sched) {
-            incomeMigrated = true;
-            const day = parseInt((e.date || "").split("-")[2]) || 1;
-            return { ...e, scheduleType: "monthly", scheduleDay: day };
-          }
-          return e;
-        });
-        if (incomeMigrated) {
-          console.info("[DebtSnowball] Filled in a monthly schedule for income entries that had none.");
-        }
         const seenIncomeRows = /* @__PURE__ */ new Set();
         appState.incomeEntries = appState.incomeEntries.map((e, i) => ({
           ...e,
@@ -1779,7 +1808,7 @@ var DebtSnowballApp = (() => {
         }
         const workingKey = data.paidMonth || currentMonthKey2();
         const workingIdx = monthKeyToIndex(workingKey);
-        let needsCleanupSave = incomeMigrated || repairsNeedSave;
+        let needsCleanupSave = repairsNeedSave;
         const staleOneTime = appState.oneTimeCosts.filter((c) => {
           if (!c.addedMonth) return true;
           return monthKeyToIndex(c.addedMonth) < workingIdx;
@@ -1833,21 +1862,11 @@ var DebtSnowballApp = (() => {
           appState.paidStatus = {};
         }
         {
-          const wm = appState.workingMonthKey;
-          const htmlMk = wm ? keyToHtmlMonth(wm) : null;
-          const isOneTimeInc = (e) => (e.scheduleType || e.schedule) === "one-time";
-          const stale = appState.incomeEntries.filter((e) => !isOneTimeInc(e) && (e.date || "").slice(0, 7) !== htmlMk);
-          if (htmlMk && stale.length) {
-            appState.incomeEntries = [
-              ...generateRecurringIncomeForMonth(appState.incomeEntries, wm),
-              // One-time income is month-scoped — only rows dated in
-              // the working month survive; stale ones from other
-              // months must not re-enter (they'd render on wrong days
-              // and inflate income totals forever).
-              ...appState.incomeEntries.filter((e) => isOneTimeInc(e) && (e.date || "").slice(0, 7) === htmlMk)
-            ];
+          const reconciled = reconcileLoadedIncome(appState.incomeEntries, appState.workingMonthKey);
+          if (reconciled.changed) {
+            appState.incomeEntries = reconciled.entries;
             needsCleanupSave = true;
-            console.info(`[DebtSnowball] Regenerated ${stale.length} income entr(ies) with stale dates for the working month.`);
+            console.info("[DebtSnowball] Reconciled income schedules for the working month.");
           }
         }
         if (needsCleanupSave) {
@@ -3034,6 +3053,8 @@ This replaces ALL current data with that snapshot.`)) {
     const sorted = [...monthIncome].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     sorted.forEach((entry, idx) => {
       const dateStr = (/* @__PURE__ */ new Date(entry.date + "T00:00:00")).toLocaleDateString(void 0, { month: "short", day: "numeric" });
+      const sched = String(entry.scheduleType || entry.schedule || "monthly").trim().toLowerCase();
+      const schedLabel = sched === "one-time" ? "One-time" : sched === "biweekly" ? "Every 2 weeks" : "Monthly";
       const el = document.createElement("div");
       el.className = "debt-card income-card";
       el.style.animation = `cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards ${idx * 0.08}s`;
@@ -3041,7 +3062,7 @@ This replaces ALL current data with that snapshot.`)) {
             <div class="income-compact-inner">
                 <div class="income-compact-info">
                     <span class="income-compact-name">${escHtml(entry.label)}</span>
-                    <span class="income-compact-date">${dateStr}</span>
+                    <span class="income-compact-date">${dateStr} \xB7 ${schedLabel}</span>
                 </div>
                 <div class="income-compact-right">
                     <span class="income-compact-amount">${formatMoney(entry.amount)}</span>
@@ -4795,7 +4816,7 @@ This replaces ALL current data with that snapshot.`)) {
     appState._root.getElementById("income-schedule-hint").style.display = "none";
     if (incomeId) {
       appState._root.getElementById("income-modal-title").textContent = "Edit Income Entry";
-      const entry = appState.incomeEntries.find((e) => e.id === incomeId);
+      const entry = appState.incomeEntries.find((e) => String(e.id) === String(incomeId));
       if (entry) {
         appState._root.getElementById("income-id").value = entry.id;
         appState._root.getElementById("income-label").value = entry.label;
@@ -5044,7 +5065,7 @@ This replaces ALL current data with that snapshot.`)) {
       const entryBase = { label, date, amount, scheduleType };
       if (scheduleType === "monthly") entryBase.scheduleDay = parseInt(date.split("-")[2]);
       if (scheduleType === "biweekly") entryBase.scheduleAnchorDate = date;
-      const existing = id ? appState.incomeEntries.find((e) => e.id === id) : null;
+      const existing = id ? appState.incomeEntries.find((e) => String(e.id) === String(id)) : null;
       if (existing && existing.scheduleType === "biweekly" && scheduleType === "biweekly") {
         appState.incomeEntries = shiftBiweeklySeries(
           appState.incomeEntries,
@@ -5053,8 +5074,8 @@ This replaces ALL current data with that snapshot.`)) {
           appState.workingMonthKey || currentMonthKey()
         );
       } else if (id) {
-        const idx = appState.incomeEntries.findIndex((e) => e.id === id);
-        if (idx !== -1) appState.incomeEntries[idx] = { id, ...entryBase };
+        const idx = appState.incomeEntries.findIndex((e) => String(e.id) === String(id));
+        if (idx !== -1) appState.incomeEntries[idx] = { id: existing.id, ...entryBase };
       } else if (scheduleType === "biweekly") {
         const seriesId = "bw_" + Date.now().toString(36);
         const generated = generateBiweeklyForMonth(label, amount, date, appState.workingMonthKey || currentMonthKey());
@@ -6052,6 +6073,11 @@ One-time bills will be removed, income will be cleared, and interval bills will 
       saveData().then(() => renderUI()).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
     });
     appState._root.getElementById("baby-steps")?.addEventListener("click", (e) => {
+      if (e.target.closest("[data-baby-steps-toggle]")) {
+        appState.babyStepsOpen = !appState.babyStepsOpen;
+        renderBabySteps();
+        return;
+      }
       const btn = e.target.closest("[data-baby-step]");
       if (!btn) return;
       const key = btn.dataset.babyStep;
@@ -10038,6 +10064,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border-radius: 10px;
     padding: 3px;
     gap: 3px;
+    margin: 0.65rem 0 0.45rem;
 }
 
 .strategy-btn {
@@ -10066,7 +10093,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 .strategy-desc-text {
-    margin-bottom: 1.5rem !important;
+    margin-bottom: 0.75rem !important;
     font-style: italic;
 }
 
@@ -10529,16 +10556,60 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
-    margin: 0 0 1rem;
+    margin: 0;
 }
 
-.baby-steps-title {
-    margin: 0 0 0.15rem;
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+.baby-steps-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid rgba(91, 127, 255, 0.55);
+    border-radius: 8px;
+    background: rgba(91, 127, 255, 0.1);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.baby-steps-summary-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    overflow: hidden;
+}
+
+.baby-steps-summary .baby-step-title,
+.baby-steps-summary .baby-step-detail {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.baby-steps-summary .baby-step-detail {
+    grid-column: auto;
+    margin: 0;
+}
+
+.baby-steps-chevron {
+    flex-shrink: 0;
     color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.baby-steps-list {
+    display: none;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.baby-steps.is-open .baby-steps-list {
+    display: flex;
 }
 
 .baby-step {
@@ -11568,17 +11639,17 @@ debt-snowball-card .checkpoint-chip .delete-checkpoint-btn {
                 <section class="visualization-section card">
                     <div class="viz-header">
                         <h2>Payoff Timeline</h2>
-                        <div class="strategy-toggle" id="strategy-toggle">
-                            <button class="strategy-btn active" data-strategy="snowball" title="Pay smallest balance first \u2014 quick wins keep you motivated">
-                                &#10052;&#65039; Snowball
-                            </button>
-                            <button class="strategy-btn" data-strategy="avalanche" title="Pay highest interest first \u2014 saves the most money">
-                                &#127754; Avalanche
-                            </button>
-                        </div>
+                    </div>
+                    <div id="baby-steps" class="baby-steps"></div>
+                    <div class="strategy-toggle" id="strategy-toggle">
+                        <button class="strategy-btn active" data-strategy="snowball" title="Pay smallest balance first \u2014 quick wins keep you motivated">
+                            &#10052;&#65039; Snowball
+                        </button>
+                        <button class="strategy-btn" data-strategy="avalanche" title="Pay highest interest first \u2014 saves the most money">
+                            &#127754; Avalanche
+                        </button>
                     </div>
                     <p id="strategy-desc" class="subtitle strategy-desc-text"></p>
-                    <div id="baby-steps" class="baby-steps"></div>
                     <label class="include-mortgage-toggle" id="include-mortgage-toggle-wrap" style="display:none;">
                         <input type="checkbox" id="include-mortgage-toggle">
                         <span>Include mortgage in the payoff</span>

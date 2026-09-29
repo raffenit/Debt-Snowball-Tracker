@@ -20,6 +20,7 @@ export {
     isCostDueInMonth,
     generateBiweeklyForMonth,
     generateRecurringIncomeForMonth,
+    reconcileLoadedIncome,
     shiftBiweeklySeries,
     intervalLabel,
     keyToHtmlMonth,

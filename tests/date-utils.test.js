@@ -14,6 +14,7 @@ import {
     isCostDueInMonth,
     generateBiweeklyForMonth,
     generateRecurringIncomeForMonth,
+    reconcileLoadedIncome,
     shiftBiweeklySeries,
     intervalLabel,
     keyToHtmlMonth,
@@ -313,6 +314,31 @@ describe('generateRecurringIncomeForMonth', () => {
         assert.equal(result[0].date, '2026-06-15');
         assert.equal(result[0].scheduleType, 'monthly');
         assert.equal(result[0].scheduleDay, 15);
+    });
+
+    test('a stale paycheck heal does not rewrite one-time income', () => {
+        const entries = [
+            { id: 'pay', label: 'Paycheck', amount: 2000, date: '2026-08-01', scheduleType: 'monthly', scheduleDay: 1 },
+            { id: 'bonus', label: 'Bonus', amount: 4300, date: '2026-09-19', scheduleType: 'one-time' },
+        ];
+        const { entries: next, changed } = reconcileLoadedIncome(entries, '2026-8');
+        const bonus = next.find(e => e.id === 'bonus');
+        const pay = next.find(e => e.id === 'pay');
+        assert.equal(changed, true);
+        assert.equal(bonus.scheduleType, 'one-time');
+        assert.equal(bonus.date, '2026-09-19');
+        assert.equal(pay.scheduleType, 'monthly');
+        assert.equal(pay.date, '2026-09-01');
+    });
+
+    test('leaves a one-time row alone when nothing else is stale', () => {
+        const entries = [
+            { id: 'bonus', label: 'Bonus', amount: 4300, date: '2026-09-19', scheduleType: 'one-time' },
+        ];
+        const { entries: next, changed } = reconcileLoadedIncome(entries, '2026-8');
+        assert.equal(changed, false);
+        assert.equal(next[0].scheduleType, 'one-time');
+        assert.equal(next[0].date, '2026-09-19');
     });
 
     test('does not duplicate when month already has materialized biweekly rows', () => {

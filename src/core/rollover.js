@@ -7,6 +7,8 @@ import {
     formatMonthLabel,
     isCostDueInMonth,
     generateRecurringIncomeForMonth,
+    incomeScheduleOf,
+    keyToHtmlMonth,
     monthKeyToIndex,
     addMonthsToKey,
 } from './date-utils.js';
@@ -117,7 +119,14 @@ export function calculateMonthRollover(state, closingMonthKey, nextMonthKey) {
     archive.finalBalance = finalBalance;
 
     // ── 3. Next-month state ─────────────────────────────────────────────────
-    const nextIncome = generateRecurringIncomeForMonth(incomeEntries, nextMonthKey);
+    // Recurring rows move forward. A one-time deposit already dated in the
+    // month being opened stays; one dated in the month being closed does not.
+    const nextHtml = keyToHtmlMonth(nextMonthKey);
+    const nextIncome = [
+        ...generateRecurringIncomeForMonth(incomeEntries, nextMonthKey),
+        ...incomeEntries.filter(e =>
+            incomeScheduleOf(e) === 'one-time' && (e.date || '').slice(0, 7) === nextHtml),
+    ];
     // Always seed day 1 with the closing month's final balance — including
     // zero and negative (overdraft) values. The next month's cash position
     // should never silently reset to "no checkpoint" just because the

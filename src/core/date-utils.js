@@ -131,6 +131,47 @@ function biweeklySeriesKey(e) {
     return e.seriesId || `${e.scheduleAnchorDate || e.anchorDate}|${e.label}|${e.amount}`;
 }
 
+/** Stored schedule, from scheduleType or the legacy schedule field. */
+export function incomeScheduleOf(entry) {
+    return String(entry?.scheduleType || entry?.schedule || '').trim().toLowerCase();
+}
+
+/**
+ * Prepare income rows after a load.
+ * Rows with no schedule are filled in as monthly. An explicit one-time row is
+ * never rewritten. Recurring rows dated outside the working month are
+ * regenerated; one-time rows dated in that month are copied through unchanged.
+ * @param {Array} entries
+ * @param {string} monthKey - Working month key (YYYY-M, 0-indexed)
+ * @returns {{entries: Array, changed: boolean}}
+ */
+export function reconcileLoadedIncome(entries, monthKey) {
+    const htmlMk = monthKey ? keyToHtmlMonth(monthKey) : null;
+    let changed = false;
+    const prepared = (entries || []).map(e => {
+        if (incomeScheduleOf(e)) return e;
+        changed = true;
+        const day = parseInt((e.date || '').split('-')[2]) || 1;
+        return { ...e, scheduleType: 'monthly', scheduleDay: day };
+    });
+
+    const isOneTime = e => incomeScheduleOf(e) === 'one-time';
+    const oneTime = prepared.filter(isOneTime);
+    const recurring = prepared.filter(e => !isOneTime(e));
+    if (!htmlMk) return { entries: prepared, changed };
+
+    const stale = recurring.some(e => (e.date || '').slice(0, 7) !== htmlMk);
+    if (!stale) return { entries: prepared, changed };
+
+    const keptIds = new Set(oneTime.map(e => e.id).filter(id => id != null));
+    const regenerated = generateRecurringIncomeForMonth(recurring, monthKey)
+        .filter(e => !keptIds.has(e.id));
+    const keptOneTime = oneTime
+        .filter(e => (e.date || '').slice(0, 7) === htmlMk)
+        .map(e => ({ ...e, scheduleType: 'one-time' }));
+    return { entries: [...regenerated, ...keptOneTime], changed: true };
+}
+
 /**
  * Generate recurring income entries for a month based on stored entries
  * @param {Array} entries - Stored income entries
@@ -143,7 +184,7 @@ export function generateRecurringIncomeForMonth(entries, monthKey) {
     const seenSeries = new Set();
 
     for (const e of entries) {
-        const schedule = e.scheduleType || e.schedule || 'monthly';
+        const schedule = incomeScheduleOf(e) || 'monthly';
         if (schedule === 'one-time') continue; // Skip one-time entries
 
         if (schedule === 'biweekly' && (e.scheduleAnchorDate || e.anchorDate)) {

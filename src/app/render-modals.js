@@ -176,7 +176,7 @@ function openIncomeModal(incomeId = null) {
 
     if (incomeId) {
         appState._root.getElementById('income-modal-title').textContent = 'Edit Income Entry';
-        const entry = appState.incomeEntries.find(e => e.id === incomeId);
+        const entry = appState.incomeEntries.find(e => String(e.id) === String(incomeId));
         if (entry) {
             appState._root.getElementById('income-id').value       = entry.id;
             appState._root.getElementById('income-label').value    = entry.label;
@@ -477,7 +477,7 @@ function saveIncome() {
         if (scheduleType === 'monthly')   entryBase.scheduleDay = parseInt(date.split('-')[2]);
         if (scheduleType === 'biweekly')  entryBase.scheduleAnchorDate = date;
 
-        const existing = id ? appState.incomeEntries.find(e => e.id === id) : null;
+        const existing = id ? appState.incomeEntries.find(e => String(e.id) === String(id)) : null;
 
         if (existing && existing.scheduleType === 'biweekly' && scheduleType === 'biweekly') {
             // Editing a paycheck re-anchors its series: the new date becomes the
@@ -488,8 +488,8 @@ function saveIncome() {
                 appState.workingMonthKey || currentMonthKey()
             );
         } else if (id) {
-            const idx = appState.incomeEntries.findIndex(e => e.id === id);
-            if (idx !== -1) appState.incomeEntries[idx] = { id, ...entryBase };
+            const idx = appState.incomeEntries.findIndex(e => String(e.id) === String(id));
+            if (idx !== -1) appState.incomeEntries[idx] = { id: existing.id, ...entryBase };
         } else if (scheduleType === 'biweekly') {
             const seriesId = 'bw_' + Date.now().toString(36);
             const generated = generateBiweeklyForMonth(label, amount, date, appState.workingMonthKey || currentMonthKey());

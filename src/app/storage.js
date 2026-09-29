@@ -1,5 +1,5 @@
 import { appState } from './state.js';
-import { monthKeyToIndex, keyToHtmlMonth, generateRecurringIncomeForMonth } from '../core/date-utils.js';
+import { monthKeyToIndex, reconcileLoadedIncome } from '../core/date-utils.js';
 import { calculateMonthRollover } from '../core/rollover.js';
 import { renderUI } from './render-modals.js';
 import { initTabs } from './render-support.js';
@@ -105,23 +105,6 @@ async function loadBackendData() {
             appState.cardExpenseSkips = data.cardExpenseSkips || [];
             appState.acknowledgedAlerts = data.acknowledgedAlerts || [];
 
-            // Older rows were saved with no schedule at all and were skipped on
-            // rollover. Fill those in as monthly. An explicit one-time choice
-            // must be left alone — rewriting it on every load undoes the user.
-            let incomeMigrated = false;
-            appState.incomeEntries = appState.incomeEntries.map(e => {
-                const sched = e.scheduleType || e.schedule;
-                if (!sched) {
-                    incomeMigrated = true;
-                    const day = parseInt((e.date || '').split('-')[2]) || 1;
-                    return { ...e, scheduleType: 'monthly', scheduleDay: day };
-                }
-                return e;
-            });
-            if (incomeMigrated) {
-                console.info('[DebtSnowball] Filled in a monthly schedule for income entries that had none.');
-            }
-
             // Repair: older biweekly rows were saved without id/seriesId and could
             // be duplicated by a rollover bug. Restore ids, derive seriesId, and
             // drop exact series+date duplicates.
@@ -167,7 +150,7 @@ async function loadBackendData() {
             // not persist across months.
             const workingKey = data.paidMonth || currentMonthKey();
             const workingIdx = monthKeyToIndex(workingKey);
-            let needsCleanupSave = incomeMigrated || repairsNeedSave;
+            let needsCleanupSave = repairsNeedSave;
             const staleOneTime = appState.oneTimeCosts.filter(c => {
                 if (!c.addedMonth) return true; // legacy entries with no addedMonth — remove
                 return monthKeyToIndex(c.addedMonth) < workingIdx;
@@ -241,29 +224,15 @@ async function loadBackendData() {
                 appState.paidStatus = {};
             }
 
-            // Repair: recurring income rows must be materialized for the
-            // working month — stale rows (missed rollover, restored backup)
-            // carry last month's dates and land on the wrong days in the cash
-            // plan. Regeneration is idempotent: monthly rows re-derive from
-            // scheduleDay, biweekly rows from the series anchor.
+            // Recurring rows dated outside the working month are regenerated.
+            // An explicit one-time row is copied through unchanged — healing a
+            // stale paycheck must not stamp the one-time deposit as monthly.
             {
-                const wm = appState.workingMonthKey;
-                const htmlMk = wm ? keyToHtmlMonth(wm) : null;
-                const isOneTimeInc = e => (e.scheduleType || e.schedule) === 'one-time';
-                const stale = appState.incomeEntries.filter(e =>
-                    !isOneTimeInc(e) && (e.date || '').slice(0, 7) !== htmlMk);
-                if (htmlMk && stale.length) {
-                    appState.incomeEntries = [
-                        ...generateRecurringIncomeForMonth(appState.incomeEntries, wm),
-                        // One-time income is month-scoped — only rows dated in
-                        // the working month survive; stale ones from other
-                        // months must not re-enter (they'd render on wrong days
-                        // and inflate income totals forever).
-                        ...appState.incomeEntries.filter(e =>
-                            isOneTimeInc(e) && (e.date || '').slice(0, 7) === htmlMk),
-                    ];
+                const reconciled = reconcileLoadedIncome(appState.incomeEntries, appState.workingMonthKey);
+                if (reconciled.changed) {
+                    appState.incomeEntries = reconciled.entries;
                     needsCleanupSave = true;
-                    console.info(`[DebtSnowball] Regenerated ${stale.length} income entr(ies) with stale dates for the working month.`);
+                    console.info('[DebtSnowball] Reconciled income schedules for the working month.');
                 }
             }
 

@@ -3856,6 +3856,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     border-radius: 10px;
     padding: 3px;
     gap: 3px;
+    margin: 0.65rem 0 0.45rem;
 }
 
 .strategy-btn {
@@ -3884,7 +3885,7 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
 }
 
 .strategy-desc-text {
-    margin-bottom: 1.5rem !important;
+    margin-bottom: 0.75rem !important;
     font-style: italic;
 }
 
@@ -4347,16 +4348,60 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
-    margin: 0 0 1rem;
+    margin: 0;
 }
 
-.baby-steps-title {
-    margin: 0 0 0.15rem;
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+.baby-steps-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid rgba(91, 127, 255, 0.55);
+    border-radius: 8px;
+    background: rgba(91, 127, 255, 0.1);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.baby-steps-summary-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    overflow: hidden;
+}
+
+.baby-steps-summary .baby-step-title,
+.baby-steps-summary .baby-step-detail {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.baby-steps-summary .baby-step-detail {
+    grid-column: auto;
+    margin: 0;
+}
+
+.baby-steps-chevron {
+    flex-shrink: 0;
     color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.baby-steps-list {
+    display: none;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.baby-steps.is-open .baby-steps-list {
+    display: flex;
 }
 
 .baby-step {
@@ -5387,17 +5432,17 @@ const PANEL_HTML = `<div class="app-container">
                 <section class="visualization-section card">
                     <div class="viz-header">
                         <h2>Payoff Timeline</h2>
-                        <div class="strategy-toggle" id="strategy-toggle">
-                            <button class="strategy-btn active" data-strategy="snowball" title="Pay smallest balance first — quick wins keep you motivated">
-                                &#10052;&#65039; Snowball
-                            </button>
-                            <button class="strategy-btn" data-strategy="avalanche" title="Pay highest interest first — saves the most money">
-                                &#127754; Avalanche
-                            </button>
-                        </div>
+                    </div>
+                    <div id="baby-steps" class="baby-steps"></div>
+                    <div class="strategy-toggle" id="strategy-toggle">
+                        <button class="strategy-btn active" data-strategy="snowball" title="Pay smallest balance first — quick wins keep you motivated">
+                            &#10052;&#65039; Snowball
+                        </button>
+                        <button class="strategy-btn" data-strategy="avalanche" title="Pay highest interest first — saves the most money">
+                            &#127754; Avalanche
+                        </button>
                     </div>
                     <p id="strategy-desc" class="subtitle strategy-desc-text"></p>
-                    <div id="baby-steps" class="baby-steps"></div>
                     <label class="include-mortgage-toggle" id="include-mortgage-toggle-wrap" style="display:none;">
                         <input type="checkbox" id="include-mortgage-toggle">
                         <span>Include mortgage in the payoff</span>

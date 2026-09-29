@@ -420,7 +420,9 @@ function renderBabySteps() {
         return !!marked[String(step.n)];
     };
     const current = steps.find(step => !done(step));
-    host.innerHTML = `<p class="baby-steps-title">Baby steps</p>` + steps.map(step => {
+    const shown = current || { n: '✓', title: 'All baby steps are done', detail: '' };
+    const open = !!appState.babyStepsOpen;
+    const list = steps.map(step => {
         const isDone = done(step);
         const isCurrent = current && current.n === step.n;
         const mark = step.manual
@@ -433,6 +435,17 @@ function renderBabySteps() {
             <span class="baby-step-detail">${escHtml(step.detail)}</span>
         </div>`;
     }).join('');
+    host.classList.toggle('is-open', open);
+    host.innerHTML = `
+        <button type="button" class="baby-steps-summary" data-baby-steps-toggle aria-expanded="${open ? 'true' : 'false'}">
+            <span class="baby-step-index">${escHtml(String(shown.n))}</span>
+            <span class="baby-steps-summary-text">
+                <span class="baby-step-title">${escHtml(shown.title)}</span>
+                ${shown.detail ? `<span class="baby-step-detail">${escHtml(shown.detail)}</span>` : ''}
+            </span>
+            <span class="baby-steps-chevron" aria-hidden="true">${open ? '▾' : '▸'}</span>
+        </button>
+        <div class="baby-steps-list">${list}</div>`;
 }
 
 export { applyWindfall, autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, initTabs, launchConfetti, maybeShowCheckin, openWindfallModal, renderBabySteps, runSimulationWithWindfall, showAutoMinHint, startCountdown, stopCountdown, updateAutoMinHint, updateCountdownDisplay };

@@ -130,6 +130,22 @@ describe('calculateMonthRollover', () => {
         assert.equal(nextState.incomeEntries[0].date, '2026-05-15');
     });
 
+    test('one-time income dated in the month being opened is kept', () => {
+        const state = baseState({
+            incomeEntries: [
+                { id: 'i1', label: 'Salary', amount: 3000, date: '2026-04-15', scheduleType: 'monthly', scheduleDay: 15 },
+                { id: 'i9', label: 'Bonus', amount: 500, date: '2026-05-03', scheduleType: 'one-time' },
+                { id: 'i8', label: 'Old bonus', amount: 100, date: '2026-04-20', scheduleType: 'one-time' },
+            ],
+        });
+
+        const { nextState } = calculateMonthRollover(state, closingMonth, nextMonth);
+        const bonus = nextState.incomeEntries.find(e => e.id === 'i9');
+        assert.equal(bonus.scheduleType, 'one-time');
+        assert.equal(bonus.date, '2026-05-03');
+        assert.equal(nextState.incomeEntries.some(e => e.id === 'i8'), false);
+    });
+
     test('checkpoints cleared and day-1 checkpoint created with final balance', () => {
         const state = baseState({
             incomeEntries: [{ id: 'i1', label: 'Salary', amount: 3000, date: '2026-04-15', scheduleType: 'monthly', scheduleDay: 15 }],

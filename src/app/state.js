@@ -18,6 +18,7 @@ export const appState = {
     showMortgage: true,   // toggle mortgage visibility on the Debts tab
     includeMortgageOnTimeline: false, // payoff graph and dates leave the house out until asked
     babySteps: {},        // manual baby-step checkoffs: { "1": true, "3": true, ... }
+    babyStepsOpen: false, // timeline baby-step list is collapsed to the current step
     showAllRecurringCosts: false, // Fixed Bills: false = due this month, true = every recurring bill
     paidStatus: {},       // { [id]: { status: 'paid'|'autopay', amount: number } } — resets each calendar month
     monthlyArchives: [],  // [{ month, label, incomeEntries, recurringCosts, checkpoints, startingBalance, totalIncome, totalCosts }]
