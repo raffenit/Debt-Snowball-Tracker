@@ -178,7 +178,7 @@ function openIncomeModal(incomeId = null) {
             appState._root.getElementById('income-label').value    = entry.label;
             appState._root.getElementById('income-date').value     = entry.date;
             appState._root.getElementById('income-amount').value   = entry.amount;
-            appState._root.getElementById('income-schedule').value = entry.scheduleType || 'monthly';
+            appState._root.getElementById('income-schedule').value = entry.scheduleType || entry.schedule || 'monthly';
             updateIncomeScheduleHint();
         }
     } else {

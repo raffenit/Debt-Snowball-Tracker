@@ -1655,7 +1655,7 @@ var DebtSnowballApp = (() => {
         let incomeMigrated = false;
         appState.incomeEntries = appState.incomeEntries.map((e) => {
           const sched = e.scheduleType || e.schedule;
-          if (!sched || sched === "one-time") {
+          if (!sched) {
             incomeMigrated = true;
             const day = parseInt((e.date || "").split("-")[2]) || 1;
             return { ...e, scheduleType: "monthly", scheduleDay: day };
@@ -1663,7 +1663,7 @@ var DebtSnowballApp = (() => {
           return e;
         });
         if (incomeMigrated) {
-          console.info("[DebtSnowball] Migrated income entries to monthly schedule (were one-time/missing).");
+          console.info("[DebtSnowball] Filled in a monthly schedule for income entries that had none.");
         }
         const seenIncomeRows = /* @__PURE__ */ new Set();
         appState.incomeEntries = appState.incomeEntries.map((e, i) => ({
@@ -4407,7 +4407,7 @@ This replaces ALL current data with that snapshot.`)) {
         appState._root.getElementById("income-label").value = entry.label;
         appState._root.getElementById("income-date").value = entry.date;
         appState._root.getElementById("income-amount").value = entry.amount;
-        appState._root.getElementById("income-schedule").value = entry.scheduleType || "monthly";
+        appState._root.getElementById("income-schedule").value = entry.scheduleType || entry.schedule || "monthly";
         updateIncomeScheduleHint();
       }
     } else {

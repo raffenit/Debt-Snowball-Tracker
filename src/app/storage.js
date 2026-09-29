@@ -99,13 +99,13 @@ async function loadBackendData() {
             appState.spendingBudgets  = data.spendingBudgets  || [];
             appState.cardExpenseSkips = data.cardExpenseSkips || [];
 
-            // Migration: income entries previously defaulted to scheduleType 'one-time',
-            // which caused them to be skipped during month rollover (resulting in zero income).
-            // Convert any entries with no scheduleType or 'one-time' to 'monthly'.
+            // Older rows were saved with no schedule at all and were skipped on
+            // rollover. Fill those in as monthly. An explicit one-time choice
+            // must be left alone — rewriting it on every load undoes the user.
             let incomeMigrated = false;
             appState.incomeEntries = appState.incomeEntries.map(e => {
                 const sched = e.scheduleType || e.schedule;
-                if (!sched || sched === 'one-time') {
+                if (!sched) {
                     incomeMigrated = true;
                     const day = parseInt((e.date || '').split('-')[2]) || 1;
                     return { ...e, scheduleType: 'monthly', scheduleDay: day };
@@ -113,7 +113,7 @@ async function loadBackendData() {
                 return e;
             });
             if (incomeMigrated) {
-                console.info('[DebtSnowball] Migrated income entries to monthly schedule (were one-time/missing).');
+                console.info('[DebtSnowball] Filled in a monthly schedule for income entries that had none.');
             }
 
             // Repair: older biweekly rows were saved without id/seriesId and could
