@@ -97,6 +97,8 @@ async function loadBackendData() {
             appState.checkpoints     = data.checkpoints     || [];
             appState.strategy        = data.strategy        || 'snowball';
             appState.showMortgage    = data.showMortgage !== false;
+            appState.includeMortgageOnTimeline = data.includeMortgageOnTimeline === true;
+            appState.babySteps       = data.babySteps && typeof data.babySteps === 'object' ? data.babySteps : {};
             appState.startingBalance = data.startingBalance || 0;
             appState.monthlyArchives  = data.monthlyArchives  || [];
             appState.spendingBudgets  = data.spendingBudgets  || [];
@@ -305,6 +307,8 @@ function buildSavePayload() {
         strategy:       appState.strategy,
         startingBalance: appState.startingBalance,
         showMortgage:   appState.showMortgage,
+        includeMortgageOnTimeline: appState.includeMortgageOnTimeline,
+        babySteps:      appState.babySteps,
         paidStatus:     appState.paidStatus,
         paidMonth:      appState.workingMonthKey || currentMonthKey(),
         monthlyArchives: appState.monthlyArchives,

@@ -1,27 +1,31 @@
 import { appState } from './state.js';
-import { currentMonthKey } from '../core/date-utils.js';
+import { currentMonthKey, isCostDueThisMonth } from '../core/date-utils.js';
 import { calcAutoMin, escHtml, formatMoney } from '../core/pure-utils.js';
-import { getStrategyOrder, simulatePayoff } from '../core/simulation.js';
+import { getStrategyOrder, planHoldTypes, simulatePayoff } from '../core/simulation.js';
 import { showNotificationToast } from './render-export.js';
 
 // ─── Countdown Timer ─────────────────────────────────────────────────────────
-function startCountdown(payoffDate) {
+function startCountdown(payoffDate, asideDate = null) {
     stopCountdown();
-    updateCountdownDisplay(payoffDate);
-    appState.countdownInterval = setInterval(() => updateCountdownDisplay(payoffDate), 60000);
+    appState.lastSimPayoffDate = payoffDate;
+    appState.lastSimPayoffAsideDate = asideDate;
+    updateCountdownDisplay();
+    appState.countdownInterval = setInterval(updateCountdownDisplay, 60000);
 }
 function stopCountdown() {
     if (appState.countdownInterval) { clearInterval(appState.countdownInterval); appState.countdownInterval = null; }
 }
 
-function updateCountdownDisplay(payoffDate) {
-    const el = appState._root.getElementById('stat-countdown');
-    if (!el) return;
-    const now  = new Date();
-    const diff = payoffDate - now;
+function paintCountdown(el, payoffDate) {
+    if (!el || !payoffDate) return;
+    const diff = payoffDate - new Date();
     if (diff <= 0) { el.textContent = '🎉 Debt Free!'; return; }
-    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-    el.textContent = days.toLocaleString();
+    el.textContent = Math.ceil(diff / (1000 * 60 * 60 * 24)).toLocaleString();
+}
+
+function updateCountdownDisplay() {
+    paintCountdown(appState._root.getElementById('stat-countdown'), appState.lastSimPayoffDate);
+    paintCountdown(appState._root.getElementById('stat-countdown-ex-mortgage'), appState.lastSimPayoffAsideDate);
 }
 
 function autoCalcMinPaymentCC() {
@@ -86,11 +90,13 @@ function closeWindfallModal() {
 // The payoff sim lives in core/simulation.js and takes an explicit state
 // snapshot — feed it live appState scoped to the working month.
 function runSimulation(strat) {
+    const hold = planHoldTypes(appState);
     return simulatePayoff({
         debts:          appState.debts,
         incomeEntries:  appState.incomeEntries,
         recurringCosts: appState.recurringCosts,
         monthKey:       appState.workingMonthKey || currentMonthKey(),
+        ...(hold.length ? { holdMinimumTypes: hold } : {}),
     }, strat);
 }
 
@@ -205,7 +211,8 @@ function applyWindfall() {
 function runSimulationWithWindfall(windfall, strat) {
     // Clone debts and apply windfall in strategy order before simulating
     let simDebts = appState.debts.map(d => ({ ...d }));
-    const ordered = getStrategyOrder(simDebts, strat);
+    const ordered = getStrategyOrder(simDebts, strat)
+        .filter(d => appState.includeMortgageOnTimeline || d.type !== 'mortgage');
     let remaining = windfall;
     const allocation = [];
 
@@ -378,4 +385,54 @@ function initTabs() {
 }
 
 
-export { applyWindfall, autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, initTabs, launchConfetti, maybeShowCheckin, openWindfallModal, runSimulationWithWindfall, showAutoMinHint, startCountdown, stopCountdown, updateAutoMinHint, updateCountdownDisplay };
+function renderBabySteps() {
+    const host = appState._root?.getElementById('baby-steps');
+    if (!host) return;
+    const debts = appState.debts || [];
+    const others = debts.filter(d => d.type !== 'mortgage' && d.balance > 0);
+    const mortgages = debts.filter(d => d.type === 'mortgage' && d.balance > 0);
+    const monthKey = appState.workingMonthKey || currentMonthKey();
+    const billTotal = [
+        ...(appState.recurringCosts || []).filter(c => isCostDueThisMonth(c, monthKey)),
+        ...(appState.oneTimeCosts || []),
+    ].reduce((sum, cost) => sum + (Number(cost.amount) || 0), 0);
+    const minTotal = debts.filter(d => d.balance > 0).reduce((sum, d) => sum + (Number(d.minPayment) || 0), 0);
+    const monthly = billTotal + minTotal;
+    const marked = appState.babySteps || {};
+    const steps = [
+        { n: 1, title: '$1,000 starter emergency fund', manual: true, detail: 'Cash set aside before the snowball.' },
+        { n: 2, title: 'Pay off every debt except the house', detail: others.length
+            ? `${others.length} left: ${others.map(d => d.name).join(', ')}`
+            : 'Nothing left outside the mortgage.' },
+        { n: 3, title: 'Save 3–6 months of expenses', manual: true, detail: monthly > 0
+            ? `Bills and minimums are about ${formatMoney(monthly)} a month, so 3–6 months is ${formatMoney(monthly * 3)}–${formatMoney(monthly * 6)}.`
+            : 'Add bills and debts to estimate 3–6 months of expenses.' },
+        { n: 4, title: 'Invest 15% of income for retirement', manual: true, detail: 'After the snowball and the full emergency fund.' },
+        { n: 5, title: 'College funding', manual: true, detail: 'Mark done if this does not apply.' },
+        { n: 6, title: 'Pay off the house', detail: mortgages.length
+            ? `${formatMoney(mortgages.reduce((s, d) => s + d.balance, 0))} left on the mortgage.`
+            : 'No mortgage balance.' },
+        { n: 7, title: 'Build wealth and give', manual: true, detail: 'The last step.' },
+    ];
+    const done = step => {
+        if (step.n === 2) return others.length === 0;
+        if (step.n === 6) return mortgages.length === 0;
+        return !!marked[String(step.n)];
+    };
+    const current = steps.find(step => !done(step));
+    host.innerHTML = `<p class="baby-steps-title">Baby steps</p>` + steps.map(step => {
+        const isDone = done(step);
+        const isCurrent = current && current.n === step.n;
+        const mark = step.manual
+            ? `<button type="button" class="baby-step-mark" data-baby-step="${step.n}">${isDone ? 'Done' : 'Mark done'}</button>`
+            : '';
+        return `<div class="baby-step${isCurrent ? ' is-current' : ''}${isDone ? ' is-done' : ''}">
+            <span class="baby-step-index">${isDone ? '✓' : step.n}</span>
+            <span class="baby-step-title">${escHtml(step.title)}</span>
+            ${mark}
+            <span class="baby-step-detail">${escHtml(step.detail)}</span>
+        </div>`;
+    }).join('');
+}
+
+export { applyWindfall, autoCalcMinPayment, autoCalcMinPaymentCC, calcWindfall, closeWindfallModal, initTabs, launchConfetti, maybeShowCheckin, openWindfallModal, renderBabySteps, runSimulationWithWindfall, showAutoMinHint, startCountdown, stopCountdown, updateAutoMinHint, updateCountdownDisplay };

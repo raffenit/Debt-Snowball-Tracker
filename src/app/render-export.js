@@ -136,6 +136,7 @@ const BACKUP_FIELDS = [
     'debts', 'recurringCosts', 'oneTimeCosts', 'incomeEntries', 'checkpoints',
     'strategy', 'spendingBudgets', 'cardExpenseSkips', 'acknowledgedAlerts', 'minPayOverrides',
     'monthlyArchives', 'paidStatus', 'startingBalance', 'showMortgage',
+    'includeMortgageOnTimeline', 'babySteps',
     'expenseDefaults',
 ];
 

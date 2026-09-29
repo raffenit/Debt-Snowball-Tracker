@@ -27,6 +27,8 @@ const VALID = {
     expenseDefaults: { paymentMethod: 'card', cardDebtId: 'd1' },
     startingBalance: 500,
     showMortgage: false,
+    includeMortgageOnTimeline: false,
+    babySteps: { '1': true },
     strategy: 'avalanche',
 };
 

@@ -4329,6 +4329,104 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     font-weight: 500;
 }
 
+.include-mortgage-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0 0 0.9rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.include-mortgage-toggle input {
+    accent-color: var(--accent-color);
+}
+
+.baby-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+}
+
+.baby-steps-title {
+    margin: 0 0 0.15rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.baby-step {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.45rem 0.6rem;
+    align-items: center;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.16);
+}
+
+.baby-step.is-current {
+    border-color: rgba(91, 127, 255, 0.55);
+    background: rgba(91, 127, 255, 0.1);
+}
+
+.baby-step.is-done {
+    opacity: 0.62;
+}
+
+.baby-step-index {
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+.baby-step.is-current .baby-step-index {
+    background: var(--accent-color);
+    color: #fff;
+}
+
+.baby-step-title {
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.baby-step-detail {
+    grid-column: 2;
+    margin-top: -0.2rem;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    line-height: 1.35;
+}
+
+.baby-step-mark {
+    padding: 0.15rem 0.45rem;
+    border-radius: 6px;
+    border: 1px solid rgba(197, 208, 255, 0.35);
+    background: transparent;
+    color: #c5d0ff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.baby-step.is-done .baby-step-mark {
+    color: #6ee7b7;
+    border-color: rgba(52, 211, 153, 0.4);
+}
+
 /* ===== Windfall Bar ===== */
 .windfall-bar {
     display: flex;
@@ -5299,6 +5397,11 @@ const PANEL_HTML = `<div class="app-container">
                         </div>
                     </div>
                     <p id="strategy-desc" class="subtitle strategy-desc-text"></p>
+                    <div id="baby-steps" class="baby-steps"></div>
+                    <label class="include-mortgage-toggle" id="include-mortgage-toggle-wrap" style="display:none;">
+                        <input type="checkbox" id="include-mortgage-toggle">
+                        <span>Include mortgage in the payoff</span>
+                    </label>
                     <div class="summary-stats">
                         <div class="stat-box stat-box-countdown" id="stat-countdown-box" style="display:none;">
                             <span class="stat-label">Days Until Debt-Free</span>

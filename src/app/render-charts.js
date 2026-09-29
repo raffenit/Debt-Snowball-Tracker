@@ -43,7 +43,8 @@ function renderPaydownChart(monthlyTotals, perDebtMonthly) {
     });
 
     const datasets = [];
-    const orderedDebts = getStrategyOrder(appState.debts, appState.strategy);
+    const orderedDebts = getStrategyOrder(appState.debts, appState.strategy)
+        .filter(d => appState.includeMortgageOnTimeline || d.type !== 'mortgage');
 
     orderedDebts.forEach((debt, idx) => {
         const color  = DEBT_COLORS[idx % DEBT_COLORS.length];

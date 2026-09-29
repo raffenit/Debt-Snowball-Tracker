@@ -28,13 +28,21 @@ function renderVisualization(simResults) {
     const countdownBox      = appState._root.getElementById('stat-countdown-box');
     const payoffBoxAlt      = appState._root.getElementById('stat-payoff-box');
     const windfallBar       = appState._root.getElementById('windfall-bar');
+    const mortgageToggle    = appState._root.getElementById('include-mortgage-toggle-wrap');
+    const hasMortgage       = appState.debts.some(d => d.type === 'mortgage' && d.balance > 0);
+    if (mortgageToggle) mortgageToggle.style.display = hasMortgage ? '' : 'none';
+    const mortgageCheck = appState._root.getElementById('include-mortgage-toggle');
+    if (mortgageCheck) mortgageCheck.checked = !!appState.includeMortgageOnTimeline;
 
     // Get archive data if in archive view
     const isArchiveViewTimeline = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
     const archiveDataForDebt = isArchiveViewTimeline ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
     const debtsForCalc = archiveDataForDebt ? (archiveDataForDebt.debts || appState.debts) : appState.debts;
     
-    const initialTotalDebt = debtsForCalc.reduce((s,d) => s + d.balance, 0);
+    const countedDebts = (!isArchiveViewTimeline && !appState.includeMortgageOnTimeline)
+        ? debtsForCalc.filter(d => d.type !== 'mortgage')
+        : debtsForCalc;
+    const initialTotalDebt = countedDebts.reduce((s,d) => s + d.balance, 0);
     statTotalDebt.textContent = formatMoney(initialTotalDebt);
 
     stratDesc.textContent = appState.strategy === 'snowball'
@@ -254,15 +262,15 @@ function renderVisualization(simResults) {
 
     const today      = new Date();
     const payoffDate = new Date(today.getFullYear(), today.getMonth() + simResults.monthsElapsed, 1);
-    appState.lastSimPayoffDate = payoffDate;
+    const formatPayoff = date => date.toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' });
     statTotalInterest.textContent = formatMoney(simResults.totalInterestPaid);
 
-    // Countdown box
     countdownBox.style.display = 'flex';
     payoffBoxAlt.style.display = 'none';
     windfallBar.style.display  = 'flex';
-    appState._root.getElementById('stat-payoff-date').textContent =
-        payoffDate.toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' });
+    const scope = !hasMortgage ? ''
+        : appState.includeMortgageOnTimeline ? ' · including mortgage' : ' · excluding mortgage';
+    appState._root.getElementById('stat-payoff-date').textContent = formatPayoff(payoffDate) + scope;
     startCountdown(payoffDate);
 
     // Compare against the other appState.strategy
@@ -287,8 +295,27 @@ function renderVisualization(simResults) {
         statSavingsBox.style.display = 'none';
     }
 
-    renderTimelineChart(simResults.payoffLog, simResults.monthsElapsed);
-    renderPaydownChart(simResults.monthlyTotals, simResults.perDebtMonthly);
+    const chartResults = chartWithoutMortgage(simResults);
+    renderTimelineChart(chartResults.payoffLog, chartResults.monthsElapsed);
+    renderPaydownChart(chartResults.monthlyTotals, chartResults.perDebtMonthly);
+}
+
+// The held-mortgage sim still carries the house balance in its series.
+// Drop that line, and the total, unless the timeline toggle includes it.
+function chartWithoutMortgage(simResults) {
+    if (appState.includeMortgageOnTimeline) return simResults;
+    const drop = new Set(appState.debts.filter(d => d.type === 'mortgage').map(d => d.id));
+    if (!drop.size) return simResults;
+    const perDebtMonthly = {};
+    for (const [id, series] of Object.entries(simResults.perDebtMonthly || {})) {
+        if (!drop.has(id)) perDebtMonthly[id] = series;
+    }
+    const payoffLog = (simResults.payoffLog || []).filter(d => !drop.has(d.id));
+    const lengths = Object.values(perDebtMonthly).map(series => series.length);
+    const maxLen = lengths.length ? Math.max(...lengths) : 0;
+    const monthlyTotals = Array.from({ length: maxLen }, (_, i) =>
+        Object.values(perDebtMonthly).reduce((sum, series) => sum + (series[i] ?? 0), 0));
+    return { ...simResults, perDebtMonthly, payoffLog, monthlyTotals };
 }
 // ─── Monthly Cash Flow Plan ───────────────────────────────────────────────────
 function renderPaymentPlan() {
@@ -424,7 +451,8 @@ function renderPaymentPlan() {
     // Money already spent via budgets isn't available for the snowball extra
     const totalSpentManual = _budgetExpenses.reduce((s, e) => s + e.amount, 0);
     const extra         = Math.max(0, totalInc - totalRec - totalMinPay - totalSpentManual);
-    const targetId      = sortedDebts[0]?.id;
+    const attackDebts   = appState.includeMortgageOnTimeline ? sortedDebts : sortedDebts.filter(d => d.type !== 'mortgage');
+    const targetId      = attackDebts[0]?.id;
 
     sortedDebts.forEach(debt => {
         const day      = debt.dueDay || 1;

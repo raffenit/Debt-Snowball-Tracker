@@ -442,7 +442,7 @@ describe('getStrategyOrder — ties and large lists', () => {
 });
 
 // ─── simulatePayoff (explicit-state variant) ──────────────────────────────────
-import { simulatePayoff } from './helpers.js';
+import { runSimulation, simulatePayoff } from './helpers.js';
 
 describe('simulatePayoff — state snapshot + month scoping', () => {
     const debts = [
@@ -489,6 +489,53 @@ describe('simulatePayoff — state snapshot + month scoping', () => {
             `one-time bonus must not shorten the plan like monthly income (${once.monthsElapsed} vs ${repeating.monthsElapsed})`);
         assert.ok(once.monthsElapsed < 20000 / 200,
             'the bonus still applies in the first month');
+    });
+
+    test('the timeline leaves the mortgage out unless the toggle includes it', () => {
+        const debts = [
+            { id: 'card', type: 'credit-card', balance: 1000, rate: 0, minPayment: 100, dueDay: 1 },
+            { id: 'home', type: 'mortgage', balance: 50000, rate: 0, minPayment: 200, dueDay: 1 },
+        ];
+        const state = {
+            debts,
+            incomeEntries: [{ id: 'pay', amount: 1000, date: '2026-10-01', scheduleType: 'monthly' }],
+            recurringCosts: [],
+            monthKey: '2026-9',
+            includeMortgageOnTimeline: false,
+        };
+        const excluded = runSimulation('snowball', state);
+        const included = runSimulation('snowball', { ...state, includeMortgageOnTimeline: true });
+        assert.equal(excluded.monthsElapsed, 2);
+        assert.equal(excluded.debtPayoffMonths.home, undefined);
+        assert.ok(included.monthsElapsed > excluded.monthsElapsed);
+    });
+
+    test('holding the mortgage stops when every other debt is paid', () => {
+        const debts = [
+            { id: 'card', type: 'credit-card', balance: 1000, rate: 0, minPayment: 100, dueDay: 1 },
+            { id: 'home', type: 'mortgage', balance: 50000, rate: 0, minPayment: 200, dueDay: 1 },
+        ];
+        const incomeEntries = [{ id: 'pay', amount: 1000, date: '2026-10-01', scheduleType: 'monthly' }];
+        const base = { debts, incomeEntries, recurringCosts: [], monthKey: '2026-9' };
+        const full = simulatePayoff(base, 'snowball');
+        const aside = simulatePayoff({ ...base, holdMinimumTypes: ['mortgage'] }, 'snowball');
+        assert.equal(aside.valid, true);
+        assert.equal(aside.monthsElapsed, 2);
+        assert.equal(aside.debtPayoffMonths.card, 2);
+        assert.equal(aside.debtPayoffMonths.home, undefined);
+        assert.ok(full.monthsElapsed > aside.monthsElapsed);
+    });
+
+    test('a held mortgage does not take the extra payment', () => {
+        const debts = [
+            { id: 'card', type: 'credit-card', balance: 2000, rate: 5, minPayment: 50, dueDay: 1 },
+            { id: 'home', type: 'mortgage', balance: 80000, rate: 8, minPayment: 400, dueDay: 1 },
+        ];
+        const incomeEntries = [{ id: 'pay', amount: 1000, date: '2026-10-01', scheduleType: 'monthly' }];
+        const base = { debts, incomeEntries, recurringCosts: [], monthKey: '2026-9' };
+        const full = simulatePayoff(base, 'avalanche');
+        const aside = simulatePayoff({ ...base, holdMinimumTypes: ['mortgage'] }, 'avalanche');
+        assert.ok(aside.debtPayoffMonths.card < full.debtPayoffMonths.card);
     });
 
     test('missing income date does not crash the sim', () => {

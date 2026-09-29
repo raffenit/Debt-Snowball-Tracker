@@ -12,7 +12,7 @@ import { renderPaymentPlan, renderVisualization } from './render-payment.js';
 import { saveData, saveDataAndRender } from './storage.js';
 import { reportError } from './error-report.js';
 import { checkDataSanity } from '../core/sanity.js';
-import { launchConfetti } from './render-support.js';
+import { launchConfetti, renderBabySteps } from './render-support.js';
 
 // ─── Debt Modal ──────────────────────────────────────────────────────────────
 function openDebtModal(debtId = null) {
@@ -534,7 +534,8 @@ function _getDebtPaymentAmount(debtId) {
 
     const aliveDebts = appState.debts.filter(d => d.balance > 0 || appState.minPayOverrides[d.id]);
     const sortedDebts = getStrategyOrder(aliveDebts, appState.strategy);
-    const targetId = sortedDebts[0]?.id;
+    const attackDebts = appState.includeMortgageOnTimeline ? sortedDebts : sortedDebts.filter(d => d.type !== 'mortgage');
+    const targetId = attackDebts[0]?.id;
 
     const _wmKey  = appState.workingMonthKey || currentMonthKey();
     const _wmHtml = keyToHtmlMonth(_wmKey);
@@ -908,6 +909,7 @@ function renderUI() {
     // and reports "No Income Added" even when the Income tab is populated.
     const simResults = runSimulation(appState.strategy, appState);
     renderDebtsList(simResults);
+    renderBabySteps();
     renderVisualization(simResults);
     
     const schedule = renderPaymentPlan();

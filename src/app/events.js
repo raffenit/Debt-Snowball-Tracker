@@ -570,6 +570,20 @@ function setupEventListeners() {
         saveData().then(() => renderUI()).catch(err => reportError("Save failed — your change may not persist after reload", err));
     });
 
+    // Mortgage on the payoff timeline. The Debts-tab show/hide is separate.
+    appState._root.getElementById('include-mortgage-toggle')?.addEventListener('change', e => {
+        appState.includeMortgageOnTimeline = e.target.checked;
+        saveData().then(() => renderUI()).catch(err => reportError("Save failed — your change may not persist after reload", err));
+    });
+
+    appState._root.getElementById('baby-steps')?.addEventListener('click', e => {
+        const btn = e.target.closest('[data-baby-step]');
+        if (!btn) return;
+        const key = btn.dataset.babyStep;
+        appState.babySteps = { ...(appState.babySteps || {}), [key]: !appState.babySteps?.[key] };
+        saveData().then(() => renderUI()).catch(err => reportError("Save failed — your change may not persist after reload", err));
+    });
+
     // Strategy toggle
     appState._root.querySelectorAll('.strategy-btn').forEach(btn => {
         btn.addEventListener('click', () => {

@@ -87,6 +87,12 @@ export function simulatePayoff(state, strat) {
         return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
     }
 
+    // Types listed here still receive their minimum (the bill is real) but
+    // never the extra payment, and the countdown stops when every other debt
+    // is gone. Used for "debt-free excluding the mortgage."
+    const holdMinimumTypes = state.holdMinimumTypes || [];
+    const isHeld = d => holdMinimumTypes.includes(d.type);
+
     const toIncomeDays = rows => rows
         .map(e => ({ day: parseInt((e.date || '').split('-')[2]) || 1, amount: e.amount }))
         .sort((a,b) => a.day - b.day);
@@ -98,7 +104,11 @@ export function simulatePayoff(state, strat) {
     const perDebtMonthly = {};
     simDebts.forEach(d => { perDebtMonthly[d.id] = [d.balance]; });
 
-    while (simDebts.some(d => d.balance > 0) && monthsElapsed < MAX_SIMULATION_MONTHS) {
+    const stillCounting = d => d.balance > 0 && !isHeld(d);
+    const unfinished = holdMinimumTypes.length
+        ? () => simDebts.some(stillCounting)
+        : () => simDebts.some(d => d.balance > 0);
+    while (unfinished() && monthsElapsed < MAX_SIMULATION_MONTHS) {
         monthsElapsed++;
         let availableCash = effectiveBudget + (monthsElapsed === 1 ? startingBalance : 0); // eslint-disable-line no-unused-vars
 
@@ -114,13 +124,14 @@ export function simulatePayoff(state, strat) {
             }
             const interest     = d.balance * (effectiveRate / 100 / 12);
             d.balance         += interest;
-            totalInterestPaid += interest;
             d.interestPaid    += interest;
+            if (!isHeld(d)) totalInterestPaid += interest;
         });
 
-        const alive     = simDebts.filter(d => d.balance > 0);
-        const ordered   = getStrategyOrder(alive, strat);
-        const targetId  = ordered[0]?.id;
+        const alive      = simDebts.filter(d => d.balance > 0);
+        const targetPool = holdMinimumTypes.length ? alive.filter(d => !isHeld(d)) : alive;
+        const ordered    = getStrategyOrder(targetPool.length ? targetPool : alive, strat);
+        const targetId   = ordered[0]?.id;
         const aliveMinSum  = alive.reduce((s,d) => s + d.minPayment, 0);
         const monthBudget  = monthsElapsed === 1 ? effectiveBudget + oneTimeTotal : effectiveBudget;
         const incomeDays   = monthsElapsed === 1 ? firstMonthIncomeDays : repeatingIncomeDays;
@@ -172,6 +183,14 @@ export function simulatePayoff(state, strat) {
  * Build a simulatePayoff snapshot from live app state.
  * The card stores the working month as `workingMonthKey`; the engine reads `monthKey`.
  */
+// Mortgage stays on its minimum, and out of the payoff, unless the timeline
+// toggle explicitly includes it. Missing flag means excluded.
+export function planHoldTypes(state) {
+    if (!state || state.includeMortgageOnTimeline === true) return [];
+    const hasMortgage = (state.debts || []).some(d => d.type === 'mortgage' && d.balance > 0);
+    return hasMortgage ? ['mortgage'] : [];
+}
+
 export function simulationStateFrom(state) {
     return {
         debts:           state.debts || [],
@@ -188,6 +207,8 @@ export function runSimulation(strat, state) {
     const snapshot = state
         ? simulationStateFrom(state)
         : { debts, incomeEntries, recurringCosts, startingBalance };
+    const hold = planHoldTypes(state);
+    if (hold.length) snapshot.holdMinimumTypes = hold;
     return simulatePayoff(snapshot, strat);
 }
 

@@ -332,8 +332,8 @@ function renderDebtsList(simResults) {
     const promoDebts   = visible.filter(d => d.promoZeroInterest);
     const regularDebts = visible.filter(d => !d.promoZeroInterest);
 
-    // The "target" debt is the first in the full visible list
-    const targetId = visible[0]?.id;
+    const attack = ordered.filter(d => d.balance > 0 && (appState.includeMortgageOnTimeline || d.type !== 'mortgage'));
+    const targetId = attack[0]?.id;
 
     function buildDebtCard(debt, globalIdx) {
         const isPastDue    = (debt.dueDay || 1) <= currentDay;
@@ -376,7 +376,12 @@ function renderDebtsList(simResults) {
 
         const minPayNote = debt.promoZeroInterest ? '<span class="promo-auto-note">(auto: payoff by promo end)</span>' : '';
 
-        const payoffLine = payoffMonths != null
+        const payoffLine = (!appState.includeMortgageOnTimeline && debt.type === 'mortgage' && debt.balance > 0)
+            ? `<div class="debt-detail payoff-months-row">
+                <span class="debt-detail-label">Snowball</span>
+                <span class="debt-detail-value">Minimum only</span>
+               </div>`
+            : payoffMonths != null
             ? `<div class="debt-detail payoff-months-row">
                 <span class="debt-detail-label">Paid off in</span>
                 <span class="debt-detail-value payoff-months-value">${payoffMonths} month${payoffMonths !== 1 ? 's' : ''}</span>

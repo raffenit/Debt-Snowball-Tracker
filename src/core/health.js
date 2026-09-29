@@ -31,6 +31,8 @@ export const FIELD_SPECS = [
     { name: 'expenseDefaults',  kind: 'object',  default: () => ({}) },
     { name: 'startingBalance',  kind: 'number',  default: () => 0 },
     { name: 'showMortgage',     kind: 'boolean', default: () => true },
+    { name: 'includeMortgageOnTimeline', kind: 'boolean', default: () => false },
+    { name: 'babySteps',        kind: 'object',  default: () => ({}) },
     { name: 'strategy',         kind: 'enum',    default: () => 'snowball', values: ['snowball', 'avalanche'] },
 ];
 

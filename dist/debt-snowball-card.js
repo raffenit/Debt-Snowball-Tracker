@@ -52,7 +52,11 @@ var DebtSnowballApp = (() => {
         strategy: "snowball",
         // 'snowball' | 'avalanche'
         showMortgage: true,
-        // toggle mortgage visibility
+        // toggle mortgage visibility on the Debts tab
+        includeMortgageOnTimeline: false,
+        // payoff graph and dates leave the house out until asked
+        babySteps: {},
+        // manual baby-step checkoffs: { "1": true, "3": true, ... }
         showAllRecurringCosts: false,
         // Fixed Bills: false = due this month, true = every recurring bill
         paidStatus: {},
@@ -579,6 +583,8 @@ var DebtSnowballApp = (() => {
     if (effectiveBudget < totalMinPayments) {
       return { valid: false, totalIncome, totalRecurring, effectiveBudget, belowMin: true, totalMinPayments };
     }
+    const holdMinimumTypes = state.holdMinimumTypes || [];
+    const isHeld = (d) => holdMinimumTypes.includes(d.type);
     const toIncomeDays = (rows) => rows.map((e) => ({ day: parseInt((e.date || "").split("-")[2]) || 1, amount: e.amount })).sort((a, b) => a.day - b.day);
     const repeatingIncomeDays = toIncomeDays(repeatingIncomeRows);
     const firstMonthIncomeDays = toIncomeDays(scopedIncome);
@@ -588,7 +594,9 @@ var DebtSnowballApp = (() => {
     simDebts.forEach((d) => {
       perDebtMonthly[d.id] = [d.balance];
     });
-    while (simDebts.some((d) => d.balance > 0) && monthsElapsed < MAX_SIMULATION_MONTHS) {
+    const stillCounting = (d) => d.balance > 0 && !isHeld(d);
+    const unfinished = holdMinimumTypes.length ? () => simDebts.some(stillCounting) : () => simDebts.some((d) => d.balance > 0);
+    while (unfinished() && monthsElapsed < MAX_SIMULATION_MONTHS) {
       monthsElapsed++;
       let availableCash = effectiveBudget + (monthsElapsed === 1 ? startingBalance : 0);
       simDebts.forEach((d) => {
@@ -602,11 +610,12 @@ var DebtSnowballApp = (() => {
         }
         const interest = d.balance * (effectiveRate / 100 / 12);
         d.balance += interest;
-        totalInterestPaid += interest;
         d.interestPaid += interest;
+        if (!isHeld(d)) totalInterestPaid += interest;
       });
       const alive = simDebts.filter((d) => d.balance > 0);
-      const ordered = getStrategyOrder(alive, strat);
+      const targetPool = holdMinimumTypes.length ? alive.filter((d) => !isHeld(d)) : alive;
+      const ordered = getStrategyOrder(targetPool.length ? targetPool : alive, strat);
       const targetId = ordered[0]?.id;
       const aliveMinSum = alive.reduce((s, d) => s + d.minPayment, 0);
       const monthBudget = monthsElapsed === 1 ? effectiveBudget + oneTimeTotal : effectiveBudget;
@@ -663,6 +672,11 @@ var DebtSnowballApp = (() => {
       effectiveBudget
     };
   }
+  function planHoldTypes(state) {
+    if (!state || state.includeMortgageOnTimeline === true) return [];
+    const hasMortgage = (state.debts || []).some((d) => d.type === "mortgage" && d.balance > 0);
+    return hasMortgage ? ["mortgage"] : [];
+  }
   function simulationStateFrom(state) {
     return {
       debts: state.debts || [],
@@ -674,6 +688,8 @@ var DebtSnowballApp = (() => {
   }
   function runSimulation(strat, state) {
     const snapshot = state ? simulationStateFrom(state) : { debts, incomeEntries, recurringCosts, startingBalance };
+    const hold = planHoldTypes(state);
+    if (hold.length) snapshot.holdMinimumTypes = hold;
     return simulatePayoff(snapshot, strat);
   }
   var debts, recurringCosts, incomeEntries, startingBalance;
@@ -1035,6 +1051,8 @@ var DebtSnowballApp = (() => {
         { name: "expenseDefaults", kind: "object", default: () => ({}) },
         { name: "startingBalance", kind: "number", default: () => 0 },
         { name: "showMortgage", kind: "boolean", default: () => true },
+        { name: "includeMortgageOnTimeline", kind: "boolean", default: () => false },
+        { name: "babySteps", kind: "object", default: () => ({}) },
         { name: "strategy", kind: "enum", default: () => "snowball", values: ["snowball", "avalanche"] }
       ];
       RECOGNIZED_KEYS = /* @__PURE__ */ new Set([
@@ -1070,6 +1088,8 @@ var DebtSnowballApp = (() => {
       expenseDefaults: data.expenseDefaults ?? {},
       startingBalance: data.startingBalance ?? 0,
       showMortgage: data.showMortgage !== false,
+      includeMortgageOnTimeline: data.includeMortgageOnTimeline === true,
+      babySteps: data.babySteps && typeof data.babySteps === "object" ? data.babySteps : {},
       oneTimeCosts: (data.oneTimeCosts ?? []).filter((c) => c.addedMonth === monthKey),
       incomeEntries: (data.incomeEntries ?? []).filter((e) => e.scheduleType !== "one-time" || monthMatches(e.date)),
       spendingBudgets: (data.spendingBudgets ?? []).map((b) => ({
@@ -1288,16 +1308,20 @@ var DebtSnowballApp = (() => {
         "paidStatus",
         "startingBalance",
         "showMortgage",
+        "includeMortgageOnTimeline",
+        "babySteps",
         "expenseDefaults"
       ];
     }
   });
 
   // src/app/render-support.js
-  function startCountdown(payoffDate) {
+  function startCountdown(payoffDate, asideDate = null) {
     stopCountdown();
-    updateCountdownDisplay(payoffDate);
-    appState.countdownInterval = setInterval(() => updateCountdownDisplay(payoffDate), 6e4);
+    appState.lastSimPayoffDate = payoffDate;
+    appState.lastSimPayoffAsideDate = asideDate;
+    updateCountdownDisplay();
+    appState.countdownInterval = setInterval(updateCountdownDisplay, 6e4);
   }
   function stopCountdown() {
     if (appState.countdownInterval) {
@@ -1305,17 +1329,18 @@ var DebtSnowballApp = (() => {
       appState.countdownInterval = null;
     }
   }
-  function updateCountdownDisplay(payoffDate) {
-    const el = appState._root.getElementById("stat-countdown");
-    if (!el) return;
-    const now = /* @__PURE__ */ new Date();
-    const diff = payoffDate - now;
+  function paintCountdown(el, payoffDate) {
+    if (!el || !payoffDate) return;
+    const diff = payoffDate - /* @__PURE__ */ new Date();
     if (diff <= 0) {
       el.textContent = "\u{1F389} Debt Free!";
       return;
     }
-    const days = Math.ceil(diff / (1e3 * 60 * 60 * 24));
-    el.textContent = days.toLocaleString();
+    el.textContent = Math.ceil(diff / (1e3 * 60 * 60 * 24)).toLocaleString();
+  }
+  function updateCountdownDisplay() {
+    paintCountdown(appState._root.getElementById("stat-countdown"), appState.lastSimPayoffDate);
+    paintCountdown(appState._root.getElementById("stat-countdown-ex-mortgage"), appState.lastSimPayoffAsideDate);
   }
   function autoCalcMinPaymentCC() {
     const balance = parseFloat(appState._root.getElementById("debt-balance").value) || 0;
@@ -1370,11 +1395,13 @@ var DebtSnowballApp = (() => {
     }, 300);
   }
   function runSimulation2(strat) {
+    const hold = planHoldTypes(appState);
     return simulatePayoff({
       debts: appState.debts,
       incomeEntries: appState.incomeEntries,
       recurringCosts: appState.recurringCosts,
-      monthKey: appState.workingMonthKey || currentMonthKey()
+      monthKey: appState.workingMonthKey || currentMonthKey(),
+      ...hold.length ? { holdMinimumTypes: hold } : {}
     }, strat);
   }
   function calcWindfall() {
@@ -1467,7 +1494,7 @@ var DebtSnowballApp = (() => {
   }
   function runSimulationWithWindfall(windfall, strat) {
     let simDebts = appState.debts.map((d) => ({ ...d }));
-    const ordered = getStrategyOrder(simDebts, strat);
+    const ordered = getStrategyOrder(simDebts, strat).filter((d) => appState.includeMortgageOnTimeline || d.type !== "mortgage");
     let remaining = windfall;
     const allocation = [];
     for (const debt of ordered) {
@@ -1588,6 +1615,47 @@ var DebtSnowballApp = (() => {
       observer.observe(nav);
     }
   }
+  function renderBabySteps() {
+    const host = appState._root?.getElementById("baby-steps");
+    if (!host) return;
+    const debts2 = appState.debts || [];
+    const others = debts2.filter((d) => d.type !== "mortgage" && d.balance > 0);
+    const mortgages = debts2.filter((d) => d.type === "mortgage" && d.balance > 0);
+    const monthKey = appState.workingMonthKey || currentMonthKey();
+    const billTotal = [
+      ...(appState.recurringCosts || []).filter((c) => isCostDueThisMonth(c, monthKey)),
+      ...appState.oneTimeCosts || []
+    ].reduce((sum, cost) => sum + (Number(cost.amount) || 0), 0);
+    const minTotal = debts2.filter((d) => d.balance > 0).reduce((sum, d) => sum + (Number(d.minPayment) || 0), 0);
+    const monthly = billTotal + minTotal;
+    const marked = appState.babySteps || {};
+    const steps = [
+      { n: 1, title: "$1,000 starter emergency fund", manual: true, detail: "Cash set aside before the snowball." },
+      { n: 2, title: "Pay off every debt except the house", detail: others.length ? `${others.length} left: ${others.map((d) => d.name).join(", ")}` : "Nothing left outside the mortgage." },
+      { n: 3, title: "Save 3\u20136 months of expenses", manual: true, detail: monthly > 0 ? `Bills and minimums are about ${formatMoney(monthly)} a month, so 3\u20136 months is ${formatMoney(monthly * 3)}\u2013${formatMoney(monthly * 6)}.` : "Add bills and debts to estimate 3\u20136 months of expenses." },
+      { n: 4, title: "Invest 15% of income for retirement", manual: true, detail: "After the snowball and the full emergency fund." },
+      { n: 5, title: "College funding", manual: true, detail: "Mark done if this does not apply." },
+      { n: 6, title: "Pay off the house", detail: mortgages.length ? `${formatMoney(mortgages.reduce((s, d) => s + d.balance, 0))} left on the mortgage.` : "No mortgage balance." },
+      { n: 7, title: "Build wealth and give", manual: true, detail: "The last step." }
+    ];
+    const done = (step) => {
+      if (step.n === 2) return others.length === 0;
+      if (step.n === 6) return mortgages.length === 0;
+      return !!marked[String(step.n)];
+    };
+    const current = steps.find((step) => !done(step));
+    host.innerHTML = `<p class="baby-steps-title">Baby steps</p>` + steps.map((step) => {
+      const isDone = done(step);
+      const isCurrent = current && current.n === step.n;
+      const mark = step.manual ? `<button type="button" class="baby-step-mark" data-baby-step="${step.n}">${isDone ? "Done" : "Mark done"}</button>` : "";
+      return `<div class="baby-step${isCurrent ? " is-current" : ""}${isDone ? " is-done" : ""}">
+            <span class="baby-step-index">${isDone ? "\u2713" : step.n}</span>
+            <span class="baby-step-title">${escHtml(step.title)}</span>
+            ${mark}
+            <span class="baby-step-detail">${escHtml(step.detail)}</span>
+        </div>`;
+    }).join("");
+  }
   var init_render_support = __esm({
     "src/app/render-support.js"() {
       init_state();
@@ -1666,6 +1734,8 @@ var DebtSnowballApp = (() => {
         appState.checkpoints = data.checkpoints || [];
         appState.strategy = data.strategy || "snowball";
         appState.showMortgage = data.showMortgage !== false;
+        appState.includeMortgageOnTimeline = data.includeMortgageOnTimeline === true;
+        appState.babySteps = data.babySteps && typeof data.babySteps === "object" ? data.babySteps : {};
         appState.startingBalance = data.startingBalance || 0;
         appState.monthlyArchives = data.monthlyArchives || [];
         appState.spendingBudgets = data.spendingBudgets || [];
@@ -1809,6 +1879,8 @@ var DebtSnowballApp = (() => {
       strategy: appState.strategy,
       startingBalance: appState.startingBalance,
       showMortgage: appState.showMortgage,
+      includeMortgageOnTimeline: appState.includeMortgageOnTimeline,
+      babySteps: appState.babySteps,
       paidStatus: appState.paidStatus,
       paidMonth: appState.workingMonthKey || currentMonthKey2(),
       monthlyArchives: appState.monthlyArchives,
@@ -3199,7 +3271,8 @@ This replaces ALL current data with that snapshot.`)) {
     const visible = appState.showMortgage ? ordered : ordered.filter((d) => d.type !== "mortgage");
     const promoDebts = visible.filter((d) => d.promoZeroInterest);
     const regularDebts = visible.filter((d) => !d.promoZeroInterest);
-    const targetId = visible[0]?.id;
+    const attack = ordered.filter((d) => d.balance > 0 && (appState.includeMortgageOnTimeline || d.type !== "mortgage"));
+    const targetId = attack[0]?.id;
     function buildDebtCard(debt, globalIdx) {
       const isPastDue = (debt.dueDay || 1) <= currentDay;
       const payoffMonths = simResults?.debtPayoffMonths?.[debt.id];
@@ -3220,7 +3293,10 @@ This replaces ALL current data with that snapshot.`)) {
       }
       const rateDisplay = debt.promoZeroInterest ? '0% APR <span class="promo-auto-note">(promo)</span>' : `${debt.rate}% APR`;
       const minPayNote = debt.promoZeroInterest ? '<span class="promo-auto-note">(auto: payoff by promo end)</span>' : "";
-      const payoffLine = payoffMonths != null ? `<div class="debt-detail payoff-months-row">
+      const payoffLine = !appState.includeMortgageOnTimeline && debt.type === "mortgage" && debt.balance > 0 ? `<div class="debt-detail payoff-months-row">
+                <span class="debt-detail-label">Snowball</span>
+                <span class="debt-detail-value">Minimum only</span>
+               </div>` : payoffMonths != null ? `<div class="debt-detail payoff-months-row">
                 <span class="debt-detail-label">Paid off in</span>
                 <span class="debt-detail-value payoff-months-value">${payoffMonths} month${payoffMonths !== 1 ? "s" : ""}</span>
                </div>` : "";
@@ -3416,7 +3492,7 @@ This replaces ALL current data with that snapshot.`)) {
       return d.toLocaleDateString(void 0, { month: "short", year: "numeric" });
     });
     const datasets = [];
-    const orderedDebts = getStrategyOrder(appState.debts, appState.strategy);
+    const orderedDebts = getStrategyOrder(appState.debts, appState.strategy).filter((d) => appState.includeMortgageOnTimeline || d.type !== "mortgage");
     orderedDebts.forEach((debt, idx) => {
       const color = DEBT_COLORS[idx % DEBT_COLORS.length];
       const series = perDebtMonthly[debt.id] || [];
@@ -3528,10 +3604,16 @@ This replaces ALL current data with that snapshot.`)) {
     const countdownBox = appState._root.getElementById("stat-countdown-box");
     const payoffBoxAlt = appState._root.getElementById("stat-payoff-box");
     const windfallBar = appState._root.getElementById("windfall-bar");
+    const mortgageToggle = appState._root.getElementById("include-mortgage-toggle-wrap");
+    const hasMortgage = appState.debts.some((d) => d.type === "mortgage" && d.balance > 0);
+    if (mortgageToggle) mortgageToggle.style.display = hasMortgage ? "" : "none";
+    const mortgageCheck = appState._root.getElementById("include-mortgage-toggle");
+    if (mortgageCheck) mortgageCheck.checked = !!appState.includeMortgageOnTimeline;
     const isArchiveViewTimeline = appState.viewingArchiveIndex !== null && !!appState.monthlyArchives[appState.viewingArchiveIndex];
     const archiveDataForDebt = isArchiveViewTimeline ? appState.monthlyArchives[appState.viewingArchiveIndex] : null;
     const debtsForCalc = archiveDataForDebt ? archiveDataForDebt.debts || appState.debts : appState.debts;
-    const initialTotalDebt = debtsForCalc.reduce((s, d) => s + d.balance, 0);
+    const countedDebts = !isArchiveViewTimeline && !appState.includeMortgageOnTimeline ? debtsForCalc.filter((d) => d.type !== "mortgage") : debtsForCalc;
+    const initialTotalDebt = countedDebts.reduce((s, d) => s + d.balance, 0);
     statTotalDebt.textContent = formatMoney(initialTotalDebt);
     stratDesc.textContent = appState.strategy === "snowball" ? "Snowball: paying the smallest balance first. Quick wins build momentum and keep you motivated." : "Avalanche: paying the highest interest rate first. Mathematically optimal \u2014 minimises total interest paid.";
     if (isArchiveViewTimeline) {
@@ -3735,12 +3817,13 @@ This replaces ALL current data with that snapshot.`)) {
     }
     const today = /* @__PURE__ */ new Date();
     const payoffDate = new Date(today.getFullYear(), today.getMonth() + simResults.monthsElapsed, 1);
-    appState.lastSimPayoffDate = payoffDate;
+    const formatPayoff = (date) => date.toLocaleDateString(void 0, { month: "long", day: "numeric", year: "numeric" });
     statTotalInterest.textContent = formatMoney(simResults.totalInterestPaid);
     countdownBox.style.display = "flex";
     payoffBoxAlt.style.display = "none";
     windfallBar.style.display = "flex";
-    appState._root.getElementById("stat-payoff-date").textContent = payoffDate.toLocaleDateString(void 0, { month: "long", day: "numeric", year: "numeric" });
+    const scope = !hasMortgage ? "" : appState.includeMortgageOnTimeline ? " \xB7 including mortgage" : " \xB7 excluding mortgage";
+    appState._root.getElementById("stat-payoff-date").textContent = formatPayoff(payoffDate) + scope;
     startCountdown(payoffDate);
     const otherStrat = appState.strategy === "snowball" ? "avalanche" : "snowball";
     const otherLabel = otherStrat.charAt(0).toUpperCase() + otherStrat.slice(1);
@@ -3762,8 +3845,23 @@ This replaces ALL current data with that snapshot.`)) {
     } else {
       statSavingsBox.style.display = "none";
     }
-    renderTimelineChart(simResults.payoffLog, simResults.monthsElapsed);
-    renderPaydownChart(simResults.monthlyTotals, simResults.perDebtMonthly);
+    const chartResults = chartWithoutMortgage(simResults);
+    renderTimelineChart(chartResults.payoffLog, chartResults.monthsElapsed);
+    renderPaydownChart(chartResults.monthlyTotals, chartResults.perDebtMonthly);
+  }
+  function chartWithoutMortgage(simResults) {
+    if (appState.includeMortgageOnTimeline) return simResults;
+    const drop = new Set(appState.debts.filter((d) => d.type === "mortgage").map((d) => d.id));
+    if (!drop.size) return simResults;
+    const perDebtMonthly = {};
+    for (const [id, series] of Object.entries(simResults.perDebtMonthly || {})) {
+      if (!drop.has(id)) perDebtMonthly[id] = series;
+    }
+    const payoffLog = (simResults.payoffLog || []).filter((d) => !drop.has(d.id));
+    const lengths = Object.values(perDebtMonthly).map((series) => series.length);
+    const maxLen = lengths.length ? Math.max(...lengths) : 0;
+    const monthlyTotals = Array.from({ length: maxLen }, (_, i) => Object.values(perDebtMonthly).reduce((sum, series) => sum + (series[i] ?? 0), 0));
+    return { ...simResults, perDebtMonthly, payoffLog, monthlyTotals };
   }
   function renderPaymentPlan() {
     const section = appState._root.getElementById("payment-plan-section");
@@ -3871,7 +3969,8 @@ This replaces ALL current data with that snapshot.`)) {
     ].reduce((s, c) => s + c.amount, 0);
     const totalSpentManual = _budgetExpenses.reduce((s, e) => s + e.amount, 0);
     const extra = Math.max(0, totalInc - totalRec - totalMinPay - totalSpentManual);
-    const targetId = sortedDebts[0]?.id;
+    const attackDebts = appState.includeMortgageOnTimeline ? sortedDebts : sortedDebts.filter((d) => d.type !== "mortgage");
+    const targetId = attackDebts[0]?.id;
     sortedDebts.forEach((debt) => {
       const day = debt.dueDay || 1;
       const isTarget = debt.id === targetId;
@@ -4996,7 +5095,8 @@ This replaces ALL current data with that snapshot.`)) {
     if (!debt || debt.balance <= 0) return 0;
     const aliveDebts = appState.debts.filter((d) => d.balance > 0 || appState.minPayOverrides[d.id]);
     const sortedDebts = getStrategyOrder(aliveDebts, appState.strategy);
-    const targetId = sortedDebts[0]?.id;
+    const attackDebts = appState.includeMortgageOnTimeline ? sortedDebts : sortedDebts.filter((d) => d.type !== "mortgage");
+    const targetId = attackDebts[0]?.id;
     const _wmKey = appState.workingMonthKey || currentMonthKey();
     const _wmHtml = keyToHtmlMonth(_wmKey);
     const totalIncome = appState.incomeEntries.filter((e) => (e.date || "").slice(0, 7) === _wmHtml).reduce((s, e) => s + e.amount, 0);
@@ -5305,6 +5405,7 @@ This replaces ALL current data with that snapshot.`)) {
     renderSpendingBudgets();
     const simResults = runSimulation(appState.strategy, appState);
     renderDebtsList(simResults);
+    renderBabySteps();
     renderVisualization(simResults);
     const schedule = renderPaymentPlan();
     if (schedule !== null) updateHASensors(simResults, schedule);
@@ -5944,6 +6045,17 @@ One-time bills will be removed, income will be cleared, and interval bills will 
     });
     appState._root.getElementById("mortgage-toggle-btn").addEventListener("click", () => {
       appState.showMortgage = !appState.showMortgage;
+      saveData().then(() => renderUI()).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
+    });
+    appState._root.getElementById("include-mortgage-toggle")?.addEventListener("change", (e) => {
+      appState.includeMortgageOnTimeline = e.target.checked;
+      saveData().then(() => renderUI()).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
+    });
+    appState._root.getElementById("baby-steps")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-baby-step]");
+      if (!btn) return;
+      const key = btn.dataset.babyStep;
+      appState.babySteps = { ...appState.babySteps || {}, [key]: !appState.babySteps?.[key] };
       saveData().then(() => renderUI()).catch((err) => reportError("Save failed \u2014 your change may not persist after reload", err));
     });
     appState._root.querySelectorAll(".strategy-btn").forEach((btn) => {
@@ -10399,6 +10511,104 @@ debt-snowball-card .tab-panel.active .stat-box:nth-child(4) { animation-delay: 0
     font-weight: 500;
 }
 
+.include-mortgage-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0 0 0.9rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.include-mortgage-toggle input {
+    accent-color: var(--accent-color);
+}
+
+.baby-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+}
+
+.baby-steps-title {
+    margin: 0 0 0.15rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.baby-step {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.45rem 0.6rem;
+    align-items: center;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.16);
+}
+
+.baby-step.is-current {
+    border-color: rgba(91, 127, 255, 0.55);
+    background: rgba(91, 127, 255, 0.1);
+}
+
+.baby-step.is-done {
+    opacity: 0.62;
+}
+
+.baby-step-index {
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+.baby-step.is-current .baby-step-index {
+    background: var(--accent-color);
+    color: #fff;
+}
+
+.baby-step-title {
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.baby-step-detail {
+    grid-column: 2;
+    margin-top: -0.2rem;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    line-height: 1.35;
+}
+
+.baby-step-mark {
+    padding: 0.15rem 0.45rem;
+    border-radius: 6px;
+    border: 1px solid rgba(197, 208, 255, 0.35);
+    background: transparent;
+    color: #c5d0ff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.baby-step.is-done .baby-step-mark {
+    color: #6ee7b7;
+    border-color: rgba(52, 211, 153, 0.4);
+}
+
 /* ===== Windfall Bar ===== */
 .windfall-bar {
     display: flex;
@@ -11368,6 +11578,11 @@ debt-snowball-card .checkpoint-chip .delete-checkpoint-btn {
                         </div>
                     </div>
                     <p id="strategy-desc" class="subtitle strategy-desc-text"></p>
+                    <div id="baby-steps" class="baby-steps"></div>
+                    <label class="include-mortgage-toggle" id="include-mortgage-toggle-wrap" style="display:none;">
+                        <input type="checkbox" id="include-mortgage-toggle">
+                        <span>Include mortgage in the payoff</span>
+                    </label>
                     <div class="summary-stats">
                         <div class="stat-box stat-box-countdown" id="stat-countdown-box" style="display:none;">
                             <span class="stat-label">Days Until Debt-Free</span>

@@ -76,6 +76,8 @@ export function filterBackupFields(data, monthKey) {
         expenseDefaults:  data.expenseDefaults ?? {},
         startingBalance:  data.startingBalance ?? 0,
         showMortgage:     data.showMortgage !== false,
+        includeMortgageOnTimeline: data.includeMortgageOnTimeline === true,
+        babySteps:        data.babySteps && typeof data.babySteps === 'object' ? data.babySteps : {},
         oneTimeCosts:     (data.oneTimeCosts ?? []).filter(c => c.addedMonth === monthKey),
         incomeEntries:    (data.incomeEntries ?? []).filter(e =>
             e.scheduleType !== 'one-time' || monthMatches(e.date)),
